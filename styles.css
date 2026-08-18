@@ -1,0 +1,65 @@
+/* Shell styling. Style tokens are the house set (Dev\INDEX.md → "UI / shell"): Quicksand
+   and 'Baloo 2', panel #171522, line #332f47, lime #a8d93a, violet #8a7ff0, coral #ff5a5a,
+   paper #f2ead9. Fonts are NOT fetched — this project makes zero external requests, so the
+   families are named and fall back to system stacks until they are vendored. */
+
+:root {
+  --panel: #171522;
+  --line:  #332f47;
+  --lime:  #a8d93a;
+  --violet:#8a7ff0;
+  --coral: #ff5a5a;
+  --paper: #f2ead9;
+  --amber: #f0b03a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d0c14;
+  color: var(--paper);
+  font-family: Quicksand, 'Baloo 2', system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+#stage {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: crosshair;
+}
+
+/* The UI layer never eats pointer events — §21.1: "no persistent panel should cover the
+   object-doorway relationship", and a panel that swallows a click swallows a grip. */
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#debug-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  min-width: 300px;
+  padding: 9px 11px;
+  background: rgba(23, 21, 34, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--paper);
+  pointer-events: none;
+  user-select: none;
+}
+
+#debug-overlay .row { display: flex; gap: 10px; }
+#debug-overlay .k { color: var(--violet); min-width: 62px; }
+#debug-overlay .v { flex: 1; }
+#debug-overlay .ok   { color: var(--lime); }
+#debug-overlay .warn { color: var(--amber); }
+#debug-overlay .bad  { color: var(--coral); }
+#debug-overlay .sep  { height: 1px; background: var(--line); margin: 6px 0; }
+#debug-overlay .ev   { color: #9b93b5; font-size: 11px; }

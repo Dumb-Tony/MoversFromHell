@@ -1,0 +1,94 @@
+/* Domain event bus — GDD §23.3.
+ *
+ * Copied from AirportBaggageCrew\src\core\eventBus.js (Dev\INDEX.md → "Simulation loop,
+ * time & state"), with the event vocabulary replaced by GDD §23.3's table.
+ *
+ * Deliberately NOT an event-sourcing framework. It is a subscribe/emit pair plus a
+ * BOUNDED recent-event log. Bounded matters twice over here: GDD §26.6 forbids unbounded
+ * growth in logs over three runs, and §15.2's customer review is assembled from "only the
+ * two or three most salient events" — so the log is a diagnostic tail, and anything the
+ * invoice needs is accumulated into the ledger as it happens, not replayed from here.
+ *
+ * Rendering and UI listen. They never emit gameplay events and never decide rules.
+ */
+
+export const EVENTS = Object.freeze({
+  // ---- Simulation shell -----------------------------------------------------------
+  SIM_RESET:        'SIM_RESET',
+  SIM_PAUSED:       'SIM_PAUSED',
+  SIM_RESUMED:      'SIM_RESUMED',
+  INPUT_CONTEXT:    'INPUT_CONTEXT',    // foot <-> drive; GDD §4.4 demands this be visible
+
+  // ---- GDD §23.3 core events ------------------------------------------------------
+  // Payloads are the "minimum payload" column. Phase 0 emits none of them; they are
+  // declared now so later phases cannot invent near-duplicate names.
+  GRIP_STARTED:     'GRIP_STARTED',     // playerId, hand, entityId, localPoint, time
+  GRIP_ENDED:       'GRIP_ENDED',       // playerId, hand, entityId, reason
+  IMPACT:           'IMPACT',           // entities, point, impulse, materials, relVelocity
+  DAMAGE_APPLIED:   'DAMAGE_APPLIED',   // target, source, category, amount, cost, position
+  STRAP_CHANGED:    'STRAP_CHANGED',    // strapId, endpoints, tension, state, actor
+  ZONE_CHANGED:     'ZONE_CHANGED',     // entityId, zoneId, entered|exited, settled
+  CARGO_STATE:      'CARGO_STATE',      // entityId, truckId, secured, support, risk
+  ROAD_FORCE:       'ROAD_FORCE',       // truckId, type, vector, severity
+  RECOVERY:         'RECOVERY',         // entityId, reason, fee, oldTransform, newTransform
+  CONTRACT_PHASE:   'CONTRACT_PHASE',   // from, to, time, validationResult
+});
+
+/** GDD §12 phase machine (§3.4). Declared here so the phase names have one home. */
+export const PHASES = Object.freeze({
+  BRIEFING:   'briefing',
+  PICKUP:     'pickup',
+  SECURE:     'secure',
+  TRANSIT:    'transit',
+  DELIVERY:   'delivery',
+  SETTLEMENT: 'settlement',
+});
+
+export class EventBus {
+  constructor({ logSize = 256 } = {}) {
+    this._handlers = new Map();   // type -> Set<fn>
+    this._any = new Set();
+    this.logSize = logSize;
+    this.log = [];                // ring, newest last
+    this.emitted = 0;
+  }
+
+  /** @returns {() => void} unsubscribe */
+  on(type, fn) {
+    let set = this._handlers.get(type);
+    if (!set) { set = new Set(); this._handlers.set(type, set); }
+    set.add(fn);
+    return () => set.delete(fn);
+  }
+
+  /** @returns {() => void} unsubscribe */
+  onAny(fn) { this._any.add(fn); return () => this._any.delete(fn); }
+
+  off(type, fn) {
+    const set = this._handlers.get(type);
+    if (set) set.delete(fn);
+  }
+
+  emit(type, payload = {}, simTimeMs = 0) {
+    const evt = { type, simTimeMs, ...payload };
+    this.emitted++;
+
+    this.log.push(evt);
+    if (this.log.length > this.logSize) this.log.shift();
+
+    const set = this._handlers.get(type);
+    // iterate a copy: a handler may unsubscribe itself mid-dispatch
+    if (set) for (const fn of Array.from(set)) fn(evt);
+    for (const fn of Array.from(this._any)) fn(evt);
+    return evt;
+  }
+
+  /** Most recent events, newest first. Debug overlay only. */
+  recent(n = 8) { return this.log.slice(-n).reverse(); }
+
+  clearLog() { this.log.length = 0; this.emitted = 0; }
+
+  /** Drop every subscriber. Contract reset rebuilds systems, so stale closures must not
+   *  survive — GDD §26.6 requires reset to remove transient state completely. */
+  clearHandlers() { this._handlers.clear(); this._any.clear(); }
+}
