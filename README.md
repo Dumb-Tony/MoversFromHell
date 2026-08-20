@@ -38,11 +38,17 @@ revised rather than expanded (§13.5).
 
 Live build, no install: **https://dumb-tony.github.io/MoversFromHell/**
 
-Locally, for development:
+Locally, for development — **double-click `play.bat`**, or:
 
 ```bash
 ./play.bat
 ```
+
+⚠ Start it from a terminal or Explorer window you keep open. A dev server launched as a
+background task from an agent session does not survive: it binds, serves correctly, and is
+then torn down within a minute (observed exiting 255 and 1, with no error of its own). The
+server is fine; the background lifetime is not. It also prints the port it actually got —
+read that line, because several projects scan the same range.
 
 Serving over http is required, not a convenience — the game is ES modules, and browsers
 block module loads on `file://`. `play.bat` starts `tools/serve.ps1` on ports 8381–8390
