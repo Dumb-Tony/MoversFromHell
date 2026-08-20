@@ -3,6 +3,65 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 1 — movement — 2026-08-19
+
+**Gate (§25.2):** "Third-person proxy, camera, jump/mantle, recover" → responsive indoors
+and on ramp. **PASSED** — 61 assertions (179 across both suites).
+
+**Hypothesis:** §5.1's hybrid character model — a kinematic capsule for normal navigation,
+with a physical reaction layer bolted on later — gives responsive movement without the
+player "wrestling the avatar merely to cross a room", and a real solver makes the ramp,
+the porch step and the mantle fall out of one controller rather than three special cases.
+
+**Added**
+- `assets/lib/rapier3d-0.20.0/` — Rapier3D compat 0.20.0, vendored offline. Single ESM
+  file with the WASM inlined as base64; no second request, no CDN, no `import.meta.url`.
+  Provenance, licence and the one modification are in `assets/lib/NOTICE.md`.
+- `src/physics/world.js` — the ONLY file that imports Rapier, so §24's Unity port has one
+  seam to replace. Fixed timestep bound to the clock, §7.3 velocity caps, static colliders
+  built from the scene's shared AABB records, rotated ramp collider.
+- `src/player/controller.js` — `KinematicCharacterController` with autostep, snap-to-ground
+  and slope limits; §5.1 state machine; mantle by three raycasts (wall, ledge top,
+  headroom); §18.3 recovery with a last-stable transform banked only while settled.
+- `src/render/playerBody.js` — blockout mannequin adapted from Something's Different.
+- Room, ramp, platform, porch step and mantle ledges in `src/render/scene.js`, as specs
+  shared by the mesh and the collider.
+- `tools/m1-tests.js` (61 assertions), `tools/_rapier-probe.js` (kept as a diagnostic).
+
+**Measured, and written into the code**
+- `world.castRay` reads a query pipeline populated ONLY by `world.step()`. A cast before
+  the first step returns null however much geometry exists, and a collider created this
+  step is invisible to rays until the next one. The first mantle probe of the session
+  found nothing until `primeQueries()` was added.
+- The hit distance is `hit.timeOfImpact`. `hit.toi` is `undefined` in 0.20 even though
+  most Rapier examples still use that name.
+- `world.bodies.len()` / `colliders.len()` / `impulseJoints.len()` are the counters;
+  `numRigidBodies()` and `numColliders()` do not exist.
+
+**Fixed during the phase**
+- **Mantle could never trigger from standing.** The jump branch cleared `grounded` before
+  the mantle test ran, so the ledge check always saw an airborne player. Jump and mantle
+  share one button (§4.2/§4.3), so the mantle now gets first refusal and consumes the press.
+- **Physics stat counters read zero.** `primeQueries()` called `world.step()` directly and
+  bypassed the bookkeeping, so the overlay showed 0 bodies until the first simulation step.
+  Worse, it made m1's "no bodies leak" assertion pass by comparing zero to zero — a guard
+  (G1a) now proves the count is real before the leak check uses it.
+- **A boot failure produced a completely blank page.** Boot is async now, and m1's
+  `await __MFH_READY` sat outside its try block, so a boot throw gave the harness nothing
+  to grep and no error. The suite now emits before awaiting and reports the boot error.
+
+**Changed deliberately**
+- `player.yaw` no longer mirrors the camera. §5.1 wants the body to face its direction of
+  TRAVEL, so a stationary player holds its facing while the camera orbits. m0's G11 used to
+  assert the old behaviour; it now asserts the new one, because locking in the old contract
+  would mean a character that pirouettes on the spot with the mouse.
+- `buildPhase0Scene` → `buildScene`. It is not Phase-0-only any more.
+
+**Not done, deliberately**
+- `stumbling`, `ragdoll` and `pinned` are declared but never entered. Nothing can apply the
+  impulses that would justify them until there are objects to collide with (Phase 3), and a
+  state that can be entered but not left is worse than one that never starts.
+
 ## Phase 0 — scaffold, action map, debug overlay, fixed loop — 2026-08-18
 
 **Gate (§25.2):** loads locally; stable frame/step. **PASSED** — 111 assertions.

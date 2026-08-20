@@ -80,3 +80,23 @@ html, body {
   pointer-events: none;
   user-select: none;
 }
+
+/* Control hints. §21.1: "no persistent panel should cover the object-doorway
+   relationship" — so this sits along the bottom edge, out of the working area, and
+   §26.5 requires essential actions to have visible prompts. */
+#help {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 8px;
+  padding: 6px 14px;
+  background: rgba(23, 21, 34, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font: 12px/1.4 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+#help b { color: var(--lime); }

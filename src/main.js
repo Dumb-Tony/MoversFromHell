@@ -1,104 +1,184 @@
-/* Boot + render loop — GDD §22.2 (App/State), §22.3 (fixed-step loop), §25.2 phase 0.
+/* Boot + render loop — GDD §22.2 (App/State), §22.3 (fixed-step loop), §25.2 phases 0-1.
  *
- * §22.3's order is followed literally:
- *   1. collect actions and update desired player/hand targets
- *   2. advance fixed physics steps with a capped accumulator
- *   3. resolve grip/tool constraints and collision events   (Phase 2+)
- *   4. aggregate damage, cargo, zone and contract changes    (Phase 5+)
- *   5. interpolate transforms for rendering; update camera and UI
- *   6. record a lightweight event log for scoring and debugging
+ * §22.3's order is followed literally, and the system registration order below IS that
+ * list. Read it top to bottom:
+ *   1. collect actions and update desired player/hand targets   -> 'look', 'player'
+ *   2. advance fixed physics steps with a capped accumulator     -> 'physics'
+ *   3. resolve grip/tool constraints and collision events        -> 'grips'    (Phase 2)
+ *   4. aggregate damage, cargo, zone and contract changes        -> 'contract' (Phase 5)
+ *   5. interpolate transforms for rendering; update camera and UI-> the render loop
+ *   6. record a lightweight event log for scoring and debugging  -> EventBus
  *
- * Steps 1-2 and 5-6 exist now. 3-4 are empty system slots, registered in order so a later
- * phase adds a function rather than restructuring the loop.
+ * 'player' must run before 'physics': the character controller only computes and QUEUES a
+ * kinematic translation, and world.step() is what actually applies it.
+ *
+ * BOOT IS ASYNCHRONOUS, because Rapier decodes an inlined WASM module before it can be
+ * used. Anything that needs the live game must await window.__MFH_READY rather than
+ * reading window.__MFH, which does not exist until boot resolves.
  */
 
 import { Game } from './game.js';
 import { Input, CONTEXTS } from './core/input.js';
-import { EventBus } from './core/eventBus.js';
+import { EventBus, EVENTS, PHASES } from './core/eventBus.js';
 import { createRenderer } from './render/renderer.js';
-import { buildPhase0Scene } from './render/scene.js';
+import { buildScene, RAMP } from './render/scene.js';
 import { ThirdPersonCamera } from './render/camera.js';
+import { makeBlockout } from './render/playerBody.js';
 import { DebugOverlay } from './dev/debugOverlay.js';
-import { PHASES } from './core/eventBus.js';
+import { initPhysics, PhysicsWorld } from './physics/world.js';
+import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { BUILD } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
 
-const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
-const world = buildPhase0Scene();
-const rig = new ThirdPersonCamera(camera, world.colliders);
-
-const bus = new EventBus();
-const input = new Input(window, canvas).attach();
-const game = new Game({ contractId: 'suburban_starter', input, bus });
-
-// Phase 0 has nothing to simulate yet, so the loop is proven with the ONE system that
-// exists: consume look input on the simulation step. Registered as a system rather than
-// read in the render loop so the camera cannot outrun the sim at high frame rates.
-game.addSystem('look', (state, stepMs, ctx) => {
-  const look = ctx.input.consumeLook();
-  rig.applyLook(look);
-  state.players[state.localPlayerId].yaw = rig.yaw;
-});
-// Slots for §22.3 steps 3-4. Empty by design; filled by their phases.
-game.addSystem('grips',    () => {});   // Phase 2
-game.addSystem('physics',  () => {});   // Phase 2 (Rapier)
-game.addSystem('contract', () => {});   // Phase 5
-
-game.setPhase(PHASES.PICKUP);
-
-const overlay = new DebugOverlay(ui, game);
-
-/* Always-visible build stamp. GitHub Pages serves with Cache-Control: max-age=600, so a
- * returning visitor can be looking at a build up to ten minutes old with no way to tell.
- * During a playtest "which build were you on?" has to be answerable without opening
- * devtools, so this sits in the corner rather than behind F3. */
-const stamp = document.createElement('div');
-stamp.id = 'build-stamp';
-stamp.textContent = `Movers From Hell — ${BUILD.label} · ${BUILD.date} · F3 for stats`;
-ui.appendChild(stamp);
-
-// ---- shell wiring ------------------------------------------------------------------
-input.onBlur = () => game.setPaused(true);           // §21.4 solo pause
-input.onContextChanged = (ctx) => game.bus.emit('INPUT_CONTEXT', { context: ctx }, game.clock.simTimeMs);
-
-canvas.addEventListener('click', () => {
-  if (!input.pointerLocked && !game.state.paused) input.requestPointerLock();
+/** Resolves to the same object as window.__MFH once boot completes. Test suites and any
+ *  other late-loading module must await this. */
+window.__MFH_READY = boot().catch((e) => {
+  window.onerror('Boot failed: ' + (e && e.message), '', 0);
+  throw e;
 });
 
-// Pause and the debug key are read on the RENDER frame, not in a system: they must keep
-// working while the simulation is paused, and a paused clock runs no systems at all.
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape') game.togglePause();
-  if (e.code === 'F3') { e.preventDefault(); overlay.toggle(); }
-});
+async function boot() {
+  const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
+  const world = buildScene();
+  const rig = new ThirdPersonCamera(camera, world.colliders);
 
-// ---- main loop ---------------------------------------------------------------------
-let lastT = performance.now();
+  // ---- physics ------------------------------------------------------------------------
+  const R = await initPhysics();
+  const physics = new PhysicsWorld(R);
+  physics.addGround();
+  physics.addStaticFromColliders(world.colliders);
+  // The ramp is NOT in world.colliders: an axis-aligned box cannot represent a slope, and
+  // a box-shaped stand-in would be a lie the camera would then occlude against. It is
+  // built here from the same RAMP spec the mesh uses.
+  physics.addRamp(RAMP);
+  // castRay reads a pipeline that only world.step() populates, so the first mantle probe
+  // of the session would find nothing without this. MEASURED — see world.js.
+  physics.primeQueries();
 
-function loop(now) {
-  const frameMs = now - lastT;
-  lastT = now;
+  const player = new PlayerController(physics, world.spawn);
+  const body = makeBlockout();
+  world.scene.add(body.group);
 
-  // Recover from a 0x0 boot (background/prerendered tab). See renderer.js syncSize.
-  syncSize();
+  const bus = new EventBus();
+  const input = new Input(window, canvas).attach();
+  const game = new Game({ contractId: 'suburban_starter', input, bus });
 
-  overlay.stepsThisFrame = game.frame(frameMs);
+  // ---- systems, in §22.3 order ----------------------------------------------------------
+  game.addSystem('look', (state, stepMs, ctx) => {
+    rig.applyLook(ctx.input.consumeLook());
+  });
 
-  // §22.3 step 5: presentation runs on REAL time. It reads state and never writes it.
-  const p = game.state.players[game.state.localPlayerId];
-  rig.update(p.position, Math.min(frameMs, 100) / 1000);
+  game.addSystem('player', (state, stepMs, ctx) => {
+    const inp = ctx.input;
+    const p = state.players[state.localPlayerId];
 
-  renderer.render(world.scene, camera);
-  overlay.update(frameMs, { bodies: 0, constraints: 0, contacts: 0 });
+    // §4.4: movement is camera-relative. The rig owns the basis; the controller never
+    // computes its own forward vector, so the two cannot disagree.
+    const intent = {
+      move: inp.moveAxis(),
+      forward: rig.forwardFlat(),
+      right: rig.rightFlat(),
+      // §4.2: Shift is "sprint when free; brace/exert while gripping". Nothing can be
+      // gripped until Phase 2, so today it is sprint. The branch is written now so the
+      // meaning change is one condition later, not a rewrite.
+      run: inp.isDown('brace') && !hasAnyGrip(p),
+      brace: inp.isDown('brace') && hasAnyGrip(p),
+      jump: inp.wasPressed('jump'),
+      recover: inp.wasPressed('recover'),
+    };
 
+    const before = player.recoveries;
+    p.locomotion = player.step(stepMs, intent);
+
+    const pos = player.position;
+    p.position.x = pos.x; p.position.y = pos.y; p.position.z = pos.z;
+
+    // Face the direction of travel, not the camera: §5.1 wants readable locomotion, and a
+    // character permanently facing the camera cannot show which way it is walking.
+    const travel = player.travelYaw();
+    if (travel !== null) p.yaw = travel;
+
+    if (player.recoveries > before) {
+      ctx.bus.emit(EVENTS.RECOVERY, {
+        entityId: p.id, reason: player.lastRecoveryReason, fee: 0,
+        newTransform: { ...player.lastStable },
+      }, ctx.simTimeMs);
+    }
+  });
+
+  game.addSystem('physics', () => { physics.step(); });
+
+  game.addSystem('grips',    () => {});   // Phase 2
+  game.addSystem('contract', () => {});   // Phase 5
+
+  game.setPhase(PHASES.PICKUP);
+
+  const overlay = new DebugOverlay(ui, game);
+
+  const stamp = document.createElement('div');
+  stamp.id = 'build-stamp';
+  stamp.textContent = `Movers From Hell — ${BUILD.label} · ${BUILD.date} · F3 for stats`;
+  ui.appendChild(stamp);
+
+  const help = document.createElement('div');
+  help.id = 'help';
+  help.innerHTML = '<b>Click to look around.</b> &nbsp; WASD move · Shift sprint · ' +
+                   'Space jump/mantle · R recover · Esc pause · F3 stats';
+  ui.appendChild(help);
+
+  // ---- shell wiring ---------------------------------------------------------------------
+  input.onBlur = () => game.setPaused(true);           // §21.4 solo pause
+  canvas.addEventListener('click', () => {
+    if (!input.pointerLocked && !game.state.paused) input.requestPointerLock();
+  });
+  // Pause and the debug key are read on the RENDER frame, not in a system: they must keep
+  // working while the simulation is paused, and a paused clock runs no systems at all.
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') game.togglePause();
+    if (e.code === 'F3') { e.preventDefault(); overlay.toggle(); }
+  });
+
+  // ---- main loop ------------------------------------------------------------------------
+  let lastT = performance.now();
+  function loop(now) {
+    const frameMs = now - lastT;
+    lastT = now;
+
+    syncSize();   // recover from a 0x0 boot; see renderer.js
+    overlay.stepsThisFrame = game.frame(frameMs);
+
+    // §22.3 step 5: presentation runs on REAL time, reads state, and never writes it.
+    const p = game.state.players[game.state.localPlayerId];
+    const dt = Math.min(frameMs, 100) / 1000;
+    body.update(p.position, p.yaw, player.horizontalSpeed, dt);
+    rig.update(p.position, dt);   // the rig adds camera height itself
+
+    renderer.render(world.scene, camera);
+    overlay.update(frameMs, {
+      bodies: physics.stats.bodies,
+      constraints: physics.stats.constraints,
+      contacts: physics.stats.contacts,
+    });
+
+    requestAnimationFrame(loop);
+  }
   requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
 
-/* Test seam. tools\m0-tests.js drives the game through this instead of synthesising real
- * frames, because headless Chrome in --dump-dom mode delivers only 1-3 rAF callbacks in
- * total (MEASURED — Dev\INDEX.md → Tooling & testing). A suite that waits for frames
- * waits forever; a suite that calls game.frame() directly is deterministic. */
-window.__MFH = { game, input, rig, world, overlay, renderer, camera, syncSize, THREE, CONTEXTS, PHASES };
+  /* Test seam. tools\m*-tests.js drive the game through this instead of waiting for real
+   * frames, because headless Chrome in --dump-dom mode delivers only 1-3 rAF callbacks in
+   * total (MEASURED — Dev\INDEX.md → Tooling & testing). */
+  const api = {
+    game, input, rig, world, overlay, renderer, camera, syncSize,
+    physics, player, body, THREE, CONTEXTS, PHASES, LOCOMOTION,
+  };
+  window.__MFH = api;
+  return api;
+}
+
+/** §4.2's Shift is sprint-when-free and brace-when-gripping. Grips arrive in Phase 2; this
+ *  is the one place that decides which meaning applies. */
+function hasAnyGrip(p) {
+  return !!(p.grips && (p.grips.left || p.grips.right));
+}

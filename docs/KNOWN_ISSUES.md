@@ -68,5 +68,16 @@ are tuned. Do not cite them as balance decisions.
 **Phase 0 scene props use axis-aligned AABBs.** Honest now, because the props are static.
 Phase 2 replaces them with real rigid bodies; the AABB path must not survive that.
 
-**No physics engine present yet.** Rapier3D (vendored WASM, offline) is the chosen solver
-per the Phase 0 decision, but nothing has been downloaded or wired. Phase 2 blocker.
+**Rapier raycasts are one step stale.** `world.castRay` reads a query pipeline that only
+`world.step()` populates, so a body created this step is invisible to rays until the next
+one, and a cast before the first step of the session returns nothing at all. `primeQueries()`
+covers session start; anything that spawns geometry and immediately raycasts against it
+(Phase 5 props, Phase 6 tools) must wait a step. Measured — see `src/physics/world.js`.
+
+**The mantle does not collision-check mid-climb.** The destination is validated before the
+climb starts (wall, ledge top, headroom), then the lerp runs uninterrupted. If geometry
+moves into the path during those 0.42 s the player passes through it. Nothing moves yet;
+revisit when dynamic objects exist in Phase 2.
+
+**Sprint may be too fast indoors.** 5.4 m/s crosses the 10 x 7 m test room in under two
+seconds. Not tuned yet — see PLAYTEST_NOTES.

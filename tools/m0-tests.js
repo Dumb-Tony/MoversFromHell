@@ -433,10 +433,10 @@ emit('running...');
 }
 
 /* ── G. the live build (§25.2 phase 0 gate) ──────────────────────────────── */
-function sectionG() {
+async function sectionG() {
 lines.push('--- G. live build (GDD §25.2 phase-0 gate) ---');
 {
-  const M = window.__MFH;
+  const M = await window.__MFH_READY;   // boot is async now: Rapier decodes WASM first
   ok('G1 the game booted and published its test seam', !!M && !!M.game);
   if (M) {
     const g = M.game;
@@ -459,7 +459,14 @@ lines.push('--- G. live build (GDD §25.2 phase-0 gate) ---');
     M.input.look.x = 200;
     g.frame(16.7);
     ok('G10 look input reaches the camera through a sim step', M.rig.yaw !== yawBefore);
-    eq('G11 …and is written back to player state', g.state.players[g.state.localPlayerId].yaw, M.rig.yaw);
+    // Phase 1 CHANGED what player.yaw means. In Phase 0 it mirrored the camera; §5.1 wants
+    // the body to face its direction of TRAVEL, so a stationary player must now hold its
+    // facing while the camera orbits around it. Asserting the old behaviour here would
+    // lock in a bug: a character that pirouettes on the spot with the mouse.
+    const bodyYawBefore = g.state.players[g.state.localPlayerId].yaw;
+    M.input.look.x = 400; g.frame(16.7);
+    eq('G11 a stationary player does not spin with the camera',
+       g.state.players[g.state.localPlayerId].yaw, bodyYawBefore);
 
     // §4.1 pitch clamp: the camera must not flip over the top.
     M.input.look.y = -1e6; g.frame(16.7);
@@ -519,7 +526,7 @@ emit();
  * as a failure in its section instead of taking the whole suite silent. */
 for (const [name, fn] of [['A', sectionA], ['B', sectionB], ['C', sectionC],
                           ['D', sectionD], ['E', sectionE], ['F', sectionF], ['G', sectionG]]) {
-  try { fn(); }
+  try { await fn(); }
   catch (e) { fails++; lines.push(`FAIL  section ${name} threw  <- ${e && e.message}`); emit(); }
 }
 emit();

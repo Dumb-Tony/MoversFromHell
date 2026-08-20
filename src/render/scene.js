@@ -48,6 +48,46 @@ export const APERTURES = Object.freeze([
   { id: 'front36',    gap: 0.91, label: '36" front',    x:  3.2 },
 ]);
 
+/* ── Phase 1 test geometry ───────────────────────────────────────────────────────────
+ * §25.2's Phase 1 gate is "responsive INDOORS and ON RAMP", so both have to exist before
+ * locomotion can be judged. Every piece below is a SPEC, not a mesh: the renderer builds
+ * geometry from it and the physics world builds colliders from the same record, so §8.1's
+ * "decorative collision must not contradict the visible surface" holds by construction
+ * rather than by discipline.
+ *
+ * Heights are chosen against the controller tuning in config.js, so each piece tests a
+ * specific behaviour rather than being decorative:
+ *   porch step 0.18  — under PLAYER.stepHeight (0.35): autostep, no jump needed
+ *   ledge      0.60  — over mantleMinHeight (0.45): a real mantle
+ *   ledge      1.25  — under mantleMaxHeight (1.35): the tallest legal mantle
+ *   wall       1.60  — over mantleMaxHeight: must REFUSE to mantle
+ */
+
+/** Ramp up to the platform. Rotating a box about +X tips its +Z end DOWN, so this rises
+ *  toward -Z. angle 0.28 rad = 16 deg, comfortably under maxSlopeClimbDeg (48). */
+export const RAMP = Object.freeze({
+  x: 7.5, z: 2.4, width: 3.0, length: 4.35, thickness: 0.25, angleRad: 0.28, y: 0.72,
+});
+
+/** Landing at the top of the ramp. */
+export const PLATFORM = Object.freeze({ x: 7.5, y: 1.2, z: -1.6, width: 3.0, depth: 3.0, thickness: 0.24 });
+
+/** Boxes to walk up (autostep) and to mantle (climb). `expectMantle` is what the Phase 1
+ *  suite asserts, so this table is the test fixture as well as the level. */
+export const OBSTACLES = Object.freeze([
+  { id: 'porchStep', x: -1.2, z: 3.4, w: 2.0, d: 0.9, top: 0.18, expectMantle: false, note: 'autostep clears it' },
+  { id: 'ledgeLow',  x: -4.6, z: 0.2, w: 1.6, d: 1.2, top: 0.60, expectMantle: true,  note: 'lowest real mantle' },
+  { id: 'ledgeHigh', x: -6.8, z: 0.2, w: 1.6, d: 1.2, top: 1.25, expectMantle: true,  note: 'tallest legal mantle' },
+  { id: 'tooTall',   x: -9.0, z: 0.2, w: 1.6, d: 1.2, top: 1.60, expectMantle: false, note: 'above mantleMaxHeight' },
+]);
+
+/** A closed room behind the aperture wall — the "indoors" half of the gate, and the place
+ *  §4.1's "indoors it should compress smoothly" camera behaviour gets exercised. */
+export const ROOM = Object.freeze({
+  minX: -5.0, maxX: 5.0, minZ: -9.0, maxZ: -2.0,
+  wallH: 2.7, wallT: 0.18, ceiling: true,
+});
+
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
 
@@ -65,6 +105,7 @@ const PALETTE = {
   couch:    0x8a5a4a,
   dresser:  0x9a7a4e,
   box:      0xc2a06a,
+  floor:    0xb9a98c,
   reference:0xa8d93a,          // the Dirty Boy Devs lime — measuring aids, and "this fits"
   impossible:0xff5a5a,         // coral — "the couch cannot pass this, in any rotation"
 };
@@ -74,7 +115,7 @@ const PALETTE = {
  *   colliders: {minX,maxX,minZ,maxZ,base,top,tag}[] — shared with camera + physics
  *   spawn: where the player starts (Phase 1)
  */
-export function buildPhase0Scene() {
+export function buildScene() {
   const THREE = window.THREE;
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x9fc4dd, 40, 160);
@@ -200,12 +241,77 @@ export function buildPhase0Scene() {
   const post = new THREE.Mesh(
     new THREE.CylinderGeometry(0.05, 0.05, REFERENCE_DIMS.moverHeight, 10),
     mat(PALETTE.reference));
-  post.position.set(-4.2, REFERENCE_DIMS.moverHeight / 2, 2.0);
+  post.position.set(-3.0, REFERENCE_DIMS.moverHeight / 2, 3.6);
   post.castShadow = true;
   scene.add(post);
 
+  // ---- Phase 1: the room (indoors) ---------------------------------------------------
+  // The aperture wall is the room's south side; three more walls and a ceiling close it.
+  const R = ROOM;
+  const roomFloor = new THREE.Mesh(
+    new THREE.PlaneGeometry(R.maxX - R.minX, R.maxZ - R.minZ), mat(PALETTE.floor));
+  roomFloor.rotation.x = -Math.PI / 2;
+  roomFloor.position.set((R.minX + R.maxX) / 2, 0.015, (R.minZ + R.maxZ) / 2);
+  roomFloor.receiveShadow = true;
+  scene.add(roomFloor);
+
+  const addWall = (cx, cz, sx, sz, tag) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, R.wallH, sz), mat(PALETTE.wall));
+    m.position.set(cx, R.wallH / 2, cz);
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+    addCollider(cx, cz, sx, sz, 0, R.wallH, tag);
+  };
+  const roomW = R.maxX - R.minX, roomD = R.maxZ - R.minZ;
+  addWall(R.minX, (R.minZ + R.maxZ) / 2, R.wallT, roomD, 'roomWallW');
+  addWall(R.maxX, (R.minZ + R.maxZ) / 2, R.wallT, roomD, 'roomWallE');
+  addWall((R.minX + R.maxX) / 2, R.minZ, roomW, R.wallT, 'roomWallN');
+
+  if (R.ceiling) {
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.16, roomD), mat(PALETTE.wall));
+    ceil.position.set((R.minX + R.maxX) / 2, R.wallH + 0.08, (R.minZ + R.maxZ) / 2);
+    ceil.receiveShadow = true;
+    scene.add(ceil);
+    addCollider((R.minX + R.maxX) / 2, (R.minZ + R.maxZ) / 2, roomW, roomD, R.wallH, R.wallH + 0.16, 'roomCeiling');
+  }
+
+  // ---- Phase 1: obstacles (autostep / mantle / refuse) --------------------------------
+  const obstacles = [];
+  for (const o of OBSTACLES) {
+    // Lime = the controller should get you up it; coral = it must refuse.
+    const col = o.expectMantle ? PALETTE.reference : (o.top > 1.0 ? PALETTE.impossible : PALETTE.trim);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.top, o.d), mat(col));
+    m.position.set(o.x, o.top / 2, o.z);
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+    addCollider(o.x, o.z, o.w, o.d, 0, o.top, o.id);
+    obstacles.push({ ...o, mesh: m });
+  }
+
+  // ---- Phase 1: ramp + platform -------------------------------------------------------
+  // Mesh rotation must match the physics quaternion exactly, or the player walks on an
+  // invisible slope. Both read RAMP; neither hard-codes an angle.
+  const rampMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(RAMP.width, RAMP.thickness, RAMP.length), mat(PALETTE.asphalt));
+  rampMesh.position.set(RAMP.x, RAMP.y, RAMP.z);
+  rampMesh.rotation.x = RAMP.angleRad;
+  rampMesh.castShadow = true; rampMesh.receiveShadow = true;
+  scene.add(rampMesh);
+  // Not added to `colliders`: an AABB cannot represent a slope, and a box-shaped collider
+  // here would be a lie the camera would then occlude against. Physics builds the rotated
+  // collider from RAMP directly; camera occlusion skips it.
+
+  const plat = new THREE.Mesh(
+    new THREE.BoxGeometry(PLATFORM.width, PLATFORM.thickness, PLATFORM.depth), mat(PALETTE.trim));
+  plat.position.set(PLATFORM.x, PLATFORM.y - PLATFORM.thickness / 2, PLATFORM.z);
+  plat.castShadow = true; plat.receiveShadow = true;
+  scene.add(plat);
+  addCollider(PLATFORM.x, PLATFORM.z, PLATFORM.width, PLATFORM.depth,
+              PLATFORM.y - PLATFORM.thickness, PLATFORM.y, 'platform');
+
   return {
     scene, colliders, props, sun, apertures: APERTURES,
+    obstacles, ramp: RAMP, platform: PLATFORM, room: ROOM,
     spawn: { x: 0, y: 0, z: 5.0 },
     dispose() {
       scene.traverse((o) => {

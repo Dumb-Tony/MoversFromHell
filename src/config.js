@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 0,
-  label: 'phase-0',
+  phase: 1,
+  label: 'phase-1',
   date: '2026-08-19',
 });
 
@@ -73,6 +73,9 @@ export const RENDER = Object.freeze({
 export const PLAYER = Object.freeze({
   radius: 0.32,
   height: 1.8,
+  /** Capsule half-height of the CYLINDRICAL section. Total height = 2*hh + 2*radius, so
+   *  this is derived, not free: 2*0.58 + 2*0.32 = 1.80. Change `height` and fix this. */
+  capsuleHalfHeight: 0.58,
   walkSpeed: 3.1,            // m/s
   runSpeed: 5.4,
   braceSpeedMult: 0.45,      // §5.1 braced: "lower speed; higher grip and impulse resistance"
@@ -80,6 +83,31 @@ export const PLAYER = Object.freeze({
   airAcceleration: 4,
   turnRate: 12,              // rad/s
   jumpVelocity: 4.6,
+
+  // ---- character controller (§25.2 Phase 1 gate: responsive indoors AND on ramp) ----
+  /** Gap the controller keeps between the capsule and geometry. Too small and it jitters
+   *  against walls; too large and the player visibly floats off surfaces. */
+  characterOffset: 0.02,
+  /** §13.1 requires "short steps/porch". Autostep is what makes a porch step walkable
+   *  without a jump, and 0.35 m clears a standard 7" (0.18 m) stair tread twice over. */
+  stepHeight: 0.35,
+  stepMinWidth: 0.18,
+  /** A ramp at 0.28 rad is ~16 deg. The climb limit sits well above it so the gate's ramp
+   *  is comfortable, while a wall is still a wall. */
+  maxSlopeClimbDeg: 48,
+  minSlopeSlideDeg: 52,
+  /** Snap-to-ground stops the capsule launching off the crest of a ramp. Without it,
+   *  walking down any slope becomes a series of small jumps. */
+  snapToGroundDist: 0.5,
+  /** Terminal fall speed, so a long drop stays readable rather than becoming a blur. */
+  maxFallSpeed: 24,
+
+  // ---- mantle (§5.1 Climbing state: "short assisted motion") ----
+  mantleReach: 0.75,         // how far ahead a ledge may be
+  mantleMinHeight: 0.45,     // below this, autostep handles it and no mantle is needed
+  mantleMaxHeight: 1.35,     // above this it is a wall, not a ledge
+  mantleSeconds: 0.42,       // §5.1 "short"; long enough to read, short enough not to annoy
+  mantleForwardClear: 0.45,  // required clear depth on top, so you never mantle into a wall
   /** §5.1 stumble/ragdoll thresholds. Entry is an imbalance measure, not a hit-point bar. */
   stumbleImpulse: 5.5,
   ragdollImpulse: 14,
