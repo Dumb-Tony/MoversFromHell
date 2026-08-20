@@ -10,7 +10,7 @@
  * bugs." This is the instrumentation half.
  */
 
-import { DEBUG, RENDER } from '../config.js';
+import { DEBUG, RENDER, BUILD } from '../config.js';
 
 export class DebugOverlay {
   constructor(root, game) {
@@ -57,6 +57,7 @@ export class DebugOverlay {
       ['phase', `${s.phase} · work ${fmt(s.elapsedWorkMs)} / est ${fmt(s.estimateMs)}`],
       ['input', `${s.inputContext} · ${g.input ? g.input.activeDevice : '—'}${g.input && g.input.pointerLocked ? ' · locked' : ''}`],
       ['session', `${Object.keys(s.players).length} player(s) · seed ${s.seed} · ${s.paused ? 'PAUSED' : 'running'}`],
+      ['build', `${BUILD.label} · ${BUILD.date}`],
     ];
 
     const events = g.bus.recent(DEBUG.eventLogLines)

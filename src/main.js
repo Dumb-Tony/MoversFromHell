@@ -20,6 +20,7 @@ import { buildPhase0Scene } from './render/scene.js';
 import { ThirdPersonCamera } from './render/camera.js';
 import { DebugOverlay } from './dev/debugOverlay.js';
 import { PHASES } from './core/eventBus.js';
+import { BUILD } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -48,6 +49,15 @@ game.addSystem('contract', () => {});   // Phase 5
 game.setPhase(PHASES.PICKUP);
 
 const overlay = new DebugOverlay(ui, game);
+
+/* Always-visible build stamp. GitHub Pages serves with Cache-Control: max-age=600, so a
+ * returning visitor can be looking at a build up to ten minutes old with no way to tell.
+ * During a playtest "which build were you on?" has to be answerable without opening
+ * devtools, so this sits in the corner rather than behind F3. */
+const stamp = document.createElement('div');
+stamp.id = 'build-stamp';
+stamp.textContent = `Movers From Hell — ${BUILD.label} · ${BUILD.date} · F3 for stats`;
+ui.appendChild(stamp);
 
 // ---- shell wiring ------------------------------------------------------------------
 input.onBlur = () => game.setPaused(true);           // §21.4 solo pause

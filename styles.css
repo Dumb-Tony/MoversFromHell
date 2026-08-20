@@ -63,3 +63,20 @@ html, body {
 #debug-overlay .bad  { color: var(--coral); }
 #debug-overlay .sep  { height: 1px; background: var(--line); margin: 6px 0; }
 #debug-overlay .ev   { color: #9b93b5; font-size: 11px; }
+
+/* Always-visible build stamp — see main.js. Deliberately not behind F3: a shared link
+   can serve a cached build for up to ten minutes, and a playtester needs to be able to
+   say which build they were on without opening devtools. */
+#build-stamp {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 4px 9px;
+  background: rgba(23, 21, 34, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #9b93b5;
+  pointer-events: none;
+  user-select: none;
+}

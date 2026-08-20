@@ -12,6 +12,18 @@
  * TUNED UNITS that happen to start life near kg.
  */
 
+/** Build identity, shown in the debug overlay and the corner stamp.
+ *
+ * GitHub Pages serves with Cache-Control: max-age=600, so a returning visitor can be
+ * looking at a build up to ten minutes old. Without a visible stamp there is no way to
+ * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
+ * `label` on every deploy. */
+export const BUILD = Object.freeze({
+  phase: 0,
+  label: 'phase-0',
+  date: '2026-08-19',
+});
+
 /** Simulation cadence. Validated by Phase 0. */
 export const SIM = Object.freeze({
   stepHz: 60,
