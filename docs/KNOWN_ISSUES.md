@@ -144,3 +144,41 @@ measurement against the gate, not by play. Whether a 90 kg couch SHOULD knock a 
 after ~2 seconds, or whether bracing should feel like more than a 50% reduction, are
 playtest questions. The one that most needs an outside opinion is whether losing your
 balance reads as "I overreached" or as "the game took it away from me".
+## Phase 4 open items
+
+**A two-mover couch lift clears the floor by 11 mm, and the ceiling is structural.** The
+gate's claim — one hand cannot lift a couch, two can — is true and measured (458 N vs 895 N
+against 883 N of couch). But the margin is thin, and the reason is not accidental. A hand is
+a `GRIP.spring` = 900 N/m spring, so two of them need 883/1800 = **0.49 m of stretch merely
+to break even**, out of the **0.70 m** `GRIP.maxStretch` allows before the hold tears. The
+entire usable lift band for a couch is therefore about **0.21 m**, and rotation eats into it.
+Two movers can get a couch off the ground and over a doorstep; they cannot lift it onto a
+table. This is a `GRIP.spring` / `GRIP.maxStretch` question for a tuning pass, not a
+cooperation one — the forces combine exactly as they should. Nothing above Phase 5 depends
+on it, but §7.2's truck deck will.
+
+**Two movers, one keyboard.** §14.2 wants real multiplayer; what exists is Tab to swap which
+mover you drive, with the others holding position and keeping their grips. That is enough to
+test §6.4's force combination, which is what §25.2's Phase 4 gate asks for ("second actor
+**or test harness or command model**"), and the seams §22.4 demands are all in place —
+stable string ids, serializable state, no ownership field on any object. It is not enough to
+judge whether co-op is FUN, which needs two humans and is a later question.
+
+**An unattended mover is a statue that happens to be strong.** It braces and holds, and does
+nothing else. It will not step back to take weight, will not follow, and will not let go when
+it should. That is deliberate for this phase — a partner with any autonomy would make it
+impossible to tell whether the force model or the AI produced a result — but it means the
+"two movers carrying a couch through a door" scenario cannot be exercised yet. Phase 5's
+house is where that starts to matter.
+
+**Solo dragging is still weak (carried over from Phase 3).** Phase 4 did not fix it, and the
+Phase 3 note stands. Two movers now make a couch tractable, which is the §6.3 outcome, so the
+pressure to fix solo dragging has dropped — but it has not gone away, because §6.3 explicitly
+allows "one drags or pivots" as a valid option and right now that option shuffles.
+
+**The lift ramp in the tests is not a control scheme.** m4 raises hands by writing
+`holdLocal` directly. A player has no way to do that — there is no "lift" input, only aim and
+grab. Raising the hands is currently a side effect of looking up, which is why the tests
+manipulate the hold offset instead of the camera. Whether lifting deserves its own input is a
+§4.2 control-map question that Phase 6's tools will force an answer to.
+

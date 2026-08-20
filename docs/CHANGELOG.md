@@ -3,6 +3,85 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 4 — the cooperative seam — 2026-08-20
+
+**Gate (§25.2):** "Second actor/test harness or command model" → **multiple grips combine
+predictably**. **PASSED** — 59 assertions (365 across five suites).
+
+**Hypothesis:** cooperation should not be a feature. If §6.4 is implemented honestly —
+forces add on a shared body, nobody owns anything — then two movers helping each other
+falls out of the physics that Phases 2 and 3 already built, and there should be no
+co-op-specific code path anywhere. The gate is therefore not "co-op works" but "nothing
+about the grip model breaks when a second pair of hands arrives".
+
+**Added**
+- `MOVERS` config: count, spawn offsets, per-mover colour, and whether an inactive mover
+  keeps its grips (it does).
+- Every mover gets its own `PlayerController`, its own `GripSystem` and its own coloured
+  blockout body. `makeBlockout` now takes a cloth colour so which one you are driving is
+  readable at a glance rather than from the HUD.
+- **Tab** swaps which mover you drive. The camera keeps its yaw and re-targets, so swapping
+  does not spin the view.
+- An unattended mover keeps holding and braces automatically. §6.4 forbids "a canned
+  synchronized carry animation taking ownership", so an idle mover is one whose INPUT is
+  zero, not one that is switched off — its grips keep pulling, which is the entire point.
+- `moversOn()` / `gripsOn()` helpers, and `tools/m4-tests.js` — 59 assertions.
+
+**THE BUG OF THE PHASE: one camera rig, and every mover's hands were reading it.**
+
+Hand targets are stored view-relative and rebuilt each step against the current aim frame
+(Phase 2's fix for the camera-to-shoulder offset). `aim()` read `rig.yaw/pitch` directly,
+which is correct with one mover and silently wrong with two: an inactive mover's hands were
+rebuilt in the ACTIVE player's view frame, so they swung around the world whenever the
+player turned the camera. MEASURED: with both movers holding one couch, mover 0 applied
+**0.0 N** while mover 1 applied 63.1 N, because mover 0's hand target had been rebuilt
+almost exactly on top of its own grip point, leaving no stretch to generate force.
+
+In play this would not have looked like a bug. It would have looked like a partner who does
+not pull their weight. Each `GripSystem` now keeps its own `aimYaw`/`aimPitch` and only
+takes them from the rig while it is the mover being driven.
+
+**Second bug: damping was solving the wrong spring.**
+`handsOn()` counts the hands of ONE grip system. In Phase 3 that is also the number of hands
+on the object, so the conflation was invisible. With two movers each holding one end, both
+derived their damping for a single-hand spring while the body actually had two attached —
+leaving the pair overdamped by a factor of √2. Split into `hands` (mine, which scales my
+strength and divides my own force budget) and `allHands` (every hand on the object, which is
+the spring system the damping has to be derived against). Nobody gets stronger because
+somebody else grabbed the other end; the damping does have to know they are there.
+
+**Measured — the gate itself**
+
+| | peak force | rose | lowest corner clear |
+|---|---|---|---|
+| one mover, one hand | 458 N | 0.058 m | **0.000 m** |
+| two movers, one hand each | 895 N | 0.131 m | **0.011 m** |
+
+The couch weighs 883 N and it sits between those two numbers. Forces add almost exactly
+linearly, and the result is binary in the way §6.3's "one drags or pivots; two or a tool
+preferred" describes: one hand cannot separate a couch from the floor by a micron, two can.
+
+`clearForces()` running once per step rather than once per mover is asserted directly
+(H2–H4): with both holding, both must register applied force in the SAME step. H5 corroborates
+it from the world rather than the counters — the couch cannot be airborne unless both forces
+landed.
+
+**Four wrong measurements, none of which were bugs in the game.** Recorded because the
+pattern is the same each time: the test asked for something the physics does not do.
+1. Asked for a lift that needs 0.49 m of stretch while ramping the hands only 0.45 m.
+2. Ramped along the aim frame's `up` axis, which is tilted by the pitch, so the hands rose
+   12% less than the arithmetic assumed. Third time an aim-frame tilt has cost a wrong number.
+3. Measured rotation about Y while the couch was visibly turning — hands gripping 0.19 m
+   above the centre of mass tip it about its LONG axis, and that is identical wherever along
+   that axis you pull, so both arrangements measured the same.
+4. Counted the rise of the couch's CENTRE as a lift. Tipping a 0.90 × 0.85 box 23° onto its
+   back edge raises its centre 0.142 m for free — within a centimetre of the 0.148 m that was
+   being read as "two movers got it airborne". Its lowest corner never left the ground.
+   `clearanceOf()` now arbitrates, and both movers take the two ENDS, which is the only
+   arrangement that lifts rather than tips.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59 — 365 assertions, all passing.
+
 ## Phase 3 — heavy object — 2026-08-19
 
 **Gate (§25.2):** "Mass, leverage, drag, brace, stumble" → **weight legible without hard

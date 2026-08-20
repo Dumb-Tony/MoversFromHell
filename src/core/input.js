@@ -45,6 +45,9 @@ export const DEFAULT_BINDINGS = Object.freeze({
     context:     { keys: ['KeyQ'],       pad: [PAD.RB] },  // context rotate / toss / cancel
     drop:        {                       pad: [PAD.B] },   // controller-only per §4.3
     recover:     { keys: ['KeyR'] },                       // recover eligible held item/player
+    // §25.2 Phase 4: swap which mover you are driving. The other one keeps holding what it
+    // had, which is how a solo player experiences a two-person carry.
+    swapMover:   { keys: ['Tab'],        pad: [PAD.Y] },
     pause:       { keys: ['Escape'],     pad: [PAD.MENU] },
     debug:       { keys: ['F3'] },
   },

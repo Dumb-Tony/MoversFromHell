@@ -3,10 +3,11 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 3 of 13**: boxes, and now a 90 kg couch that argues back. WASD move,
-Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, R recover, F3
-stats. Try carrying the couch on your own — it will slow you down, unbalance you, and
-eventually put you on the floor. That is the design, not a bug.
+*is* the site. **Phase 4 of 13**: two movers, and a 90 kg couch that argues back. WASD move,
+Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
+mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
+unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
+one end, Tab to the other mover, grab the other end, and watch it come off the ground.
 
 ---
 
@@ -76,7 +77,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 3 complete
+## Current state — Phase 4 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -86,14 +87,26 @@ GDD §25.2 defines a 13-phase roadmap.
 | 1. Movement | responsive indoors and on ramp | done — 61 assertions |
 | 2. One box | controllable; no wall ghosting | done — 66 assertions |
 | 3. Heavy object | weight legible without hard denial | done — 61 assertions |
-| 4. Cooperative seam | multiple grips combine predictably | next |
+| 4. Cooperative seam | multiple grips combine predictably | done — 59 assertions |
+| 5. House puzzle | architecture creates real choices | next |
 
-**306 assertions across four suites, all passing.**
+**365 assertions across five suites, all passing.**
 
-![Phase 3](docs/phase3-heavy.png)
+![Phase 4](docs/phase4-coop.png)
 
-A mover with both hands on the 90 kg couch — the HUD reads "two hands". Behind: the three
-doorways, the mantle ledges (lime climbable, red refuses), all at true scale on a metre grid.
+Two movers at either end of the 90 kg couch. One hand peaks at 458 N and cannot separate it
+from the floor by a micron; two peak at 895 N against the couch's 883 N and lift it clear.
+Nothing in the code special-cases cooperation — that is just what two springs on one rigid
+body do (§6.4).
+
+### What Phase 4 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| Multiple movers | `src/main.js`, `src/config.js` | Each with its own controller, grip system and colour. **Tab** swaps which one you drive. |
+| Per-mover aim | `src/player/grip.js` | Each mover keeps its own yaw/pitch. Reading the shared camera rig made an inactive mover's hands swing with your view, and it applied 0 N. |
+| Shared-spring damping | `src/player/grip.js` | Damping is derived from every hand on the object, not just yours. Your strength is still yours alone. |
+| No ownership | everywhere | No owner field, no carry state, no synchronized animation (§14.2). Releasing one grip updates the forces within a single step. |
 
 ### What Phase 3 added
 

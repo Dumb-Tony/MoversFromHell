@@ -111,3 +111,50 @@ building toward, and it is Phase 4.
 **Would I tell a friend about it?** Yes, one thing: "I tried to carry a couch on my own and
 it knocked me over." That is the first sentence out of this project that sounds like the
 game it is meant to be.
+## Phase 4 — the cooperative seam — 2026-08-20
+
+**The phase where the design's central bet paid off.** Author's note; still no external
+playtest, and this is the phase where that limitation starts to bite hardest.
+
+**Nothing had to be written for co-op.** That is the finding. Two movers holding one couch
+required a config block, a loop, and a key to swap between them — the cooperation itself is
+just two force-at-a-point springs on the same rigid body. §6.4's "forces add" is not
+implemented anywhere; it is arithmetic that Rapier was already doing. Every other approach I
+have seen to this problem involves a carry state, an owner, and a synchronized animation, and
+the GDD explicitly forbids all three (§14.2). It was right to.
+
+**The moment it became real.** One mover heaving at a couch that will not move, then the same
+couch coming off the ground the instant the second pair of hands arrives. 458 N against
+895 N, with the couch's 883 N sitting between them — the number is not a threshold anyone
+authored, it is just what 90 kg weighs. That is exactly §6.3's promise: nothing refuses, the
+cost changes.
+
+**The best accident, again from consequences rather than authoring.** Knock one mover down
+while both are carrying and the couch does not drop — it slews violently as it swings onto
+the remaining grip. Nobody wrote a "partner staggers" behaviour; one spring stopped and the
+other kept pulling from where it was.
+
+**Actively worse — and it is my own doing.** Tab-swapping breaks the fiction badly. You are
+one person driving a statue, not two people cooperating, and the moment you swap you lose
+track of which body you are in even with the colour coding. The colours help less than I
+expected. This does not undermine the gate — the gate is about forces, and the forces are
+right — but it means I have learned almost nothing about whether co-op is FUN.
+
+**Cannot be judged yet, and this is now the biggest gap in the project.** Everything about
+this game's appeal is supposed to come from two people fumbling a couch together. I have
+measured that the physics support it and observed nothing at all about whether it lands. The
+next genuinely informative thing that could happen to this project is two humans and one
+couch, not another phase.
+
+**The near-miss worth recording.** I nearly shipped "two movers can lift a couch" as a pass
+on a measurement that was counting the couch tipping onto its back edge as lifting. The
+centre rose 0.148 m; the lowest corner never left the floor. Both numbers were real and one
+of them meant nothing. Every physics claim in this suite is now made against clearance,
+force, or a controlled A/B, never against a single number that "looks like" the thing.
+
+**Would I tell a friend about it?** Yes, but the sentence has changed and got worse: "watch
+this couch come off the ground when the second guy grabs it." That is a sentence about a
+simulation, not about a game. Phase 3's was "I tried to carry a couch on my own and it
+knocked me over" — a story. Phase 4 made the game more correct and less funny, which is
+probably the right trade at this point in the build order, but it is worth noticing.
+

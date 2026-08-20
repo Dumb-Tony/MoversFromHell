@@ -19,9 +19,9 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 3,
-  label: 'phase-3',
-  date: '2026-08-19',
+  phase: 4,
+  label: 'phase-4',
+  date: '2026-08-20',
 });
 
 /** Simulation cadence. Validated by Phase 0. */
@@ -175,6 +175,31 @@ export const CARRY = Object.freeze({
    *  harder to keep, which is what motivates a partner or a tool. */
   exertAt: 0.75,             // fraction of the force cap that counts as working hard
   exertForcePenalty: 0.40,   // at full exertion the cap drops by this fraction
+});
+
+/** §6.4 cooperative handling, §22.4 the multiplayer seam. Validated: Phase 4.
+ *
+ *  §25.2's Phase 4 is "second actor/test harness or command model", gated on "multiple
+ *  grips combine predictably". This build is NOT networked — §13.4 is explicit that a
+ *  deterministic or host-authoritative seam is what matters and that production networking
+ *  must not delay feel tests. So there are two real movers in the world, each with their
+ *  own body, hands and grips, and you switch between them. Neither owns anything: §14.2's
+ *  "shared objects accept forces from all validated grips; no single client permanently
+ *  owns a jointly held object" is already true, because a grip is just a force. */
+export const MOVERS = Object.freeze({
+  count: 2,
+  /** Where each mover starts, relative to the scene spawn. Far enough apart that they are
+   *  not standing in each other, close enough that both can reach the same couch. */
+  spawnOffsets: [
+    { x: -0.9, z: 0.0 },
+    { x: 0.9, z: 0.6 },
+  ],
+  /** Body colours, so it is obvious which one you are driving. */
+  colours: ['#5f6b8a', '#7a5f8a'],
+  /** The inactive mover keeps holding what it was holding. That is the whole point: it is
+   *  how one person experiences a two-person carry, and it is what makes §6.4's
+   *  "opposite-end grips naturally stabilise long objects" reachable solo. */
+  inactiveKeepsGrips: true,
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */

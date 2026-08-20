@@ -19,12 +19,14 @@
 
 import { PLAYER } from '../config.js';
 
-export function makeBlockout() {
+export function makeBlockout(clothColour) {
   const THREE = window.THREE;
   const H = PLAYER.height;
   const g = new THREE.Group();
 
-  const skin = '#cfc6b8', cloth = '#5f6b8a', dark = '#3d4358', hi = '#a8d93a';
+  // Phase 4 gives each mover its own colour, so which one you are driving is readable at a
+  // glance rather than from the HUD.
+  const skin = '#cfc6b8', cloth = clothColour || '#5f6b8a', dark = '#3d4358', hi = '#a8d93a';
   const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
 
   const legH = H * 0.50, torsoH = H * 0.33, headR = H * 0.076;

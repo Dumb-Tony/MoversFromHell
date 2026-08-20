@@ -53,6 +53,31 @@ export class GripSystem {
     /** What the reticle is currently over, for the §21.1 HUD prompt. */
     this.hovered = null;
     this.lastRelease = null;
+
+    /* THIS MOVER'S OWN AIM — the Phase 4 fix, and the reason multiple grips combine at all.
+     *
+     * There is one camera rig for the whole game (§4.1), and the obvious thing is for aim()
+     * to read rig.yaw/pitch directly. That is what Phases 2-3 did, and it is correct right
+     * up until a SECOND mover holds something.
+     *
+     * Hand targets are stored view-relative (see tryGrab), so they are rebuilt every step
+     * against the current aim frame. Reading the shared rig means an inactive mover's hands
+     * are rebuilt in the ACTIVE player's view frame: turn the camera and your partner's arms
+     * swing round with it, wherever they happen to be standing. Measured, this collapsed
+     * their stretch to near zero and they applied 0 N — which reads in play as "my partner
+     * is not helping", not as a camera bug.
+     *
+     * So each mover keeps its own yaw/pitch and only takes them from the rig while it is the
+     * one being driven. An unattended mover's hands stay where IT last put them. */
+    this.aimYaw = 0;
+    this.aimPitch = 0;
+  }
+
+  /** Adopt the shared rig's orientation as this mover's own. Called for the mover currently
+   *  being driven, and on any grab, since you always grab under your own aim. */
+  syncAim() {
+    this.aimYaw = this.rig.yaw;
+    this.aimPitch = this.rig.pitch;
   }
 
   /* AIM FROM THE CAMERA, REACH FROM THE BODY.
@@ -80,8 +105,9 @@ export class GripSystem {
    *  The rig owns yaw/pitch; this derives the 3D vectors, because forwardFlat() is
    *  deliberately flattened and cannot aim up or down at a box on the floor. */
   aim() {
-    const cp = Math.cos(this.rig.pitch), sp = Math.sin(this.rig.pitch);
-    const sy = Math.sin(this.rig.yaw), cy = Math.cos(this.rig.yaw);
+    // this.aimYaw/aimPitch, NOT rig.yaw/pitch — see the constructor for why.
+    const cp = Math.cos(this.aimPitch), sp = Math.sin(this.aimPitch);
+    const sy = Math.sin(this.aimYaw), cy = Math.cos(this.aimYaw);
     // Matches ThirdPersonCamera's convention: forward is -Z at yaw 0, pitch 0.
     const dir = { x: -sy * cp, y: sp, z: -cy * cp };
     const right = { x: cy, y: 0, z: -sy };
@@ -143,6 +169,10 @@ export class GripSystem {
    */
   tryGrab(hand, playerId = 'p0', simTimeMs = 0) {
     if (this.grips[hand]) return this.grips[hand];
+    // You always grab under your OWN aim: whoever is reaching out is, by definition, the
+    // mover being driven right now. Syncing here means a grab can never be built against a
+    // stale frame, whatever order main.js happens to call things in.
+    this.syncAim();
     const found = this.probe();
     if (!found) return null;
 
@@ -254,12 +284,13 @@ export class GripSystem {
 
   /** One fixed step. Applies each grip's force and resolves slip and stretch. */
   step(stepMs, { brace = false, simTimeMs = 0 } = {}) {
-    /* Rapier forces PERSIST and COMPOUND until reset — see PhysicsWorld.clearForces for the
-     * measurements. Without this line the grip force accumulates every step: measured 60x
-     * the intended value after one second, which made §6.4's per-step clamp meaningless and
-     * was quietly behind objects flying off. This is the first force applied in the step
-     * order, so clearing here clears for everyone. */
-    this.physics.clearForces();
+    /* NOTE: clearForces() used to live here, and with one mover that was fine. It is now
+     * hoisted into the step order in main.js, because with TWO movers on one couch the
+     * second grip system would clear the first one's force every step and only the last
+     * mover to run would ever be felt. That is the quiet, plausible-looking version of
+     * §6.4's "two clients" failure, and it would have looked like "the other mover isn't
+     * helping" rather than like a bug. Forces are cleared once per step, before any mover
+     * applies one. */
 
     const frame = this.aim();   // frame.origin is the SHOULDER, not the camera (see aim())
     this.hovered = (this.grips.left || this.grips.right) ? null : this.probe();
@@ -314,7 +345,20 @@ export class GripSystem {
       // fights nothing.
       const vp = velocityAtPoint(body, gripWorld);
 
+      /* TWO HAND COUNTS, AND THEY ARE NOT THE SAME NUMBER.
+       *
+       * `hands` is MY hands on this object. It scales MY strength, and divides MY budget
+       * between my own hands. A partner's grip must not do either: nobody gets stronger
+       * because someone else grabbed the other end.
+       *
+       * `allHands` is every hand on the object, mine and theirs. The spring system acting
+       * on the body is the sum of all of them, so the damping derivation has to see the
+       * total or it is solving the wrong system. Phase 3 could not tell these apart — with
+       * one mover they are equal — and Phase 4 inherited the conflation as a real bug: two
+       * movers each derived damping for a single-hand spring while the body actually had
+       * two, leaving the pair overdamped by sqrt(2) and the couch feeling like treacle. */
       const hands = this.handsOn(grip.entityId);
+      const allHands = Math.max(hands, entity.state.grips.length);
 
       /* Damping is derived from the RATIO, per object, per hand. Critical damping is
        * 2*sqrt(k*m), so a fixed coefficient is only ever correct for one mass — measured
@@ -323,8 +367,8 @@ export class GripSystem {
        * effective stiffness is N*k, so the critical coefficient is computed against that
        * and then split between the hands. */
       const mass = entity.def.mass;
-      const kEff = GRIP.spring * hands;
-      const cPerHand = (2 * GRIP.dampingRatio * Math.sqrt(kEff * mass)) / hands;
+      const kEff = GRIP.spring * allHands;
+      const cPerHand = (2 * GRIP.dampingRatio * Math.sqrt(kEff * mass)) / allHands;
 
       let fx = GRIP.spring * err.x - cPerHand * vp.x;
       let fy = GRIP.spring * err.y - cPerHand * vp.y;
@@ -390,36 +434,14 @@ export class GripSystem {
       this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs);
     }
 
-    this._restoreClearedObjects();
-
     // §7.3's caps apply to whatever the grips just did.
     this.registry.clampVelocities();
   }
 
-  /** Give a dropped object its player collision back, but only once it is clear of the
-   *  player. See release() for why doing it immediately fires the box across the room. */
+  /** Convenience for a single-mover caller. The real work is the module-level helper,
+   *  because clearance depends on EVERY mover, not just the one that let go. */
   _restoreClearedObjects() {
-    if (!this.player) return;
-    const p = this.player.position;
-    for (const entity of this.registry.entities.values()) {
-      if (!entity.state.awaitingPlayerClearance || entity.state.held) continue;
-      const t = entity.body.translation();
-      const d = entity.def.dimensions;
-      // Horizontal distance against the capsule radius plus the object's own half-extent;
-      // vertical overlap is checked against the capsule's span.
-      // Half-DIAGONAL, not half-width: the object may be rotated, so its corner reaches
-      // sqrt(x^2+z^2)/2 from the centre. Using half-width declared a box clear at exactly
-      // the distance its corner was still touching the capsule, and restoring collision
-      // there produced a 7.3 m/s shove. The extra margin is deliberate slack on top.
-      const halfDiag = Math.hypot(d.x, d.z) / 2;
-      const horiz = Math.hypot(t.x - p.x, t.z - p.z);
-      const verticallyApart = (t.y + d.y / 2) < p.y - 0.05 || (t.y - d.y / 2) > p.y + PLAYER.height + 0.05;
-      const clear = horiz > PLAYER.radius + halfDiag + 0.20 || verticallyApart;
-      if (clear) {
-        entity.collider.setCollisionGroups(GROUP_PRESETS.object);
-        entity.state.awaitingPlayerClearance = false;
-      }
-    }
+    restoreClearedObjects(this.registry, this.player ? [this.player] : []);
   }
 
   /** Wire the body's forced-release hook, so being knocked down drops the load. §5.1's
@@ -493,3 +515,53 @@ export function velocityAtPoint(body, point) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function dot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+/* ── shared, mover-count-agnostic helpers ─────────────────────────────────────
+ * These take the movers as an argument rather than living on one GripSystem, because a
+ * dropped object's safety depends on ALL of them. §22.4: "no hidden singleton ownership
+ * of objects" — the same reasoning applies to the code that reasons about them.
+ */
+
+/** Give a dropped object its player collision back, but only once it is clear of EVERY
+ *  mover. Restoring it while still overlapping hands the solver a one-step depenetration —
+ *  measured 40 m/s. With two movers, checking only the one that let go is not enough: the
+ *  other one may be standing exactly where the box was put down. */
+export function restoreClearedObjects(registry, movers) {
+  if (!movers || !movers.length) return;
+  for (const entity of registry.entities.values()) {
+    if (!entity.state.awaitingPlayerClearance || entity.state.held) continue;
+    const t = entity.body.translation();
+    const d = entity.def.dimensions;
+    // Half-DIAGONAL, not half-width: the object may be rotated, so its corner reaches
+    // sqrt(x^2+z^2)/2 from the centre. Using half-width declared a box clear at exactly the
+    // distance its corner was still touching, and that produced a 7.3 m/s shove.
+    const halfDiag = Math.hypot(d.x, d.z) / 2;
+    let clearOfAll = true;
+    for (const m of movers) {
+      const p = m.position;
+      const horiz = Math.hypot(t.x - p.x, t.z - p.z);
+      const verticallyApart =
+        (t.y + d.y / 2) < p.y - 0.05 || (t.y - d.y / 2) > p.y + PLAYER.height + 0.05;
+      if (!(horiz > PLAYER.radius + halfDiag + 0.20 || verticallyApart)) { clearOfAll = false; break; }
+    }
+    if (clearOfAll) {
+      entity.collider.setCollisionGroups(GROUP_PRESETS.object);
+      entity.state.awaitingPlayerClearance = false;
+    }
+  }
+}
+
+/** Every grip on an entity, across all movers — §6.4's "mover count" factor and §14.2's
+ *  "shared objects accept forces from all validated grips; no single client permanently
+ *  owns a jointly held object". */
+export function gripsOn(entity) {
+  return entity && entity.state ? entity.state.grips.slice() : [];
+}
+
+/** How many DISTINCT movers have a hand on this entity. Two hands from one mover is one
+ *  mover; that distinction is what §6.4 means by a second person helping. */
+export function moversOn(entity) {
+  const ids = new Set();
+  for (const g of gripsOn(entity)) ids.add(g.playerId);
+  return ids.size;
+}
