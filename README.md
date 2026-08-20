@@ -1,5 +1,13 @@
 # Movers From Hell
 
+### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
+
+Always live, always the current `main`. Every push redeploys it — no build step, the repo
+*is* the site. **Phase 0 of 13**, so right now that link shows the diagnostic scene with a
+mouse-look camera; there is no character to move yet. Phase 1 adds one.
+
+---
+
 A 1–4 player physics-driven moving-company co-op game. You and your friends carry
 furniture down stairs, through doorways it does not fit through, into a truck that is a
 real collision volume, drive it somewhere, and find out what your packing was worth.
@@ -25,6 +33,10 @@ revised rather than expanded (§13.5).
 ---
 
 ## Run it
+
+Live build, no install: **https://dumb-tony.github.io/MoversFromHell/**
+
+Locally, for development:
 
 ```bash
 ./play.bat
@@ -61,7 +73,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 GDD §25.2 defines a 13-phase roadmap. Phase 0 is *"standalone launch, scene, action map,
 debug overlay, fixed loop"*, gated on *"loads locally; stable frame/step"*.
 
-**111 assertions, all passing.** What exists:
+**118 assertions, all passing.** What exists:
 
 | Piece | Where | Notes |
 |---|---|---|

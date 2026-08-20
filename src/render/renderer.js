@@ -26,16 +26,34 @@ export function createRenderer(canvas) {
 
   const camera = new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);
 
-  function resize() {
-    const w = canvas.clientWidth || window.innerWidth;
-    const h = canvas.clientHeight || window.innerHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(1, h);
-    camera.updateProjectionMatrix();
-    return { w, h };
-  }
-  resize();
-  window.addEventListener('resize', resize);
+  let lastW = -1, lastH = -1;
 
-  return { THREE, renderer, camera, resize };
+  /** Re-size only when the canvas actually changed size. Returns true if it did.
+   *
+   * Called EVERY FRAME rather than only from a resize listener, and that is deliberate.
+   * A page that boots in a background or prerendered tab lays out at 0x0: the backing
+   * store is 0x0 and camera.aspect is 0. Bringing that tab to the front fires no resize
+   * event, so a listener-only implementation stays 0x0 forever and renders nothing.
+   * MEASURED on the live GitHub Pages build in a non-painting tab — client size reached
+   * 1280x720 while the backing store stayed 0x0 and aspect stayed 0.
+   *
+   * The comparison is two integer compares per frame; only a genuine change touches the
+   * GL viewport or the projection matrix, so this costs nothing in the steady state. */
+  function syncSize() {
+    const w = canvas.clientWidth || window.innerWidth || 0;
+    const h = canvas.clientHeight || window.innerHeight || 0;
+    if (w === lastW && h === lastH) return false;
+    lastW = w; lastH = h;
+    if (w <= 0 || h <= 0) return false;   // still unlaid-out; try again next frame
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    return true;
+  }
+  syncSize();
+  // Kept as well as the per-frame check: it makes a drag-resize update on the same frame
+  // the browser reflows, rather than one frame later.
+  window.addEventListener('resize', syncSize);
+
+  return { THREE, renderer, camera, syncSize };
 }

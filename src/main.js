@@ -24,7 +24,7 @@ import { PHASES } from './core/eventBus.js';
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
 
-const { THREE, renderer, camera } = createRenderer(canvas);
+const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
 const world = buildPhase0Scene();
 const rig = new ThirdPersonCamera(camera, world.colliders);
 
@@ -71,6 +71,9 @@ function loop(now) {
   const frameMs = now - lastT;
   lastT = now;
 
+  // Recover from a 0x0 boot (background/prerendered tab). See renderer.js syncSize.
+  syncSize();
+
   overlay.stepsThisFrame = game.frame(frameMs);
 
   // §22.3 step 5: presentation runs on REAL time. It reads state and never writes it.
@@ -88,4 +91,4 @@ requestAnimationFrame(loop);
  * frames, because headless Chrome in --dump-dom mode delivers only 1-3 rAF callbacks in
  * total (MEASURED — Dev\INDEX.md → Tooling & testing). A suite that waits for frames
  * waits forever; a suite that calls game.frame() directly is deterministic. */
-window.__MFH = { game, input, rig, world, overlay, renderer, camera, THREE, CONTEXTS, PHASES };
+window.__MFH = { game, input, rig, world, overlay, renderer, camera, syncSize, THREE, CONTEXTS, PHASES };

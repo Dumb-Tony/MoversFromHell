@@ -18,6 +18,7 @@ import { mulberry32, Rng, hashStr } from '../src/core/rng.js';
 import { Game, createInitialState } from '../src/game.js';
 import { SIM, RENDER, PLAYER, GRIP, DAMAGE, STRAP, TRUCK, ECONOMY } from '../src/config.js';
 import { camOcclude, ThirdPersonCamera } from '../src/render/camera.js';
+import { createRenderer } from '../src/render/renderer.js';
 import { REFERENCE_DIMS, APERTURES, fitsThroughGap, minProjectedWidth } from '../src/render/scene.js';
 
 /* ── harness (from AirportBaggageCrew\tools\m0-tests.js) ─────────────────── */
@@ -472,6 +473,43 @@ lines.push('--- G. live build (GDD §25.2 phase-0 gate) ---');
     ok('G14 yaw stays wrapped to +/-PI', Math.abs(M.rig.yaw) <= Math.PI + 1e-6, `yaw ${M.rig.yaw}`);
 
     ok('G15 no error banner was raised during boot', !document.getElementById('err-banner'));
+
+    // §26.6 robustness. A page that boots in a background or prerendered tab lays out at
+    // 0x0; bringing it forward fires NO resize event, so a renderer that sizes itself only
+    // from a resize listener stays 0x0 and renders nothing, forever. MEASURED on the live
+    // GitHub Pages build: client size reached 1280x720 while the backing store stayed 0x0
+    // and camera.aspect stayed 0. syncSize() runs every frame and must recover on its own.
+    //
+    // Reproduced honestly, on a throwaway canvas that really does boot at 0x0. Forcing the
+    // state with setSize(0,0) instead would NOT reproduce it — the CSS size never changes,
+    // so syncSize's change detection is right to ignore it.
+    ok('G16 the canvas exists', !!document.getElementById('stage'));
+
+    const probe = document.createElement('canvas');
+    probe.style.cssText = 'position:absolute;left:-9999px;width:0px;height:0px';
+    document.body.appendChild(probe);
+    try {
+      const r2 = createRenderer(probe);
+      ok('G17 booting at 0x0 never yields a non-finite aspect', Number.isFinite(r2.camera.aspect),
+         `aspect ${r2.camera.aspect}`);
+      ok('G18 …and syncSize reports no change while unlaid-out', r2.syncSize() === false);
+
+      probe.style.width = '800px';
+      probe.style.height = '400px';
+      const recovered = r2.syncSize();      // no resize event fired — this is the point
+      ok('G19 a 0x0 boot recovers on the next frame, with no resize event', recovered);
+      near('G20 …to the real canvas aspect ratio', r2.camera.aspect, 2, 1e-6);
+      ok('G21 …and the backing store is no longer 0x0', probe.width > 0 && probe.height > 0,
+         `${probe.width}x${probe.height}`);
+
+      // Steady state must be free: an unchanged canvas re-syncs nothing.
+      ok('G22 an unchanged canvas reports no change', r2.syncSize() === false);
+      r2.renderer.dispose();
+    } catch (e) {
+      fails++; lines.push(`FAIL  G17-G22 resize probe threw  <- ${e && e.message}`);
+    } finally {
+      probe.remove();
+    }
   }
 }
 emit();

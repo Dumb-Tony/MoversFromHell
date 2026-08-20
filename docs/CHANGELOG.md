@@ -37,6 +37,18 @@ guessed at.
   down by D8–D11, which assert the eye→target direction equals `forwardFlat()` at six
   different yaws.
 
+**Fixed after deploying to GitHub Pages**
+- **Renderer never recovered from a 0x0 boot.** `createRenderer` sized itself once and
+  otherwise relied on the `resize` event. A page that boots in a background or prerendered
+  tab lays out at 0x0, and bringing it forward fires no resize event — so the backing store
+  stayed 0x0 and `camera.aspect` stayed 0 permanently, rendering nothing. Measured on the
+  live Pages build: client size reached 1280x720 while the backing store stayed 0x0.
+  Replaced with `syncSize()`, called every frame, which re-sizes only on an actual change
+  (two integer compares in the steady state). Locked by G17-G22, which reproduce the boot
+  honestly on a throwaway 0x0 canvas rather than by forcing `setSize(0,0)` — the latter does
+  not reproduce it, because the CSS size never changes and the change detection is right to
+  ignore it.
+
 **Corrected in the tests, not the code**
 - A12/E1/E2 initially failed on float precision, not behaviour: `stepMs * 3` is exactly
   `50.0` in float64, and `50 − 2×16.666666666666668` falls 7e-15 short of a third step, so
@@ -50,3 +62,7 @@ guessed at.
 - No physics engine. Rapier3D is chosen and vendored-offline is the plan, but Phase 0 has
   no bodies to simulate. Phase 2 introduces it.
 - No player character, no grips, no truck. Those are Phases 1–8.
+
+**Deployed**
+- GitHub Pages enabled from `main` root, plus `.nojekyll`. The repo *is* the site: no build
+  step, every push redeploys. https://dumb-tony.github.io/MoversFromHell/
