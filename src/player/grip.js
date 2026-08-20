@@ -25,7 +25,7 @@
  *      Kinematic attachment, the usual shortcut, ghosts through everything by definition.
  */
 
-import { GRIP, PLAYER } from '../config.js';
+import { GRIP, PLAYER, CARRY } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
 import { GROUP_PRESETS } from '../physics/world.js';
 
@@ -254,8 +254,34 @@ export class GripSystem {
 
   /** One fixed step. Applies each grip's force and resolves slip and stretch. */
   step(stepMs, { brace = false, simTimeMs = 0 } = {}) {
+    /* Rapier forces PERSIST and COMPOUND until reset — see PhysicsWorld.clearForces for the
+     * measurements. Without this line the grip force accumulates every step: measured 60x
+     * the intended value after one second, which made §6.4's per-step clamp meaningless and
+     * was quietly behind objects flying off. This is the first force applied in the step
+     * order, so clearing here clears for everyone. */
+    this.physics.clearForces();
+
     const frame = this.aim();   // frame.origin is the SHOULDER, not the camera (see aim())
     this.hovered = (this.grips.left || this.grips.right) ? null : this.probe();
+
+    /* §6.2's last factor: the object pulls back. Every force a hand puts INTO an object has
+     * an equal and opposite reaction on the mover, and accumulating it here is what turns
+     * "this object is 90 kg" from a number into something the player feels through the
+     * controls. Summed across hands, handed to the body at the end of the step. */
+    let reactionX = 0, reactionZ = 0;
+    /* How much weight the mover is actually SUPPORTING — the sum of the upward force the
+     * hands are applying, expressed as a mass.
+     *
+     * Charging the object's full mass would be wrong, and measurably so: dragging a couch
+     * along the floor loads the mover with almost nothing, because the FLOOR is holding it
+     * up and the hands only supply horizontal force. Billing the full 90 kg made imbalance
+     * reach the knockdown threshold in 1.5 s, so every attempt to drag ended with the mover
+     * flat on their back — which is exactly the hard denial §2.1 and the Phase 3 gate
+     * forbid, arriving by the back door.
+     *
+     * Supporting-force is also just the better model: it makes §6.3's "one drags or pivots"
+     * true for free. Dragging is sustainable; lifting the same object is not. */
+    let supportedN = 0;
 
     for (const hand of HANDS) {
       const grip = this.grips[hand];
@@ -309,6 +335,10 @@ export class GripSystem {
       if (brace) strength *= GRIP.braceForceMult;
       if (hands > 1) strength *= GRIP.twoHandForceMult;
       if (entity.state.wet) strength *= GRIP.wetGripMult;
+      // §5.2: sustained overload "may reduce maximum force". Never to zero — exertion makes
+      // a hard hold harder to keep, which is what motivates a partner or a tool, and is
+      // explicitly not a stamina bar that forbids the attempt.
+      if (this.player) strength *= this.player.strengthFraction;
 
       /* A hand is limited by how fast it can MOVE as well as how hard it can pull. Without
        * the acceleration term, 750 N on a 9 kg box is 8.5 g and a dropped box leaves at
@@ -343,6 +373,21 @@ export class GripSystem {
       }
 
       body.addForceAtPoint({ x: fx, y: fy, z: fz }, gripWorld, true);
+
+      // Equal and opposite, horizontal only: the vertical reaction is what the mover's legs
+      // are for, and feeding it in would have them sink into the floor.
+      reactionX -= fx;
+      reactionZ -= fz;
+      // Only UPWARD force counts as supporting weight; pushing down on something does not
+      // tire your back in the way this models.
+      if (fy > 0) supportedN += fy;
+
+      // §5.2: working near the cap is what "exertion" means.
+      if (this.player && grip.lastApplied > cap * CARRY.exertAt) this.player.noteExertion(stepMs);
+    }
+
+    if (this.player) {
+      this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs);
     }
 
     this._restoreClearedObjects();
@@ -375,6 +420,14 @@ export class GripSystem {
         entity.state.awaitingPlayerClearance = false;
       }
     }
+  }
+
+  /** Wire the body's forced-release hook, so being knocked down drops the load. §5.1's
+   *  ragdoll entry is a consequence, and dropping the couch on yourself is the point. */
+  attachTo(player) {
+    this.player = player;
+    player.onForcedRelease = (reason) => this.releaseAll(reason);
+    return this;
   }
 
   /** For the HUD and the debug overlay. */

@@ -217,30 +217,16 @@ export function buildScene() {
     }
   }
 
-  // ---- reference objects at true dimensions ------------------------------------------
+  /* ---- movable objects are no longer built here ---------------------------------------
+   * Through Phase 0-1 the boxes, couch and dresser stood in this scene as static meshes
+   * with AABB colliders — honest while nothing could move. Phase 2 made the boxes real
+   * rigid bodies and Phase 3 did the same for the couch and dresser, so they are all
+   * spawned from src/objects/definitions.js (PHASE2_SPAWNS, PHASE3_SPAWNS) instead.
+   *
+   * Leaving the static stand-ins behind would put an immovable collider inside every
+   * object the registry spawns, which is the kind of duplication §8.1's one-shared-record
+   * rule exists to prevent. */
   const props = [];
-  const addBox = (dims, color, x, z, yaw = 0, tag = '') => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(dims.x, dims.y, dims.z), mat(color));
-    m.position.set(x, dims.y / 2, z);
-    m.rotation.y = yaw;
-    m.castShadow = true; m.receiveShadow = true;
-    scene.add(m);
-    props.push({ mesh: m, dims, tag });
-    // Axis-aligned only while yaw is 0 — Phase 0 props are static, and Phase 2 replaces
-    // this list with real rigid bodies, so an AABB is honest here and nowhere later.
-    if (Math.abs(yaw) < 1e-6) addCollider(x, z, dims.x, dims.z, 0, dims.y, tag);
-    return m;
-  };
-
-  // Couch and dresser stay STATIC until Phase 3 ("heavy object"). §29.1 is explicit that
-  // one box must feel good before furniture variety arrives, and a couch grabbable under
-  // the Phase 2 model would just be a very large box — which is precisely the answer §6.3
-  // says the game must never give.
-  addBox(REFERENCE_DIMS.couch3Seat, PALETTE.couch,   0,   1.6, 0, 'couch');
-  addBox(REFERENCE_DIMS.dresser,    PALETTE.dresser, 3.0, 1.2, 0, 'dresser');
-  // The moving boxes that used to stand here are now DYNAMIC entities spawned from
-  // src/objects/definitions.js PHASE2_SPAWNS. Leaving the static stand-ins would put an
-  // immovable collider inside every box the registry spawns.
 
   // Human-height post. Without it nothing on screen has a believable scale.
   const post = new THREE.Mesh(

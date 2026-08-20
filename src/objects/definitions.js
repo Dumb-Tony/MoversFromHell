@@ -3,12 +3,11 @@
  * "Every movable entity uses a data-driven definition plus runtime state. The visible
  * silhouette and collider must agree closely because spatial reasoning is the game."
  *
- * §29.1 sets the build order: "make one box feel good before adding furniture variety."
- * So Phase 2 defines BOXES and nothing else. The couch and dresser already stand in the
- * scene as static geometry and stay static until Phase 3 ("heavy object"), because a
- * couch that can be grabbed before the heavy-handling model exists would be judged on
- * the wrong terms — it would feel like a very large box, which is exactly the answer
- * §6.3 says the game must not give.
+ * §29.1 sets the build order: "make one box feel good before adding furniture variety",
+ * then "make one heavy shared object feel good before building missions". Phase 2 defined
+ * BOXES only; Phase 3 adds the couch and dresser and makes them dynamic. The couch was
+ * deliberately left static until now, because a couch grabbable under the Phase 2 model
+ * would have felt like a very large box — exactly the answer §6.3 says never to give.
  *
  * §7.1 permits "exaggerated, stable mass tuning rather than literal kilograms when
  * realism harms feel", so `mass` is in TUNED UNITS that start life near kg. A real
@@ -63,6 +62,70 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['container'],
     colour: 0xa8834e,
     cargoHints: [],
+    disassembly: [],
+  },
+
+  /* THE Phase 3 object. §7.1 gives couch_3seat_01 as its worked example, dimensions and
+   * all, and §6.3 puts a couch in the HEAVY tier: "one drags or pivots; two or a tool
+   * preferred". Those two lines together are the whole phase.
+   *
+   * The numbers land there without being forced. Lifting 90 kg needs 883 N; one hand caps
+   * at 750 N, so a lone mover can only DRAG it. Two hands reach 1237 N and can just lift
+   * it, and braced 2227 N is genuinely comfortable. Nothing refuses; the cost changes.
+   *
+   * Dragging is bounded by the SPRING, not the cap: at GRIP.maxStretch the spring delivers
+   * 900 x 0.70 = 630 N, so floor friction has to sit well under that. See the friction
+   * note below — it was 0.62 and the couch would not move at all. */
+  couch_3seat_01: {
+    id: 'couch_3seat_01',
+    prefab: 'couch_3seat',
+    massClass: 'heavy',
+    mass: 90,
+    dimensions: { x: 2.10, y: 0.85, z: 0.90 },
+    // Slightly forward of centre: a couch's mass sits in the back and base, and an
+    // off-centre COM is what makes WHERE you grab it matter (§6.2, §26.2).
+    centerOfMassOffset: { x: 0, y: -0.12, z: 0.06 },
+    /* Friction 0.35, arrived at by measurement rather than by taste.
+     *
+     * This began at 0.62 — rubber-on-concrete — which was survivable only while grip forces
+     * were compounding every step and were therefore ~60x too strong. Once that bug was
+     * fixed the couch became immovable, which is precisely the "hard denial" §25.2's gate
+     * forbids and §2.1 rules out: "allow awkward solo dragging of objects intended for two
+     * players".
+     *
+     * MEASURED with real forces: a one-handed drag develops about 358 N before the grip
+     * gives way. 0.45 resists 397 N (still stuck), 0.35 resists 309 N (drags, slowly).
+     * 0.35 is also the honest figure for a fabric-and-wood base on a hard floor, and §9.1's
+     * furniture sliders exist to reduce it further still. */
+    physics: { friction: 0.35, restitution: 0.02, linearDamping: 0.2, angularDamping: 0.8 },
+    grip: { forceMult: 1.0, surface: 'fabric' },
+    fragility: 'normal',
+    replacementValue: 900,
+    surfaceTags: ['fabric', 'furniture'],
+    tags: ['furniture', 'twoPersonPreferred'],
+    colour: 0x8a5a4a,
+    cargoHints: ['heavy-low'],
+    disassembly: [],
+  },
+
+  /* The middle rung, so "heavy" is not a single data point. 55 kg is liftable one-handed
+   * (540 N against a 750 N cap) but slow and unbalancing — the awkward tier §6.3 describes
+   * as "one player awkward". */
+  dresser_01: {
+    id: 'dresser_01',
+    prefab: 'dresser',
+    massClass: 'heavy',
+    mass: 55,
+    dimensions: { x: 1.10, y: 0.85, z: 0.50 },
+    centerOfMassOffset: { x: 0, y: -0.08, z: 0 },
+    physics: { friction: 0.68, restitution: 0.02, linearDamping: 0.18, angularDamping: 0.75 },
+    grip: { forceMult: 1.0, surface: 'wood' },
+    fragility: 'normal',
+    replacementValue: 320,
+    surfaceTags: ['wood', 'furniture'],
+    tags: ['furniture'],
+    colour: 0x9a7a4e,
+    cargoHints: ['heavy-low'],
     disassembly: [],
   },
 });
@@ -120,3 +183,10 @@ export function validateAllDefs() {
   }
   return out;
 }
+
+/** Phase 3's heavy objects. They replace the static couch and dresser meshes that stood in
+ *  the scene for Phases 0-2; the scene no longer builds those, so nothing is duplicated. */
+export const PHASE3_SPAWNS = Object.freeze([
+  { def: 'couch_3seat_01', x: 0.00, y: 0.44, z: 1.60, yaw: 0.0 },
+  { def: 'dresser_01',     x: 3.00, y: 0.44, z: 1.20, yaw: 0.0 },
+]);

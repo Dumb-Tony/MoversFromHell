@@ -56,6 +56,7 @@ export class DebugOverlay {
       ['bodies', `${extra.bodies || 0} rigid · ${extra.constraints || 0} constraints · ${extra.contacts || 0} contacts`],
       ['phase', `${s.phase} · work ${fmt(s.elapsedWorkMs)} / est ${fmt(s.estimateMs)}`],
       ['input', `${s.inputContext} · ${g.input ? g.input.activeDevice : '—'}${g.input && g.input.pointerLocked ? ' · locked' : ''}`],
+      ['carry', extra.carry || '—'],
       ['session', `${Object.keys(s.players).length} player(s) · seed ${s.seed} · ${s.paused ? 'PAUSED' : 'running'}`],
       ['build', `${BUILD.label} · ${BUILD.date}`],
     ];

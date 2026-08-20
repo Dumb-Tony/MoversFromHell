@@ -105,6 +105,34 @@ export class PhysicsWorld {
     return this;
   }
 
+  /* FORCES IN RAPIER PERSIST AND COMPOUND — MEASURED, 2026-08-19, 0.20.0.
+   *
+   * `addForce` / `addForceAtPoint` do NOT apply for one step. They add to an accumulator
+   * that is re-applied on EVERY subsequent step until it is reset, and calling them again
+   * adds to it rather than replacing it. Measured on a 10 kg body with a nominal 100 N:
+   *
+   *   addForce once, 60 steps, no reset             10.0  m/s   (a steady 1 s push)
+   *   addForce EVERY step, 60 steps, no reset      312.6  m/s   (compounding, ~60x)
+   *   resetForces before each addForce              16.2  m/s   (correct, no compounding)
+   *   resetForces AFTER world.step()                10.1  m/s   (does NOT clear it)
+   *
+   * A per-step clamp on the value passed in is therefore worthless on its own — §6.4's
+   * bound was being enforced on a number that was then added to an unbounded running
+   * total. Anything that applies a force must call clearForces() first, in the same step.
+   */
+
+  /** Zero the accumulated force and torque on every dynamic body. MUST be called each step
+   *  BEFORE any system applies forces — see the note above; resetting afterwards does not
+   *  work. main.js calls this at the top of the grip system, which is the first thing in
+   *  the step order that applies any force. */
+  clearForces() {
+    this.world.bodies.forEach((body) => {
+      if (!body.isDynamic()) return;
+      body.resetForces(false);
+      body.resetTorques(false);
+    });
+  }
+
   /** One fixed step. Called from inside the GameClock's step callback, never elsewhere. */
   step() {
     this.world.step(this.eventQueue);

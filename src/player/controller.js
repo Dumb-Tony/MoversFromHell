@@ -10,13 +10,18 @@
  * knock the player out of that mode into stumble or ragdoll. Phase 1 builds the controller
  * half; the reaction half arrives when there are impulses to react to.
  *
- * STATES (§5.1's table). Phase 1 enters grounded, braced, airborne and climbing, plus the
- * §18.3 recovery path. `stumbling`, `ragdoll` and `pinned` are declared so the vocabulary
- * is fixed, and are NOT entered yet — nothing can currently apply the impulses that would
- * justify them, and a state that can never be left is worse than one that never starts.
+ * STATES (§5.1's table). Phase 1 added grounded, braced, airborne and climbing plus the
+ * §18.3 recovery path; Phase 3 adds STUMBLING and RAGDOLL, now that there is something
+ * heavy enough to unbalance a mover. `pinned` remains declared and unentered — it needs an
+ * object to trap the player under, which arrives with the Phase 5 house.
+ *
+ * The ragdoll is a TIMED KNOCKDOWN, not a simulated jointed body: the mover is dropped and
+ * immobilised for §5.1's 1-3 seconds and then gets up. §5.1 also asks for "physical body;
+ * limited crawl/grab", which this does not do. Recorded in KNOWN_ISSUES rather than
+ * pretended otherwise — a real ragdoll is Unity-side work (§24.2).
  */
 
-import { PLAYER, RECOVERY, SIM } from '../config.js';
+import { PLAYER, RECOVERY, SIM, CARRY } from '../config.js';
 import { GROUP_PRESETS } from '../physics/world.js';
 
 export const LOCOMOTION = Object.freeze({
@@ -75,6 +80,87 @@ export class PlayerController {
 
     this._climb = null;   // { fromY, toY, fromX, toX, fromZ, toZ, elapsed, duration }
     this._vel = { x: 0, z: 0 };   // horizontal velocity, m/s
+
+    /* ---- Phase 3: carrying a heavy thing (§5.1 stumble, §5.2 exert, §6.2 pull) --------
+     * Nothing here ever refuses an action. §25.2's gate is "weight legible without HARD
+     * DENIAL" and §2.1 says to "allow awkward solo dragging of objects intended for two
+     * players", so every field below expresses weight as COST — slower, less stable, more
+     * tiring — and never as a veto. */
+    /** Total mass currently held, set each step by the grip system. */
+    this.carriedMass = 0;
+    /** Horizontal force currently being resisted, N. Set by applyCarry. */
+    this.resistedForce = 0;
+    /** Velocity the held object is dragging the body at, m/s. §6.2's "pulls players
+     *  harder" — this is the single thing that makes weight FELT rather than reported. */
+    this.pull = { x: 0, z: 0 };
+    /** §5.1 imbalance, 0..1+. Crossing CARRY.stumbleAt is stumbling; CARRY.knockdownAt
+     *  puts the mover on the floor. NOT a hit-point bar: it falls fast when comfortable. */
+    this.imbalance = 0;
+    /** §5.2 exertion, 0..1. Reduces the grip force cap while working hard, recovers
+     *  quickly. Explicitly not a stamina bar — it never blocks anything. */
+    this.exertion = 0;
+    this._downMs = 0;         // remaining knockdown time
+    this.knockdowns = 0;
+    /** Set by the grip system when it wants the mover to let go (knocked down). */
+    this.onForcedRelease = null;
+  }
+
+  /** Called by the grip system each step, before step(): how much is being held and what
+   *  reaction force the hands are putting into the body. §6.2's factor list ends with the
+   *  object pulling back, and this is that. */
+  applyCarry(carriedMass, reactionX, reactionZ, stepMs) {
+    this.carriedMass = carriedMass;
+    // Horizontal force the mover is resisting — what dragging costs, as opposed to what
+    // carrying costs. See CARRY.dragForceRef.
+    this.resistedForce = Math.hypot(reactionX, reactionZ);
+    const dt = stepMs / 1000;
+    // The reaction is a force on a body of PLAYER.mass; integrate it as a velocity and let
+    // it decay, so a heavy object tugs the mover along rather than teleporting them.
+    this.pull.x += (reactionX / PLAYER.mass) * dt;
+    this.pull.z += (reactionZ / PLAYER.mass) * dt;
+    const decay = Math.max(0, 1 - CARRY.pullDamping * dt);
+    this.pull.x *= decay;
+    this.pull.z *= decay;
+    const sp = Math.hypot(this.pull.x, this.pull.z);
+    if (sp > CARRY.maxPullSpeed) {
+      const k = CARRY.maxPullSpeed / sp;
+      this.pull.x *= k; this.pull.z *= k;
+    }
+  }
+
+  /** §6.2: carried mass slows the mover. Floored so a heavy object is punishing but never
+   *  a full stop — a mover who cannot move at all has been told "no" (§2.1). */
+  get loadSpeedMult() {
+    // Two costs, not one: weight you are SUPPORTING and force you are RESISTING. A carried
+    // couch bills the first; a dragged one bills the second. Without the drag term a mover
+    // walks away from what they are pulling at full speed and simply loses it.
+    const fromMass = this.carriedMass / CARRY.loadRef;
+    const fromDrag = (this.resistedForce || 0) / CARRY.dragForceRef;
+    return Math.max(CARRY.minSpeedMult, 1 / (1 + fromMass + fromDrag));
+  }
+
+  /** True while §5.1's stumbling state is active. */
+  get stumbling() { return this.imbalance >= CARRY.stumbleAt && !this._downMs; }
+  get knockedDown() { return this._downMs > 0; }
+
+  /** §5.2: the fraction of full grip strength currently available. Falls while exerted,
+   *  recovers fast. Read by the grip system when it computes its cap. */
+  get strengthFraction() { return 1 - CARRY.exertForcePenalty * this.exertion; }
+
+  /** Put the mover on the floor (§5.1 ragdoll entry: major impact, or losing balance
+   *  entirely). Grips are dropped — that is the consequence, and it is a physical one. */
+  knockDown(reason = 'lost balance') {
+    if (this._downMs > 0) return false;
+    this._downMs = PLAYER.ragdollMinSeconds * 1000 +
+      Math.min(1, this.imbalance - CARRY.knockdownAt) * (PLAYER.ragdollMaxSeconds - PLAYER.ragdollMinSeconds) * 1000;
+    this.state = LOCOMOTION.RAGDOLL;
+    this.imbalance = 0;
+    this._vel.x = 0; this._vel.z = 0;
+    this.pull.x = 0; this.pull.z = 0;
+    this.knockdowns++;
+    this.lastKnockdownReason = reason;
+    if (this.onForcedRelease) this.onForcedRelease(reason);
+    return true;
   }
 
   /** Feet position. The body's translation is its CENTRE, so this is the useful one:
@@ -122,6 +208,29 @@ export class PlayerController {
 
     if (intent.recover) this.recoverNow('player request');
 
+    // §5.1 ragdoll: "physical body; limited crawl/grab; auto or player recovery in 1-3
+    // seconds". The recovery timer is real; the physical body is not — the mover is
+    // immobilised and dropped rather than simulated as a jointed skeleton. Recorded as a
+    // limitation rather than pretended otherwise; a real ragdoll is a Unity-side job (§24.2).
+    if (this._downMs > 0) {
+      this._downMs -= stepMs;
+      this._vel.x = 0; this._vel.z = 0;
+      this.velocityY += SIM.gravity * dt;
+      this.controller.computeColliderMovement(this.collider, { x: 0, y: this.velocityY * dt, z: 0 },
+        undefined, GROUP_PRESETS.player);
+      const mv = this.controller.computedMovement();
+      const t0 = this.body.translation();
+      this.body.setNextKinematicTranslation({ x: t0.x + mv.x, y: t0.y + mv.y, z: t0.z + mv.z });
+      this.grounded = this.controller.computedGrounded();
+      if (this.grounded && this.velocityY < 0) this.velocityY = 0;
+      if (this._downMs <= 0) { this._downMs = 0; this.state = LOCOMOTION.GROUNDED; }
+      else this.state = LOCOMOTION.RAGDOLL;
+      this._bankStability(stepMs);
+      return this.state;
+    }
+
+    this._updateBalance(stepMs, intent);
+
     if (this._climb) { this._stepClimb(dt); return this.state; }
 
     // ---- desired horizontal velocity, camera-relative (§4.4) ----
@@ -136,11 +245,17 @@ export class PlayerController {
     let speed = intent.run ? PLAYER.runSpeed : PLAYER.walkSpeed;
     if (intent.brace) speed = PLAYER.walkSpeed * PLAYER.braceSpeedMult;
 
+    // §6.2: what you are carrying slows you, and §5.1's stumbling reduces control further.
+    speed *= this.loadSpeedMult;
+    if (this.stumbling) speed *= CARRY.stumbleSpeedMult;
+
     const targetVx = wx * speed, targetVz = wz * speed;
 
     // Acceleration is much lower in the air: §5.1 wants responsive ground movement, not
     // helicopter control over a fall.
-    const accel = (this.grounded ? PLAYER.acceleration : PLAYER.airAcceleration) * dt;
+    let accelPerSec = this.grounded ? PLAYER.acceleration : PLAYER.airAcceleration;
+    if (this.stumbling) accelPerSec *= CARRY.stumbleAccelMult;
+    const accel = accelPerSec * dt;
     this._vel.x = approach(this._vel.x, targetVx, accel);
     this._vel.z = approach(this._vel.z, targetVz, accel);
 
@@ -165,10 +280,13 @@ export class PlayerController {
     }
 
     // ---- ask the controller what movement is actually legal ----
+    // The pull is ADDED to the intended movement rather than replacing it, so a mover
+    // dragging something heavy is displaced by it while still steering — §5.1's "the player
+    // should not wrestle the avatar", applied to being wrestled by the furniture instead.
     const desired = {
-      x: this._vel.x * dt,
+      x: (this._vel.x + this.pull.x) * dt,
       y: this.velocityY * dt,
-      z: this._vel.z * dt,
+      z: (this._vel.z + this.pull.z) * dt,
     };
     /* Pass the player's interaction group. The character controller does NOT consult the
      * colliders' own groups by default, so a held object — which has removed PLAYER from
@@ -199,10 +317,53 @@ export class PlayerController {
   }
 
   _updateState(intent) {
-    if (this._climb) this.state = LOCOMOTION.CLIMBING;
+    if (this._downMs > 0) this.state = LOCOMOTION.RAGDOLL;
+    else if (this._climb) this.state = LOCOMOTION.CLIMBING;
     else if (!this.grounded) this.state = LOCOMOTION.AIRBORNE;
+    else if (this.stumbling) this.state = LOCOMOTION.STUMBLING;
     else if (intent.brace) this.state = LOCOMOTION.BRACED;
     else this.state = LOCOMOTION.GROUNDED;
+  }
+
+  /** §5.1 imbalance and §5.2 exertion, both updated once per step.
+   *
+   *  Imbalance rises from two things: carrying more than is comfortable, and being yanked
+   *  sideways by what you are carrying. It falls quickly the moment either eases — §5.1
+   *  says recovery is fast, and §5.2 insists heavy work should "motivate a partner or tool,
+   *  not idle waiting". Nothing here stops the mover doing anything; it changes how well. */
+  _updateBalance(stepMs, intent) {
+    const dt = stepMs / 1000;
+
+    let rise = 0;
+    if (this.carriedMass > CARRY.comfortableMass) {
+      // Linear in how far past comfortable the load is: at twice comfortable, the full rate.
+      rise += (this.carriedMass / CARRY.comfortableMass - 1) * CARRY.imbalanceRise;
+    }
+    rise += Math.hypot(this.pull.x, this.pull.z) * CARRY.imbalanceFromPull;
+
+    // §5.1: braced is explicitly "higher grip and impulse resistance", so bracing is the
+    // answer to being unbalanced — it halves what builds up.
+    if (intent && intent.brace) rise *= 0.5;
+
+    if (rise > 0) this.imbalance += rise * dt;
+    else this.imbalance -= CARRY.imbalanceFall * dt;
+    if (this.imbalance < 0) this.imbalance = 0;
+
+    if (this.imbalance >= CARRY.knockdownAt) this.knockDown('overloaded');
+
+    // §5.2 exertion: driven by the grip system through noteExertion(); it decays here.
+    if (!this._exertedThisStep) {
+      this.exertion -= PLAYER.exertRecoverPerSecond * dt;
+      if (this.exertion < 0) this.exertion = 0;
+    }
+    this._exertedThisStep = false;
+  }
+
+  /** Called by the grip system when a hand is working near its cap (§5.2). */
+  noteExertion(stepMs) {
+    this.exertion += PLAYER.exertDrainPerSecond * (stepMs / 1000);
+    if (this.exertion > 1) this.exertion = 1;
+    this._exertedThisStep = true;
   }
 
   // ---- mantle ------------------------------------------------------------------------

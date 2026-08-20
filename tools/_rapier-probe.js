@@ -1,57 +1,52 @@
-/* Rapier API probe — a DIAGNOSTIC, not a test. Keep it.
- *
- * Same role as AirportBaggageCrew\tools\_raf.js (Dev\INDEX.md → Tooling & testing): a
- * throwaway-looking file that answers "what does this dependency actually do on this
- * machine". Re-run it after any Rapier version bump; every surprise it has already found
- * is recorded in src/physics/world.js.
- *
- *   powershell -ExecutionPolicy Bypass -File tools\smoketest.ps1 -Tests tools\_rapier-probe.js
- *
- * Findings so far (Rapier 0.20.0, 2026-08-19):
- *   - castRay reads a pipeline populated ONLY by world.step(); a cast before the first
- *     step returns null, and a collider created this step is invisible until the next one.
- *   - the hit distance is hit.timeOfImpact; hit.toi is undefined despite most examples.
- *   - world.bodies.len() / world.colliders.len() / world.impulseJoints.len() are correct;
- *     world.numRigidBodies() and world.numColliders() do not exist.
- */
+/* Probe: what actually clears a persistent Rapier force, and when? */
 import { initPhysics, PhysicsWorld } from '../src/physics/world.js';
-
 const lines = [];
 const out = (s) => lines.push(s);
 try {
   const R = await initPhysics();
-  out('rapier version                 ' + (R.version ? R.version() : '?'));
-
   const p = new PhysicsWorld(R);
   p.addGround();
-  out('world.timestep                 ' + p.world.timestep);
+  let x = 0;
+  const mk = () => {
+    const b = p.world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(x += 10, 5, 0).setGravityScale(0));
+    p.world.createCollider(R.ColliderDesc.cuboid(0.25, 0.25, 0.25).setMass(10), b);
+    return b;
+  };
+  const run = (label, fn) => {
+    const b = mk();
+    fn(b);
+    out(label.padEnd(46) + b.linvel().x.toFixed(4) + ' m/s');
+  };
 
-  const mk = () => new R.Ray({ x: 0, y: 5, z: 0 }, { x: 0, y: -1, z: 0 });
-  out('castRay before any step        ' + (p.world.castRay(mk(), 20, true) ? 'HIT' : 'no hit (expected)'));
-  p.step();
-  const hit = p.world.castRay(mk(), 20, true);
-  out('castRay after one step         ' + (hit ? 'hit at ' + hit.timeOfImpact : 'NO HIT (unexpected!)'));
-  if (hit) out('  timeOfImpact=' + hit.timeOfImpact + '  toi=' + hit.toi + ' (toi should be undefined)');
-
-  out('counters  bodies/colliders/joints  ' +
-      p.world.bodies.len() + '/' + p.world.colliders.len() + '/' + p.world.impulseJoints.len());
-
-  const cc = p.world.createCharacterController(0.02);
-  const need = ['setUp', 'enableAutostep', 'enableSnapToGround', 'setMaxSlopeClimbAngle',
-                'setMinSlopeSlideAngle', 'setSlideEnabled', 'setApplyImpulsesToDynamicBodies',
-                'computeColliderMovement', 'computedMovement', 'computedGrounded'];
-  const missing = need.filter((m) => typeof cc[m] !== 'function');
-  out('character controller           ' + (missing.length ? 'MISSING: ' + missing.join(',') : 'all methods present'));
-
-  // Phases 2 and 7 need these; check now rather than discovering it mid-phase.
-  for (const sym of ['JointData', 'EventQueue', 'ActiveEvents', 'QueryFilterFlags']) {
-    out('  ' + sym.padEnd(28) + typeof R[sym]);
-  }
-} catch (e) {
-  out('THREW: ' + (e && e.message));
-  out((e && e.stack || '').split('\n').slice(0, 4).join('\n'));
-}
-
+  out('10 kg body, 100 N, 60 steps. One-step-only would be 0.167 m/s.');
+  out('');
+  run('addForce once, no reset', (b) => {
+    b.addForce({ x: 100, y: 0, z: 0 }, true);
+    for (let i = 0; i < 60; i++) p.world.step();
+  });
+  run('addForce once, resetForces(false) AFTER step', (b) => {
+    b.addForce({ x: 100, y: 0, z: 0 }, true);
+    for (let i = 0; i < 60; i++) { p.world.step(); b.resetForces(false); }
+  });
+  run('addForce once, resetForces(true) AFTER step', (b) => {
+    b.addForce({ x: 100, y: 0, z: 0 }, true);
+    for (let i = 0; i < 60; i++) { p.world.step(); b.resetForces(true); }
+  });
+  run('resetForces BEFORE step, then addForce each step', (b) => {
+    for (let i = 0; i < 60; i++) { b.resetForces(true); b.addForce({ x: 100, y: 0, z: 0 }, true); p.world.step(); }
+  });
+  run('addForce each step, no reset (60x compounding)', (b) => {
+    for (let i = 0; i < 60; i++) { b.addForce({ x: 100, y: 0, z: 0 }, true); p.world.step(); }
+  });
+  run('applyImpulse once (one-shot, for reference)', (b) => {
+    b.applyImpulse({ x: 100 / 60, y: 0, z: 0 }, true);
+    for (let i = 0; i < 60; i++) p.world.step();
+  });
+  out('');
+  out('A steady 100 N on 10 kg for 1 s = 10 m/s. That is the CORRECT answer for a');
+  out('force meant to act continuously — the question is only whether it keeps acting');
+  out('after you stop asking, and whether repeated addForce calls compound.');
+} catch (e) { out('THREW: ' + (e && e.message) + '\n' + (e.stack||'').split('\n').slice(0,3).join('\n')); }
 const pre = document.createElement('pre');
 pre.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#06080c;color:#cfe;font:12px monospace;padding:12px;white-space:pre';
 pre.textContent = '==MFHTEST-BEGIN==\n' + lines.join('\n') + '\n\nALL-PASS  probe\n==MFHTEST-END==';

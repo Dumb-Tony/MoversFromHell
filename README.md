@@ -3,9 +3,10 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 2 of 13**: you can pick boxes up and carry them. WASD move, Shift
-sprint, Space jump/mantle, **LMB/RMB to grab with each hand**, R recover, F3 stats.
-Grab a box by a corner and it swings — that is the grip model, not a bug.
+*is* the site. **Phase 3 of 13**: boxes, and now a 90 kg couch that argues back. WASD move,
+Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, R recover, F3
+stats. Try carrying the couch on your own — it will slow you down, unbalance you, and
+eventually put you on the floor. That is the design, not a bug.
 
 ---
 
@@ -69,7 +70,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 2 complete
+## Current state — Phase 3 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -78,15 +79,25 @@ GDD §25.2 defines a 13-phase roadmap.
 | 0. Scaffold | loads locally; stable frame/step | done — 118 assertions |
 | 1. Movement | responsive indoors and on ramp | done — 61 assertions |
 | 2. One box | controllable; no wall ghosting | done — 66 assertions |
-| 3. Heavy object | weight legible without hard denial | next |
+| 3. Heavy object | weight legible without hard denial | done — 61 assertions |
+| 4. Cooperative seam | multiple grips combine predictably | next |
 
-**245 assertions across three suites, all passing.**
+**306 assertions across four suites, all passing.**
 
-![Phase 2](docs/phase2-grip.png)
+![Phase 3](docs/phase3-heavy.png)
 
-A mover holding a box, reticle showing the grip state. Behind: the three doorways, the
-mantle ledges (lime climbable, red refuses) and the 2.10 m couch, at true scale on a metre
-grid.
+A mover with both hands on the 90 kg couch — the HUD reads "two hands". Behind: the three
+doorways, the mantle ledges (lime climbable, red refuses), all at true scale on a metre grid.
+
+### What Phase 3 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| Heavy objects | `src/objects/definitions.js` | The §7.1 couch (90 kg) and a dresser (55 kg), both dynamic. |
+| Load, pull, balance | `src/player/controller.js` | Carried weight slows you; the object's reaction tugs you; imbalance builds and can put you on the floor. |
+| Stumble + knockdown | `src/player/controller.js` | §5.1's STUMBLING and RAGDOLL states, now reachable. Being knocked down drops what you held. |
+| Exertion | `src/player/controller.js` | §5.2's leverage modifier — reduces grip strength while working hard, recovers fast, never blocks an action. |
+| Force reset | `src/physics/world.js` | Rapier forces persist and compound; `clearForces()` is why the §6.4 bound is now real. |
 
 ### What Phase 2 added
 
@@ -159,8 +170,12 @@ Names were kept so the lineage stays greppable.
 ## Known limitations
 
 - **Must be served over http.** ES modules are blocked on `file://`. Use `play.bat`.
-- **Nothing can be picked up yet.** Grabbing is Phase 2; §5.1's stumble and ragdoll states
-  are declared but unreachable until Phase 3.
+- **Solo dragging of the couch is weak.** It moves but does not travel — see
+  [KNOWN_ISSUES](docs/KNOWN_ISSUES.md). Lifting it with two braced hands works.
+- **The ragdoll is a timed knockdown**, not a simulated jointed body. §5.1 asks for one;
+  that is Unity-side work.
+- **Rapier forces persist and compound** until reset — the single most surprising thing
+  found so far. See `src/physics/world.js` for the measurements.
 - **Rapier raycasts need a step first.** `castRay` reads a pipeline only `world.step()`
   populates, so a body spawned this step is invisible to rays until the next one. Measured;
   see `src/physics/world.js`.

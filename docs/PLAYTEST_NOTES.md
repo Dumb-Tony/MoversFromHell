@@ -80,3 +80,34 @@ movers on one object, forces adding, opposing inputs twisting it. Phase 4.
 
 **Would I tell a friend about it?** Not yet. But there is now a thing to describe, which
 was not true after Phase 1: "you can pick a box up and it swings if you grab it wrong."
+
+---
+
+## Phase 3 — heavy object — 2026-08-19
+
+**First build where an object argues back.** Author's note; still no external playtest.
+
+**More fun, clearly.** The couch is a different KIND of thing from a box, and it took no
+special-casing to make it so — the same grip, with mass and a reaction force, produces an
+object you approach differently. Grabbing it one-handed and feeling the mover get tugged
+sideways is the first moment this has felt like the game the GDD describes rather than a
+physics demo.
+
+**The best accident.** Being knocked down drops what you were carrying, because that is the
+consequence rather than a state flag. Overreaching with the couch and watching it land on
+the driveway while the mover picks themselves up is genuinely funny, and it is §18.1's
+"escalate through wobble → warning → failure → new problem" happening without anyone
+authoring a wobble.
+
+**Actively worse.** Dragging is unsatisfying. You can get the couch moving but not keep it
+moving, so it shuffles. Right now the honest way to move a couch is to lift it with two
+braced hands and waddle, which is not what §6.3 describes. This is the thing to fix before
+Phase 4, because co-op will be judged against it.
+
+**Cannot be judged yet.** Everything two-person. §6.2's "mover count — forces add; opposing
+inputs can twist objects or drag teammates" is the payoff the whole heavy-object model is
+building toward, and it is Phase 4.
+
+**Would I tell a friend about it?** Yes, one thing: "I tried to carry a couch on my own and
+it knocked me over." That is the first sentence out of this project that sounds like the
+game it is meant to be.

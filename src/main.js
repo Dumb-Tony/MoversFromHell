@@ -32,7 +32,7 @@ import { DebugOverlay } from './dev/debugOverlay.js';
 import { initPhysics, PhysicsWorld } from './physics/world.js';
 import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
-import { PHASE2_SPAWNS } from './objects/definitions.js';
+import { PHASE2_SPAWNS, PHASE3_SPAWNS } from './objects/definitions.js';
 import { GripSystem, HANDS } from './player/grip.js';
 import { Hud } from './ui/hud.js';
 import { BUILD } from './config.js';
@@ -76,7 +76,10 @@ async function boot() {
   // ---- movable objects (Phase 2) --------------------------------------------------------
   const registry = new ObjectRegistry(physics, world.scene);
   for (const s of PHASE2_SPAWNS) registry.spawn(s.def, s);
-  const grips = new GripSystem(physics, registry, rig, camera, bus, player);
+  for (const s of PHASE3_SPAWNS) registry.spawn(s.def, s);
+  // attachTo wires the body's forced-release hook: being knocked down drops what you were
+  // carrying, which is §5.1's consequence rather than a cosmetic state change.
+  const grips = new GripSystem(physics, registry, rig, camera, bus, player).attachTo(player);
   // New colliders are invisible to raycasts until the next step (MEASURED — world.js), and
   // the very first grab probe happens before any step has run.
   physics.primeQueries();
@@ -207,6 +210,9 @@ async function boot() {
       bodies: physics.stats.bodies,
       constraints: physics.stats.constraints,
       contacts: physics.stats.contacts,
+      // §5.1/§5.2 made visible: what you are holding, how close to falling over, how tired.
+      carry: `${player.carriedMass.toFixed(0)} kg · speed x${player.loadSpeedMult.toFixed(2)} · ` +
+             `balance ${player.imbalance.toFixed(2)} · exert ${player.exertion.toFixed(2)}`,
     });
 
     requestAnimationFrame(loop);

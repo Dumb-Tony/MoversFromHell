@@ -3,6 +3,78 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 3 — heavy object — 2026-08-19
+
+**Gate (§25.2):** "Mass, leverage, drag, brace, stumble" → **weight legible without hard
+denial**. **PASSED** — 61 assertions (306 across four suites).
+
+**Hypothesis:** weight becomes legible when the object pushes back through the CONTROLS —
+slower movement, a body being tugged, balance you can lose — rather than through a number
+on screen. And §2.1's "the game should rarely say no" means every one of those must be a
+cost, never a refusal.
+
+**Added**
+- `couch_3seat_01` (90 kg) and `dresser_01` (55 kg) as dynamic entities. The couch is §7.1's
+  own worked example, at its own dimensions. Both stood in the scene as static meshes for
+  three phases; §29.1's build order said the couch could not be grabbed until the
+  heavy-handling model existed, or it would have felt like a very large box.
+- `CARRY` config block, and on the mover: supported load, the reaction pull, imbalance,
+  knockdown and exertion.
+- §5.1's STUMBLING and RAGDOLL states are now entered. `pinned` still is not — it needs an
+  object to trap the mover under, which arrives with the Phase 5 house.
+- `tools/m3-tests.js` — 61 assertions.
+
+**THE BUG OF THE PHASE: Rapier forces persist and compound.**
+`addForce` / `addForceAtPoint` do not apply for one step. They add to an accumulator that is
+re-applied on EVERY subsequent step until reset, and calling them again ADDS to it. Measured
+on a 10 kg body with a nominal 100 N:
+
+| pattern | result |
+|---|---|
+| addForce once, 60 steps, no reset | 10.0 m/s (a steady 1 s push) |
+| addForce EVERY step, 60 steps, no reset | **312.6 m/s** — compounding, ~60x |
+| resetForces before each addForce | 16.2 m/s — correct |
+| resetForces AFTER world.step() | 10.1 m/s — does **not** clear it |
+
+Every grip since Phase 2 had been applying a force that grew without bound. §6.4's cap was
+being enforced on a number that was then added to an unbounded running total — the clamp was
+real, the total was not. This is behind a great deal of Phase 2's flying-object behaviour,
+and it means several Phase 2 assertions were passing for the wrong reason. Fixed with
+`PhysicsWorld.clearForces()`, called at the top of the grip step; the measurements are in
+the source so nobody re-derives them.
+
+**Three design errors it exposed, all found by tests**
+1. **Dragging billed the mover for the object's full mass.** The floor holds a dragged couch
+   up; the hands only supply horizontal force. Charging 90 kg made imbalance reach the
+   knockdown threshold in 1.5 s, so every drag ended with the mover flat on their back — the
+   forbidden hard denial, arriving by the back door. Load is now the mover's actual
+   SUPPORTING force, which makes §6.3's "one drags or pivots" true for free.
+2. **Dragging then cost nothing at all**, so the mover strolled off at 3 m/s and outran what
+   they were pulling (grip gone in 18 steps, mover 11.9 m away). Resisted force now slows
+   the mover too — `CARRY.dragForceRef`.
+3. **…and at first it slowed them to a standstill** (0.26 m in four seconds), because the
+   `pull` velocity already opposes motion and the speed penalty double-counted it. Calibrated
+   to 600 N.
+
+**Also fixed**
+- The couch's friction went 0.62 → 0.35. 0.62 was survivable only while forces were ~60x too
+  strong; with real forces the couch became immovable. 0.35 is also the honest figure for a
+  fabric-and-wood base on a hard floor, and §9.1's sliders exist to reduce it further.
+
+**Assertions rewritten, not deleted**
+- m2's "nothing heavy before Phase 3" was correct for Phase 2 and correctly obsolete the
+  moment Phase 3 added the couch. A test that pins a phase's SCOPE has a shelf life; it now
+  asserts the invariant underneath — every definition declares a class the config knows.
+- m2's "pulling away from a stuck box breaks the grip" tested one MECHANISM. Since the mover
+  is now slowed by resistance they often strain instead of tearing free, which is a fine
+  outcome. It now asserts the GUARANTEE: the box never crosses geometry.
+
+**Known shortfall, not papered over.** Sustained one-handed dragging of the couch does not
+work: it reaches 0.91 m/s but nets 8 mm, lurching and springing back. §6.3's "one drags or
+pivots" is half true. What IS asserted is that a lone mover can put 90 kg into motion at all
+— which is the no-hard-denial claim the gate makes. Written up in KNOWN_ISSUES with the
+numbers rather than hidden behind a threshold low enough to pass.
+
 ## Phase 2 — one box — 2026-08-19
 
 **Gate (§25.2):** "Freeform two-hand grip, collision, carry/drop" → **controllable; no

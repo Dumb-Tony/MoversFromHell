@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 2,
-  label: 'phase-2',
+  phase: 3,
+  label: 'phase-3',
   date: '2026-08-19',
 });
 
@@ -108,6 +108,10 @@ export const PLAYER = Object.freeze({
   mantleMaxHeight: 1.35,     // above this it is a wall, not a ledge
   mantleSeconds: 0.42,       // §5.1 "short"; long enough to read, short enough not to annoy
   mantleForwardClear: 0.45,  // required clear depth on top, so you never mantle into a wall
+  /** The mover's own mass, used to turn the reaction from a carried object into a pull on
+   *  the body (§6.2 "object mass ... pulls players harder"). */
+  mass: 78,
+
   /** §5.1 stumble/ragdoll thresholds. Entry is an imbalance measure, not a hit-point bar. */
   stumbleImpulse: 5.5,
   ragdollImpulse: 14,
@@ -116,6 +120,61 @@ export const PLAYER = Object.freeze({
   /** §5.2: overload reduces max force and adds tremble, but recovery is rapid. Not a bar. */
   exertRecoverPerSecond: 0.55,
   exertDrainPerSecond: 0.30,
+});
+
+/** §5.1 stumble, §5.2 exertion, §6.2 "pulls players harder" — the Phase 3 half of the
+ *  model, and the half that makes weight LEGIBLE. Validated: Phase 3.
+ *
+ *  §25.2's Phase 3 gate is "weight legible without HARD DENIAL", and §2.1 is explicit that
+ *  the game should rarely say no: "allow awkward solo dragging of objects intended for two
+ *  players". So nothing here forbids an action. A 90 kg couch stays liftable by one person
+ *  with two braced hands — it just slows them to a crawl, unbalances them, and drains what
+ *  they can hold, until they put it down or fall over. Difficulty is expressed as cost and
+ *  consequence, never as a refusal. */
+export const CARRY = Object.freeze({
+  /** Carried mass at which walking speed roughly halves. speed *= 1/(1 + carried/loadRef),
+   *  so 9 kg costs ~17%, 55 kg ~45%, 90 kg ~67%. */
+  loadRef: 45,
+  /** Floor on the penalty, so a heavy object is punishing but never a full stop (§2.1). */
+  minSpeedMult: 0.22,
+
+  /** Horizontal force at which DRAGGING roughly halves walking speed.
+   *
+   *  Carrying is not the only way an object costs you. Dragging a couch loads almost no
+   *  weight — the floor holds it up — so the supported-mass penalty barely applies, and
+   *  without this the mover simply walks off at full speed and outruns what they are
+   *  pulling: MEASURED, the grip broke after 18 steps while the mover strolled 11.9 m.
+   *  Resisting force slows you exactly as carrying weight does. */
+  //  600, not the 240 first tried. The `pull` velocity ALREADY opposes motion, so a strong
+  //  speed penalty on top double-counts the same resistance and stops the mover dead —
+  //  measured 0.26 m of travel in four seconds at 240. This term exists only to stop a
+  //  mover outrunning what they are pulling; the pull itself does the rest.
+  dragForceRef: 600,
+
+  /** §6.2's reaction: the force the hand puts into the object also pulls the mover. This
+   *  is the single thing that makes weight FELT rather than merely reported. */
+  pullDamping: 3.2,          // per second; how fast the pull velocity decays
+  maxPullSpeed: 2.4,         // m/s — bounded, or a heavy object could fling the player
+
+  /** §5.1 stumbling. Imbalance is a 0..1+ measure, not a hit-point bar: it rises while
+   *  overloaded or while being yanked sideways, and falls quickly once the load is
+   *  comfortable again. Crossing 1 is "stumbling"; crossing knockdownAt puts the mover on
+   *  the floor. */
+  comfortableMass: 45,       // above this, imbalance starts to build
+  imbalanceRise: 0.85,       // per second at twice the comfortable mass
+  imbalanceFromPull: 0.55,   // per second per m/s of sideways pull
+  imbalanceFall: 1.5,        // per second when comfortable — §5.1 "recovery is fast"
+  stumbleAt: 1.0,
+  knockdownAt: 1.9,
+  /** §5.1 stumbling: "reduced control", not loss of control. */
+  stumbleSpeedMult: 0.55,
+  stumbleAccelMult: 0.45,
+
+  /** §5.2: "sustained overload may reduce maximum force ... but recovery is rapid".
+   *  Exertion is NOT a stamina bar — it never blocks an action, it only makes a hard hold
+   *  harder to keep, which is what motivates a partner or a tool. */
+  exertAt: 0.75,             // fraction of the force cap that counts as working hard
+  exertForcePenalty: 0.40,   // at full exertion the cap drops by this fraction
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */

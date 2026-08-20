@@ -114,3 +114,33 @@ does, the fix is to stop the player instead, which is a bigger change.
 
 **The couch and dresser are still static.** They stay that way until Phase 3, on §29.1's
 build order. Do not read their immovability as a bug.
+
+---
+
+## Phase 3 open items
+
+**Sustained one-handed dragging of the couch does not work.** This is the clearest gap
+against §6.3's "one drags or pivots", and it is not hidden behind a lenient assertion.
+MEASURED: pulling a 90 kg couch one-handed and unbraced develops up to 467 N (floor friction
+needs 309 N) and the couch reaches 0.91 m/s — but nets only 8 mm of travel. It lurches
+forward, the spring pulls it back, and the mover shuffles it rather than dragging it. What
+IS true, and what m3 E3 asserts, is that a lone mover can put 90 kg into motion at all,
+which is the no-hard-denial claim the gate actually makes. Candidate levers, none yet tried
+in anger: `GRIP.maxStretch` against `GRIP.spring` (the force available at full stretch is
+spring × maxStretch = 630 N and that is the real ceiling), `CARRY.dragForceRef`, or giving
+dragged objects a lower kinetic than static friction.
+
+**The ragdoll is a timed knockdown, not a simulated body.** §5.1 asks for "physical body;
+limited crawl/grab" during ragdoll. What exists is: the mover is dropped, immobilised for
+§5.1's 1–3 seconds, and gets up. The timing and the consequence (you drop what you were
+carrying) are real; the jointed physical body is not. A proper ragdoll is Unity-side work
+(§24.2) and would be wasted effort in the prototype.
+
+**`pinned` is still declared and unentered.** §5.1's table has it; nothing can trap the
+mover under an object until the Phase 5 house exists.
+
+**Tuning above this line is one person's guesses.** `CARRY`'s numbers were arrived at by
+measurement against the gate, not by play. Whether a 90 kg couch SHOULD knock a mover down
+after ~2 seconds, or whether bracing should feel like more than a 50% reduction, are
+playtest questions. The one that most needs an outside opinion is whether losing your
+balance reads as "I overreached" or as "the game took it away from me".
