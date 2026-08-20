@@ -4,8 +4,11 @@
 # block module loads on file:// (CORS). GDD §22.1 asked for "open index.html"; that is not
 # possible with modules, so this is the documented substitute. See README.
 #
-# Ports 8381-8390, chosen to sit clear of Chameleon (8321-8330), Something's Different
-# (8341-8350) and Airport Baggage Crew (8361-8370) so all four can run at once.
+# Ports 8381-8390. ⚠ THE RANGE IS NOT EXCLUSIVE ANY MORE — Tow Bros and Small Town
+# Emergency Services were created later and also scan from 8381, so this server routinely
+# lands on 8384 or higher. That is fine: it scans for a free port and PRINTS the one it
+# got. Read that line; never assume the first port in the range. Probing 8381 by hand once
+# reached Tow Bros and nearly got a link to the wrong game posted as this one.
 #   -NoBrowser   don't launch a browser tab (used by tools\smoketest.ps1)
 #   -Port <n>    try this exact port instead of scanning 8381-8390
 param([switch]$NoBrowser, [int]$Port = 0)
