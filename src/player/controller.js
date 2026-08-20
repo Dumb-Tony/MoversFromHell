@@ -17,6 +17,7 @@
  */
 
 import { PLAYER, RECOVERY, SIM } from '../config.js';
+import { GROUP_PRESETS } from '../physics/world.js';
 
 export const LOCOMOTION = Object.freeze({
   GROUNDED:  'grounded',
@@ -45,7 +46,8 @@ export class PlayerController {
         .setTranslation(spawn.x, spawn.y + PLAYER.height / 2, spawn.z));
 
     this.collider = physics.world.createCollider(
-      R.ColliderDesc.capsule(PLAYER.capsuleHalfHeight, PLAYER.radius), this.body);
+      R.ColliderDesc.capsule(PLAYER.capsuleHalfHeight, PLAYER.radius)
+        .setCollisionGroups(GROUP_PRESETS.player), this.body);
 
     this.controller = physics.world.createCharacterController(PLAYER.characterOffset);
     this.controller.setUp({ x: 0, y: 1, z: 0 });
@@ -168,7 +170,13 @@ export class PlayerController {
       y: this.velocityY * dt,
       z: this._vel.z * dt,
     };
-    this.controller.computeColliderMovement(this.collider, desired);
+    /* Pass the player's interaction group. The character controller does NOT consult the
+     * colliders' own groups by default, so a held object — which has removed PLAYER from
+     * its filter precisely so its carrier cannot crush it — was still being shoved by
+     * setApplyImpulsesToDynamicBodies. MEASURED: a box put down beside the player left at
+     * 7 m/s, and the controller fought every attempt to lift one. Handing the filter in
+     * makes the groups authoritative for the controller too. */
+    this.controller.computeColliderMovement(this.collider, desired, undefined, GROUP_PRESETS.player);
     const corrected = this.controller.computedMovement();
 
     this.groundedLastStep = this.grounded;

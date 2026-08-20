@@ -100,3 +100,50 @@ html, body {
   white-space: nowrap;
 }
 #help b { color: var(--lime); }
+
+/* HUD — §21.1. Centre reticle only; nothing may grow a panel over the working area,
+   because judging whether an object fits through a gap is the entire game. §26.5 wants
+   states readable without colour, so each one changes SHAPE and carries a label too. */
+#hud { position: absolute; inset: 0; pointer-events: none; }
+
+#reticle {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+#reticle .dot {
+  width: 4px; height: 4px;
+  background: var(--paper);
+  border-radius: 50%;
+  opacity: 0.75;
+}
+/* Each hand is a bracket. Empty = thin and dim; ready = taller; holding = filled;
+   slipping = filled, wider, and pulsing — four visually distinct shapes. */
+#reticle .hand {
+  width: 3px; height: 10px;
+  background: var(--paper);
+  opacity: 0.30;
+  border-radius: 1px;
+  transition: height .12s ease, opacity .12s ease, background .12s ease, width .12s ease;
+}
+#reticle .hand.ready    { height: 16px; opacity: 0.70; }
+#reticle .hand.holding  { height: 22px; width: 5px; opacity: 1; background: var(--lime); }
+#reticle .hand.slipping { height: 26px; width: 7px; opacity: 1; background: var(--coral);
+                          animation: gripPulse .32s ease-in-out infinite alternate; }
+@keyframes gripPulse { from { opacity: .55; } to { opacity: 1; } }
+
+#grip-label {
+  position: absolute;
+  left: 50%; top: calc(50% + 26px);
+  transform: translateX(-50%);
+  font: 11px/1.4 Quicksand, system-ui, sans-serif;
+  letter-spacing: .04em;
+  color: var(--paper);
+  opacity: .75;
+  white-space: nowrap;
+}
+#grip-label.holding  { color: var(--lime); }
+#grip-label.slipping { color: var(--coral); font-weight: 700; opacity: 1; }

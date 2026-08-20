@@ -54,3 +54,29 @@ proves the controller is not the problem, not that the movement is good.
 
 **Nothing to tell a friend about yet**, which is the correct state for Phase 1 — §29.1 says
 make movement feel good before grabbing, and grabbing is where the stories start.
+
+---
+
+## Phase 2 — one box — 2026-08-19
+
+**First build where the game is about an object rather than about walking.** Author's note
+again; no external playtest yet.
+
+**More fun, and it is the first time that sentence means anything.** Picking a box up,
+turning, and putting it down somewhere else is already a small loop with a shape to it. The
+best moment is unplanned: because the hold offset is stored in the VIEW frame, the box
+stays where you grabbed it relative to your head — so turning your body swings the box
+around you, and you can feel it lag. That is the first hint of §1.4's "physical discovery"
+beat, and it arrived from a bug fix rather than from a feature.
+
+**Actively worse, and worth watching.** A one-handed hold swings. Grab a box by a corner
+and lift and it pendulums, and if you keep lifting it eventually tears out of your hand.
+Correct physics; unclear whether it reads as "I grabbed it badly" (good — that is §6.2
+working) or "the game took my box away" (bad). This is the single thing to put in front of
+another person first.
+
+**Cannot be judged yet.** Everything about §6.2 that needs a SECOND pair of hands — two
+movers on one object, forces adding, opposing inputs twisting it. Phase 4.
+
+**Would I tell a friend about it?** Not yet. But there is now a thing to describe, which
+was not true after Phase 1: "you can pick a box up and it swings if you grab it wrong."

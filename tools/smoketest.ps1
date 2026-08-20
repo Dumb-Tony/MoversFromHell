@@ -56,6 +56,12 @@ if (-not $up) {
   exit 2
 }
 
+# VIRTUAL TIME BUDGET. Raised from 90s to 240s when Rapier arrived: boot is asynchronous
+# now (the WASM module is decoded before the game exists), and an occasional run used the
+# whole budget before that promise resolved. The symptom is a page that emits its first
+# progress line and nothing else, which reads exactly like a hang. The suites are also
+# simply longer than they were.
+#
 # NOTE: chrome.exe is a GUI-subsystem binary, so `$x = & chrome --dump-dom` captures
 # NOTHING under PowerShell - the DOM has to be redirected to a file. Do not "simplify"
 # this back to a direct capture; it silently cost an hour on the last project.
@@ -65,7 +71,7 @@ $proc = Start-Process $chrome -ArgumentList `
   "--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check",
   "--user-data-dir=$profileDir","--window-size=1280,720",
   "--autoplay-policy=no-user-gesture-required",
-  "--virtual-time-budget=90000","--dump-dom",$url `
+  "--virtual-time-budget=240000","--dump-dom",$url `
   -RedirectStandardOutput $domFile -NoNewWindow -Wait -PassThru
 
 if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }

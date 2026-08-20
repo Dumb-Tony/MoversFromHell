@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 1,
-  label: 'phase-1',
+  phase: 2,
+  label: 'phase-2',
   date: '2026-08-19',
 });
 
@@ -122,15 +122,82 @@ export const PLAYER = Object.freeze({
 export const GRIP = Object.freeze({
   reach: 2.1,                // m, ray/cone length from the camera (§6.1)
   coneDegrees: 7,            // §6.1 "short cone", biases toward visible handles
-  spring: 900,               // constraint stiffness
-  damping: 60,
+
+  /** Spring stiffness, N/m. This number is why weight is legible: holding a mass m
+   *  against gravity needs m*g newtons, so the grip point sags by m*g/spring. A 9 kg box
+   *  hangs 0.10 m below the hand, a 17 kg box 0.19 m. §6.2 wants "object mass requires
+   *  more force" to be VISIBLE, and the sag is how you see it without a readout. */
+  spring: 900,
+
+  /** DAMPING RATIO, not a coefficient — and that distinction is the whole point.
+   *
+   * A fixed coefficient cannot work, because critical damping for a mass-spring is
+   * 2*sqrt(k*m) and therefore depends on the object. MEASURED with a flat 60 N.s/m:
+   *   9 kg box   zeta 0.33   17 kg box  zeta 0.24   90 kg couch  zeta 0.11
+   * All underdamped, all oscillating, and getting worse the heavier the object — so the
+   * problem would have been invisible on a box and unbearable on a piano.
+   *
+   * The coefficient is therefore derived per grip as 2*zeta*sqrt(k_effective*mass).
+   * 1.0 is critical damping: the fastest approach that does not overshoot at all, which
+   * is exactly what §26.2's "without sustained jitter" asks for. */
+  dampingRatio: 1.0,
+
   /** §6.4: "player force should be bounded so two clients cannot create an explosive
    *  feedback loop". This cap is the thing that stops that, so it is not a feel knob. */
   forceCap: 750,
+
+  /** ACCELERATION cap, m/s^2 — the second half of the §6.4 bound, and the one a single
+   *  force cap cannot express.
+   *
+   *  750 N on a 9 kg box is 83 m/s^2: eight and a half g. MEASURED consequence — running
+   *  while carrying a box lets it lag, the spring saturates, and it accelerates hard to
+   *  catch up; when the grip then breaks it leaves at 17 m/s and rockets across the room.
+   *  Correct physics, absurd feel.
+   *
+   *  A hand is limited by how fast it can MOVE as well as how hard it can pull, so the cap
+   *  is min(strength, mass * maxAccel). Light objects become acceleration-limited (you
+   *  cannot whip a box around); heavy ones stay force-limited (you are not strong enough).
+   *  25 m/s^2 is about 2.5 g. Brace and hand count raise strength, not hand speed, so the
+   *  §6.2 multipliers apply to forceCap only. */
+  maxAccel: 25,
+
   braceForceMult: 1.8,       // §6.2 brace "raises force cap and stability"
   twoHandForceMult: 1.65,    // §6.2 "two hands improve control and sustainable load"
-  slipThreshold: 0.82,       // fraction of force cap at which the grip starts to slide
   wetGripMult: 0.6,          // §6.2 surface grip; wet/slippery reduces sustainable force
+
+  /** §6.2's "grip loss", and §2.1's "show why an attempt struggles". A grip whose demand
+   *  sits at the cap for this long lets go, rather than the object silently refusing to
+   *  move. Slipping is the feedback. */
+  /** A hand also resists the object TURNING in it, which a single-point spring cannot
+   *  express. Grab a free-hanging box by one face and it swings like a pendulum about the
+   *  grip; damping that swing through the linear spring alone would need far more force
+   *  than GRIP.maxAccel allows, so the box tears out of the hand for no reason a player
+   *  could understand. Raising the body's angular damping while held is the cheap stand-in
+   *  for a real hand's grip friction. Restored to the object's own value on release. */
+  heldAngularDamping: 5.0,
+
+  slipThreshold: 0.97,       // fraction of the cap that counts as overloaded
+  slipMs: 420,               // sustained overload before the hand gives way
+
+  /** THE ANTI-GHOSTING RULE (§25.2's Phase 2 gate, §7.3's "no wall ghosting").
+   *  The held object is a fully dynamic body: it collides with the world and is dragged
+   *  by a force, never teleported. So when the player backs through a doorway the box
+   *  cannot follow, the spring stretches instead. Past this separation the grip breaks.
+   *  Without it the spring would keep winding up and eventually fire the box through the
+   *  wall in one step, which is precisely the failure the gate names.
+   *
+   *  INVARIANT: maxStretch MUST stay below forceCap / spring (0.833 m at the base cap).
+   *  Above that ratio the spring is saturated — demand exceeds the cap, the applied force
+   *  can no longer grow with distance, and the object can never catch up. A grip that
+   *  enters that band is already doomed and merely takes another second to admit it. At
+   *  1.15 m there was a 0.32 m dead band doing exactly that; 0.70 m keeps 16% margin.
+   *  tools/m2-tests.js asserts the relationship so a later tweak cannot reintroduce it. */
+  maxStretch: 0.70,          // m between hand target and grip point before releasing
+
+  holdDistanceMin: 0.85,     // how close the hand target may be pulled
+  holdDistanceMax: 2.0,      // …and how far it may be pushed
+  handLateral: 0.20,         // m each hand sits off the camera centreline; two hands
+                             // therefore apply force at two points and resist twisting
 });
 
 /** §7.1 mass classes. §6.3 is explicit that these are GUIDANCE, NOT GATES — nothing in

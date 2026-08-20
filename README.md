@@ -3,9 +3,9 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 1 of 13**: there is a mover you can actually walk around. WASD to
-move, Shift to sprint, Space to jump and mantle, R to recover, F3 for stats.
-Nothing can be picked up yet — grabbing is Phase 2.
+*is* the site. **Phase 2 of 13**: you can pick boxes up and carry them. WASD move, Shift
+sprint, Space jump/mantle, **LMB/RMB to grab with each hand**, R recover, F3 stats.
+Grab a box by a corner and it swings — that is the grip model, not a bug.
 
 ---
 
@@ -69,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 1 complete
+## Current state — Phase 2 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -77,14 +77,26 @@ GDD §25.2 defines a 13-phase roadmap.
 |---|---|---|
 | 0. Scaffold | loads locally; stable frame/step | done — 118 assertions |
 | 1. Movement | responsive indoors and on ramp | done — 61 assertions |
-| 2. One box | freeform two-hand grip; no wall ghosting | next |
+| 2. One box | controllable; no wall ghosting | done — 66 assertions |
+| 3. Heavy object | weight legible without hard denial | next |
 
-**179 assertions across both suites, all passing.**
+**245 assertions across three suites, all passing.**
 
-![Phase 1](docs/phase1-movement.png)
+![Phase 2](docs/phase2-grip.png)
 
-A 1.80 m mover beside the 2.10 m couch, the three doorways, the mantle ledges (lime
-climbable, red refuses) and the ramp — all at true scale on a metre grid.
+A mover holding a box, reticle showing the grip state. Behind: the three doorways, the
+mantle ledges (lime climbable, red refuses) and the 2.10 m couch, at true scale on a metre
+grid.
+
+### What Phase 2 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| Object definitions | `src/objects/definitions.js` | §7.1 data + a §24.4 validator that runs at spawn. It caught a real data error on its first run. |
+| Object registry | `src/objects/registry.js` | Body, collider, mesh and runtime state as one record; collider→entity lookup for raycasts. |
+| Grip system | `src/player/grip.js` | Damped spring applied AT THE GRIP POINT, so leverage and torque emerge from the physics rather than from special cases. |
+| HUD | `src/ui/hud.js` | §21.1 centre reticle, per-hand state, readable without colour (§26.5). |
+| Collision groups | `src/physics/world.js` | A held object stops colliding with its carrier — the fix that makes "no wall ghosting" true. |
 
 ### What Phase 1 added
 
@@ -118,7 +130,9 @@ src/
   player/           controller.js — kinematic capsule, mantle, recovery
   render/           renderer, camera, scene, playerBody — reads state, never writes it
   dev/              debugOverlay
-  objects/ tools/ vehicle/ contract/ ui/ data/   — empty, one per §22.2 module
+  objects/          definitions.js, registry.js — movable entities as data + state
+  ui/               hud.js
+  tools/ vehicle/ contract/ data/   — empty, one per §22.2 module
 assets/lib/         vendored Three.js r128 + Rapier 0.20 — zero external requests
                     see assets/lib/NOTICE.md for provenance and licences
 tools/              serve, smoketest, shot, per-phase test suites

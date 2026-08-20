@@ -3,6 +3,82 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 2 — one box — 2026-08-19
+
+**Gate (§25.2):** "Freeform two-hand grip, collision, carry/drop" → **controllable; no
+wall ghosting**. **PASSED** — 66 assertions (245 across all three suites).
+
+**Hypothesis:** §6.1's "spring-like constraint from the hand target to a local point on the
+object's collider", applied as a bounded FORCE AT A POINT rather than as a joint, gives
+controllable carrying and makes §6.2's leverage and mass factors emerge from rigid-body
+dynamics instead of needing special cases — while keeping the object a fully dynamic body,
+which is the only way to satisfy "no wall ghosting".
+
+**Added**
+- `src/objects/definitions.js` — §7.1/§23.1 object definitions as data, plus a §24.4
+  validator run at spawn. Two boxes only; §29.1's build order keeps furniture out until
+  Phase 3.
+- `src/objects/registry.js` — dynamic bodies, meshes and §7.2 runtime state created and
+  disposed as one record; collider-handle → entity lookup for raycasts; settle detection.
+- `src/player/grip.js` — acquisition, the damped-spring force at a point, per-hand targets,
+  slip, and the anti-ghosting release.
+- `src/ui/hud.js` — §21.1's centre reticle with per-hand grip state, readable without
+  colour (§26.5): each state changes shape as well as colour and carries a text label.
+- `tools/m2-tests.js` — 66 assertions.
+
+**Six bugs found and fixed, all by the tests**
+1. **Nothing was grabbable at all.** §6.1 says the ray comes from the camera, and I also
+   measured REACH from the camera — but the third-person camera sits ~4 m behind the
+   character, so a 2.1 m reach did not arrive at its own back. Aim comes from the camera;
+   reach is now measured from the shoulder.
+2. **The held object was crushed through walls.** The player capsule is kinematic and
+   unstoppable, so walking into a wall while carrying pinned the box between an immovable
+   body and a static one; the solver ejected it — MEASURED at z = -8.66 through a wall at
+   -2.09. CCD does not help, that is depenetration not tunnelling. A held object now leaves
+   the player's collision group. This is the gate, and it would have shipped broken.
+3. **The character controller ignored those groups.** It has its own filter, so
+   `setApplyImpulsesToDynamicBodies` kept shoving held objects anyway — a box put down
+   beside the player left at 7 m/s. Fixed by passing the player's interaction group to
+   `computeColliderMovement`.
+4. **A dropped box was launched at 40 m/s.** Restoring player collision the instant a grip
+   ended handed the solver a deep overlap to resolve in one step. Collision is now restored
+   only once the object is geometrically clear — and the clearance test needs the box's
+   half-DIAGONAL, not its half-width, or it declares "clear" at the exact distance a corner
+   still touches (that produced a 7.3 m/s shove).
+5. **The hold was underdamped.** A flat damping coefficient gives ζ = 0.33 for a 9 kg box
+   and 0.11 for a 90 kg couch — worse the heavier the object, so invisible on a box and
+   unbearable on a piano. Damping is now a RATIO; the coefficient is derived per grip as
+   2ζ√(k·m).
+6. **Light objects were flung.** 750 N on a 9 kg box is 8.5 g; running while carrying let
+   the box lag, saturate the spring, and leave at 17 m/s when the grip broke. The cap is
+   now min(strength, mass × maxAccel) — light things are acceleration-limited, heavy things
+   force-limited.
+
+**Also fixed**
+- `lastForce` recorded the force DEMANDED before clamping, and was then used to assert
+  §6.4's bound — meaningless, since demand is unbounded by construction (4001 N was
+  observed against a 750 N cap while the clamp worked perfectly). Split into `lastDemand`
+  and `lastApplied`.
+- `GRIP.maxStretch` (1.15 m) sat above the spring's saturation point (forceCap/spring =
+  0.833 m), leaving a 0.32 m band in which every grip was doomed and merely took a second
+  to admit it. Now 0.70 m, with the invariant asserted.
+- The harness virtual-time budget went from 90 s to 240 s: boot is async since Rapier
+  arrived, and an occasional run spent the budget before the WASM promise resolved, which
+  looks exactly like a hang.
+
+**Corrected in the tests, not the code**
+- The definition validator rejected `box_heavy_01` at boot for having mass 17 in the
+  `light` band. It was right — 17 kg is `medium` by §6.3's own table. The data was fixed
+  and the over-strict assertion ("everything must be light") replaced with what §29.1
+  actually forbids before Phase 3: nothing heavy.
+- Several attempts to measure steady-state sag failed because the rig, not the game, was
+  wrong: comparing two boxes in different support conditions, then a hand target on a
+  different line from the probe ray, then lifting faster than a bounded force can follow.
+
+**Not verified, deliberately** — see KNOWN_ISSUES. Mass legibility (does a heavier box
+*look* heavier?) and the swing-then-slip behaviour of a one-handed hold are recorded for a
+human playtest rather than asserted on the strength of a rig that would not hold still.
+
 ## Phase 1 — movement — 2026-08-19
 
 **Gate (§25.2):** "Third-person proxy, camera, jump/mantle, recover" → responsive indoors

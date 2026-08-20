@@ -232,10 +232,15 @@ export function buildScene() {
     return m;
   };
 
+  // Couch and dresser stay STATIC until Phase 3 ("heavy object"). §29.1 is explicit that
+  // one box must feel good before furniture variety arrives, and a couch grabbable under
+  // the Phase 2 model would just be a very large box — which is precisely the answer §6.3
+  // says the game must never give.
   addBox(REFERENCE_DIMS.couch3Seat, PALETTE.couch,   0,   1.6, 0, 'couch');
   addBox(REFERENCE_DIMS.dresser,    PALETTE.dresser, 3.0, 1.2, 0, 'dresser');
-  addBox(REFERENCE_DIMS.movingBox,  PALETTE.box,    -2.4, 0.9, 0, 'box');
-  addBox(REFERENCE_DIMS.movingBox,  PALETTE.box,    -2.4, 1.6, 0, 'box');
+  // The moving boxes that used to stand here are now DYNAMIC entities spawned from
+  // src/objects/definitions.js PHASE2_SPAWNS. Leaving the static stand-ins would put an
+  // immovable collider inside every box the registry spawns.
 
   // Human-height post. Without it nothing on screen has a believable scale.
   const post = new THREE.Mesh(

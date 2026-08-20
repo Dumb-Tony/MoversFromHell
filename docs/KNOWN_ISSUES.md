@@ -81,3 +81,36 @@ revisit when dynamic objects exist in Phase 2.
 
 **Sprint may be too fast indoors.** 5.4 m/s crosses the 10 x 7 m test room in under two
 seconds. Not tuned yet — see PLAYTEST_NOTES.
+
+---
+
+## Phase 2 open items
+
+**A one-handed hold swings, and eventually slips.** Grab a box by one face, lift it, and it
+pendulums about the grip point, overshoots the hand and can overload until the grip lets
+go. MEASURED: the light box rose 0.25 → 1.16 m and the heavy one 0.21 → 1.11 m, then both
+slipped near the top of the swing. This is a bounded force acting on a body free to rotate
+about a single point, so it is physically reasonable — and §6.2 explicitly wants grip
+position to matter — but whether it is *fun* is a playtest question, not a test question.
+Two hands are noticeably steadier already (m2 F4). Candidate levers if it reads badly:
+`GRIP.heldAngularDamping`, `GRIP.maxStretch`, `GRIP.slipMs`.
+
+**Mass legibility is not verified by test.** §6.2 wants "object mass requires more force" to
+be visible, and the design makes the sag equal m·g/k — 0.098 m for the 9 kg box, 0.185 m
+for the 17 kg one. What IS asserted is that the heavier box is pulled with more force
+(m2 D5). What is NOT asserted is the settled sag, because the swing above means the hold
+does not reach a steady state within the test window. Needs an eye, not an assertion.
+
+**You cannot yank an object.** Moving the hand target faster than the bounded grip force
+can follow stretches the grip until it breaks. That is the intended §6.4 behaviour and the
+reason a box cannot be dragged through a wall, but it also means sweeping the camera while
+carrying something will drop it. Whether the threshold is set kindly enough is a playtest
+question.
+
+**Held objects do not collide with their carrier.** Necessary — see the changelog — but it
+means a player can walk through a box they are holding. It becomes solid again the moment
+it is clear of them. Watch for this reading as "the box is a ghost" in playtests; if it
+does, the fix is to stop the player instead, which is a bigger change.
+
+**The couch and dresser are still static.** They stay that way until Phase 3, on §29.1's
+build order. Do not read their immovability as a bug.

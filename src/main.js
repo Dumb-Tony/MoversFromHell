@@ -1,16 +1,20 @@
-/* Boot + render loop — GDD §22.2 (App/State), §22.3 (fixed-step loop), §25.2 phases 0-1.
+/* Boot + render loop — GDD §22.2 (App/State), §22.3 (fixed-step loop), §25.2 phases 0-2.
  *
- * §22.3's order is followed literally, and the system registration order below IS that
- * list. Read it top to bottom:
+ * §22.3's order, mapped onto the system registration order below:
  *   1. collect actions and update desired player/hand targets   -> 'look', 'player'
  *   2. advance fixed physics steps with a capped accumulator     -> 'physics'
- *   3. resolve grip/tool constraints and collision events        -> 'grips'    (Phase 2)
- *   4. aggregate damage, cargo, zone and contract changes        -> 'contract' (Phase 5)
+ *   3. resolve grip/tool constraints and collision events        -> 'grips'
+ *   4. aggregate damage, cargo, zone and contract changes        -> 'objects', 'contract'
  *   5. interpolate transforms for rendering; update camera and UI-> the render loop
  *   6. record a lightweight event log for scoring and debugging  -> EventBus
  *
- * 'player' must run before 'physics': the character controller only computes and QUEUES a
- * kinematic translation, and world.step() is what actually applies it.
+ * Two orderings matter and both are the opposite of the naive reading:
+ *   - 'player' runs BEFORE 'physics'. The character controller only computes and QUEUES a
+ *     kinematic translation; world.step() is what applies it.
+ *   - 'grips' also runs BEFORE 'physics', even though §22.3 lists constraints after it.
+ *     Forces are ACCUMULATED by addForceAtPoint and CONSUMED by the next step, so applying
+ *     them afterwards would cost one step of lag on every carry.
+ *   - 'objects' runs AFTER, because settle detection reads post-step velocities.
  *
  * BOOT IS ASYNCHRONOUS, because Rapier decodes an inlined WASM module before it can be
  * used. Anything that needs the live game must await window.__MFH_READY rather than
@@ -27,6 +31,10 @@ import { makeBlockout } from './render/playerBody.js';
 import { DebugOverlay } from './dev/debugOverlay.js';
 import { initPhysics, PhysicsWorld } from './physics/world.js';
 import { PlayerController, LOCOMOTION } from './player/controller.js';
+import { ObjectRegistry } from './objects/registry.js';
+import { PHASE2_SPAWNS } from './objects/definitions.js';
+import { GripSystem, HANDS } from './player/grip.js';
+import { Hud } from './ui/hud.js';
 import { BUILD } from './config.js';
 
 const canvas = document.getElementById('stage');
@@ -65,6 +73,14 @@ async function boot() {
   const input = new Input(window, canvas).attach();
   const game = new Game({ contractId: 'suburban_starter', input, bus });
 
+  // ---- movable objects (Phase 2) --------------------------------------------------------
+  const registry = new ObjectRegistry(physics, world.scene);
+  for (const s of PHASE2_SPAWNS) registry.spawn(s.def, s);
+  const grips = new GripSystem(physics, registry, rig, camera, bus, player);
+  // New colliders are invisible to raycasts until the next step (MEASURED — world.js), and
+  // the very first grab probe happens before any step has run.
+  physics.primeQueries();
+
   // ---- systems, in §22.3 order ----------------------------------------------------------
   game.addSystem('look', (state, stepMs, ctx) => {
     rig.applyLook(ctx.input.consumeLook());
@@ -80,9 +96,9 @@ async function boot() {
       move: inp.moveAxis(),
       forward: rig.forwardFlat(),
       right: rig.rightFlat(),
-      // §4.2: Shift is "sprint when free; brace/exert while gripping". Nothing can be
-      // gripped until Phase 2, so today it is sprint. The branch is written now so the
-      // meaning change is one condition later, not a rewrite.
+      // §4.2: Shift is "sprint when free; brace/exert while gripping". Since Phase 2 both
+      // branches are live — holding anything turns sprint into brace, which is what makes
+      // §6.2's brace force bonus reachable without a second key.
       run: inp.isDown('brace') && !hasAnyGrip(p),
       brace: inp.isDown('brace') && hasAnyGrip(p),
       jump: inp.wasPressed('jump'),
@@ -108,14 +124,43 @@ async function boot() {
     }
   });
 
+  /* §22.3 lists "resolve grip/tool constraints" after the physics step. With a real
+   * solver the practical ordering is the other way round and means the same thing: forces
+   * are ACCUMULATED here and CONSUMED by the next world.step(), so a grip force applied
+   * after the step would not be felt until the following frame — one step of lag on every
+   * carry, which is exactly the sponginess the Phase 2 gate calls "not controllable". */
+  game.addSystem('grips', (state, stepMs, ctx) => {
+    const inp = ctx.input;
+    const p = state.players[state.localPlayerId];
+
+    // Press-and-hold is the default (§4.4); Input resolves hold-vs-toggle itself, so this
+    // reads the same either way.
+    for (const hand of HANDS) {
+      const action = hand === 'left' ? 'gripLeft' : 'gripRight';
+      const want = inp.isDown(action);
+      const have = !!grips.grips[hand];
+      if (want && !have) grips.tryGrab(hand, p.id, ctx.simTimeMs);
+      else if (!want && have) grips.release(hand, 'released', ctx.simTimeMs);
+    }
+
+    grips.step(stepMs, { brace: inp.isDown('brace'), simTimeMs: ctx.simTimeMs });
+
+    // Mirror into serializable state (§22.4). The renderer and HUD read this, not the bodies.
+    p.grips.left = grips.grips.left ? grips.grips.left.entityId : null;
+    p.grips.right = grips.grips.right ? grips.grips.right.entityId : null;
+  });
+
   game.addSystem('physics', () => { physics.step(); });
 
-  game.addSystem('grips',    () => {});   // Phase 2
+  // After the step, because it reads post-step velocities to decide "settled" (§12.3).
+  game.addSystem('objects', (state, stepMs) => { registry.step(stepMs); });
+
   game.addSystem('contract', () => {});   // Phase 5
 
   game.setPhase(PHASES.PICKUP);
 
   const overlay = new DebugOverlay(ui, game);
+  const hud = new Hud(ui);
 
   const stamp = document.createElement('div');
   stamp.id = 'build-stamp';
@@ -125,7 +170,7 @@ async function boot() {
   const help = document.createElement('div');
   help.id = 'help';
   help.innerHTML = '<b>Click to look around.</b> &nbsp; WASD move · Shift sprint · ' +
-                   'Space jump/mantle · R recover · Esc pause · F3 stats';
+                   'Space jump/mantle · <b>LMB/RMB grab</b> · R recover · Esc pause · F3 stats';
   ui.appendChild(help);
 
   // ---- shell wiring ---------------------------------------------------------------------
@@ -154,6 +199,8 @@ async function boot() {
     const dt = Math.min(frameMs, 100) / 1000;
     body.update(p.position, p.yaw, player.horizontalSpeed, dt);
     rig.update(p.position, dt);   // the rig adds camera height itself
+    registry.syncMeshes();
+    hud.update(grips.status());
 
     renderer.render(world.scene, camera);
     overlay.update(frameMs, {
@@ -170,8 +217,8 @@ async function boot() {
    * frames, because headless Chrome in --dump-dom mode delivers only 1-3 rAF callbacks in
    * total (MEASURED — Dev\INDEX.md → Tooling & testing). */
   const api = {
-    game, input, rig, world, overlay, renderer, camera, syncSize,
-    physics, player, body, THREE, CONTEXTS, PHASES, LOCOMOTION,
+    game, input, rig, world, overlay, hud, renderer, camera, syncSize,
+    physics, player, body, registry, grips, THREE, CONTEXTS, PHASES, LOCOMOTION,
   };
   window.__MFH = api;
   return api;

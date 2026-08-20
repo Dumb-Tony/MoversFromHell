@@ -16,6 +16,41 @@
 
 import { SIM } from '../config.js';
 
+/* Collision groups. Rapier packs an interaction group into one u32: the high 16 bits are
+ * MEMBERSHIP (what this collider is) and the low 16 bits are the FILTER (what it will
+ * collide with). Two colliders interact only if EACH one's membership is in the other's
+ * filter, so excluding on one side is enough.
+ *
+ * The reason these exist at all is the Phase 2 gate. The player capsule is kinematic and
+ * therefore unstoppable; walk into a wall while carrying a box and the box is crushed
+ * between an immovable body and a static wall. The solver has to resolve a penetration it
+ * cannot resolve, and ejects the box — MEASURED, straight through the wall to z = -8.66,
+ * which is exactly the "wall ghosting" the gate forbids. CCD does not help: that is
+ * depenetration, not tunnelling.
+ *
+ * So a HELD object stops colliding with the player that holds it. It still collides with
+ * the world and with every other object, so it cannot be dragged through geometry; it
+ * simply cannot be squashed by its own carrier any more.
+ */
+export const GROUPS = Object.freeze({
+  WORLD:  0x0001,   // static architecture, ground, ramps
+  PLAYER: 0x0002,   // player capsules
+  OBJECT: 0x0004,   // movable entities
+});
+
+/** Pack a membership + filter pair into Rapier's u32 interaction group. */
+export function interactionGroups(membership, filter) {
+  return ((membership & 0xffff) << 16) | (filter & 0xffff);
+}
+
+export const GROUP_PRESETS = Object.freeze({
+  world:      interactionGroups(GROUPS.WORLD,  GROUPS.WORLD | GROUPS.PLAYER | GROUPS.OBJECT),
+  player:     interactionGroups(GROUPS.PLAYER, GROUPS.WORLD | GROUPS.PLAYER | GROUPS.OBJECT),
+  object:     interactionGroups(GROUPS.OBJECT, GROUPS.WORLD | GROUPS.PLAYER | GROUPS.OBJECT),
+  /** Held: everything except the player carrying it. */
+  objectHeld: interactionGroups(GROUPS.OBJECT, GROUPS.WORLD | GROUPS.OBJECT),
+});
+
 let RAPIER = null;
 
 /** Load and initialise Rapier once. Safe to await repeatedly. */
@@ -123,7 +158,8 @@ export class PhysicsWorld {
     const R = this.R;
     const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(0, -thickness / 2, 0));
     const col = this.world.createCollider(
-      R.ColliderDesc.cuboid(size / 2, thickness / 2, size / 2).setFriction(0.9), body);
+      R.ColliderDesc.cuboid(size / 2, thickness / 2, size / 2).setFriction(0.9)
+        .setCollisionGroups(GROUP_PRESETS.world), body);
     return { body, collider: col };
   }
 
@@ -139,7 +175,8 @@ export class PhysicsWorld {
       if (hx <= 0 || hy <= 0 || hz <= 0) continue;
       const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(
         (c.minX + c.maxX) / 2, base + hy, (c.minZ + c.maxZ) / 2));
-      const col = this.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8), body);
+      const col = this.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8)
+        .setCollisionGroups(GROUP_PRESETS.world), body);
       out.push({ body, collider: col, tag: c.tag });
     }
     return out;
@@ -154,7 +191,8 @@ export class PhysicsWorld {
     const body = this.world.createRigidBody(
       R.RigidBodyDesc.fixed().setTranslation(x, y, z).setRotation(q));
     const col = this.world.createCollider(
-      R.ColliderDesc.cuboid(width / 2, thickness / 2, length / 2).setFriction(0.9), body);
+      R.ColliderDesc.cuboid(width / 2, thickness / 2, length / 2).setFriction(0.9)
+        .setCollisionGroups(GROUP_PRESETS.world), body);
     return { body, collider: col, angleRad };
   }
 
