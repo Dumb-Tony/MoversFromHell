@@ -3,8 +3,9 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 8 of 13**: a house to empty, two movers, four tools, a truck with a
-real cargo box, and a drive that finds out how well you packed it. WASD move,
+*is* the site. **Phase 9 of 13**: a house to empty, two movers, four tools, a truck with a
+real cargo box, a drive that finds out how well you packed it, and a second house to fill.
+WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
@@ -78,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 8 complete
+## Current state — Phase 9 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -93,9 +94,22 @@ GDD §25.2 defines a 13-phase roadmap.
 | 6. Tools | each solves a physical problem | done — 66 assertions |
 | 7. Cargo | secured pack remains stable | done — 53 assertions |
 | 8. Drive | poor pack shifts or damages visibly | done — 38 assertions |
-| 9. Destination | manifest completes reliably | next |
+| 9. Destination | manifest completes reliably | done — 41 assertions |
+| 10. Economy | ledger matches events | next |
 
-**583 assertions across nine suites, all passing.**
+**624 assertions across ten suites, all passing.**
+
+![Phase 9](docs/phase9-destination.png)
+
+The destination with the whole manifest delivered — §13.1's "smaller site with 3-4 labeled
+room zones", 54 m² against the pickup house's 70. All 23 objects settled in the rooms the
+manifest asked for.
+
+**The decision this phase had to make:** §3.4 reads wrong-room delivery as a gate, §15.1 as a
+scored line, §12.2 forbids it as a hard fail. Two of three make it a price, and §2.1 breaks
+the tie — **an object is delivered when it is settled inside the destination; the right room
+is a separate, scored fact.** A contract completes with half the load in the wrong rooms. It
+simply pays less.
 
 ![Phase 8](docs/phase8-drive.png)
 

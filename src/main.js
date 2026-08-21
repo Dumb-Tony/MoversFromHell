@@ -39,6 +39,7 @@ import { ToolSystem } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
+import { DEST_ZONES, DEST_SHELL, insideDestination } from './world/destination.js';
 import { DamageSystem } from './damage/damage.js';
 import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
@@ -372,6 +373,7 @@ async function boot() {
     game, input, rig, world, overlay, hud, renderer, camera, syncSize,
     physics, registry, movers, tools, straps, cargo,
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
+    destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
     damage, route,
     get player() { return active().controller; },
     get grips() { return active().grips; },

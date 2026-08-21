@@ -97,6 +97,9 @@ export const OBSTACLES = Object.freeze([
 export { ROOM } from '../world/house.js';
 import { ROOM, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
 import { cargoColliders, cargoAnchors } from '../world/truck.js';
+import {
+  DEST_SHELL, DEST_ZONES, DEST_PARTITIONS, DEST_DOORS, destColliders,
+} from '../world/destination.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -366,6 +369,50 @@ export function buildScene() {
       const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.16), mat(PALETTE.reference));
       knob.position.set(a.x, a.y, a.z);
       scene.add(knob);
+    }
+  }
+
+  /* ---- Phase 9: the destination ---------------------------------------------------------
+   * §13.1: "Destination | One smaller site with 3-4 labeled room zones." Built from
+   * destination.js's records by the same code path as everything else — shell colliders,
+   * then partitions cut by their doorways. */
+  {
+    const destMat = mat(0xc8bda8);
+    for (const c of destColliders()) {
+      const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
+      if (sx <= 0 || sy <= 0 || sz <= 0) continue;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz),
+        c.tag === 'destFloor' ? mat(PALETTE.floor) : destMat);
+      m.position.set((c.minX + c.maxX) / 2, c.base + sy / 2, (c.minZ + c.maxZ) / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+      addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag);
+    }
+
+    for (const p of DEST_PARTITIONS) {
+      for (const seg of wallSegments(p, DEST_DOORS)) {
+        const len = seg.hi - seg.lo;
+        if (len <= 1e-6) continue;
+        const mid = (seg.lo + seg.hi) / 2;
+        const sx = p.axis === 'x' ? len : PARTITION_T;
+        const sz = p.axis === 'x' ? PARTITION_T : len;
+        const cx = p.axis === 'x' ? mid : p.at;
+        const cz = p.axis === 'x' ? p.at : mid;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(sx, DEST_SHELL.wallH, sz), destMat);
+        m.position.set(cx, DEST_SHELL.wallH / 2, cz);
+        m.castShadow = true; m.receiveShadow = true;
+        scene.add(m);
+        addCollider(cx, cz, sx, sz, 0, DEST_SHELL.wallH, `partition_${p.id}`);
+      }
+    }
+
+    // §13.1 says the zones are LABELED, and §21.2's contract UX has to name a room. A lime
+    // marker on the floor of each is the cheapest version of that which is not a lie.
+    for (const z of DEST_ZONES) {
+      if (z.id === 'dest_apron') continue;
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.02, 0.9), mat(PALETTE.reference));
+      pad.position.set((z.minX + z.maxX) / 2, 0.03, (z.minZ + z.maxZ) / 2);
+      scene.add(pad);
     }
   }
 

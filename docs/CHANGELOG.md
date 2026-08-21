@@ -3,6 +3,76 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 9 — the destination — 2026-08-21
+
+**Gate (§25.2):** "Unload, room zones, settled validation" → **manifest completes
+reliably**. **PASSED** — 41 assertions (624 across ten suites).
+
+**Hypothesis:** "reliably" is the word doing the work, and it means three separable things,
+each asserted on its own: the whole manifest CAN complete, a completed delivery STAYS
+completed, and nothing counts that should not.
+
+**Measured**
+
+| | delivered | in the right room |
+|---|---|---|
+| every object carried into its own target room | **23 / 23** | 23 (100%) |
+| …then six identical objects swapped between rooms | **23 / 23** | 17 (74%) |
+| one item taken back to the pickup site | 22 / 23 | contract not complete |
+
+**THE DESIGN DECISION THIS PHASE HAD TO MAKE, because the GDD pulls three ways.**
+
+- §3.4's Delivery phase exits when "required items settled in **valid** destination zones" —
+  which reads as a **gate**: wrong room, no completion.
+- §15.1 lists **room accuracy** as a scored line item with a "small perfect bonus" — which
+  reads as a **price**.
+- §12.2 restricts hard failure to four named conditions, and a lamp in the wrong bedroom is
+  not among them.
+
+Two of the three make it a price, and §2.1's "the game should rarely say no" breaks the tie.
+**An object is delivered when it is settled anywhere inside the destination building; being
+in the RIGHT room is a separate, scored fact.** A contract can complete with half the load in
+the wrong rooms — it simply pays less. The alternative leaves a player who cannot find the
+right bedroom holding a finished job the game refuses to accept, which is exactly the shape
+§2.1 forbids. m9's D-series asserts it from both sides so the decision cannot be reversed by
+accident.
+
+**Room accuracy is a fraction of what was DELIVERED, not of the manifest.** An item still on
+the truck is an undelivered item, not a room-accuracy failure. Counting it as both would
+charge a player twice for one mistake.
+
+**Added**
+- `src/world/destination.js` — §13.1's "smaller site with 3-4 labeled room zones". 54 m²
+  against the pickup house's 70 m², with its own front aperture and two interior doorways.
+- Delivery, room accuracy and `deliveryStatus()` in `src/contract/manifest.js`, which reports
+  what is outstanding and why, and never refuses anything.
+- §24.4 validation that a manifest may not name a room that does not exist. Until this phase
+  the `toZone` values were seams with nothing to resolve against.
+
+**THREE FIXTURES THAT MEASURED THE WRONG THING**, all for the same reason — each changed
+*where* objects were put, so each also changed *whether they fitted*:
+
+1. Piling all 23 items into one room to test wrong-room delivery reported **12 of 23
+   delivered**. That is a fact about the size of a 4.5 × 3.0 m room, not about room accuracy.
+2. Rotating every item one room along reported **22 of 23** — the room populations stop
+   matching what fits.
+3. Swapping the target rooms pairwise still reported **22 of 23**, because it changes which
+   object lands in which slot.
+
+The fixture now swaps two objects **of the same definition** that were bound for different
+rooms. Two identical objects are interchangeable, so the slots, the populations and every
+other object are untouched; the only thing that changes is whether each is where the manifest
+asked for it. Six swaps, 23/23 delivered, 74% accuracy.
+
+**One regression, and it was correct behaviour arriving.** m5's §12.3 dwell test used a
+*pickup* room as the delivery target, because when it was written the destination did not
+exist. Now that `delivered` means "settled inside the destination building", the stand-in
+stopped standing in and the assertion failed with `settled=true dwell 0`. The dwell mechanism
+it tests is unchanged; only the address is.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61, m6 66, m7 53, m8 38, m9 41 — 624
+assertions, all passing.
+
 ## Phase 8 — the drive — 2026-08-21
 
 **Gate (§25.2):** "Route, turn/brake/bump, cargo coupling" → **poor pack shifts or damages

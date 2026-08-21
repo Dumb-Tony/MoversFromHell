@@ -331,3 +331,35 @@ rather than by a player who can see what they are doing.
 **Nothing renders any of it.** No route progress, no §11.2 "coarse cargo-status indicator",
 no §8.4 "small cost notice" at impact, no condition icons. The drive currently happens
 entirely in the log.
+
+## Phase 9 open items
+
+**Nobody carried anything.** The manifest completes because the suite teleports 23 objects
+into the destination and lets them settle — which is the right way to test the VALIDATION,
+and is not a test of unloading. §25.2's build outcome says "unload", and unloading is
+carrying, which needs the interaction work Phases 6 to 8 have all deferred. What is proven is
+that delivery detection is correct, stable and honest; what is not proven is that a person
+can do it.
+
+**No unload order, and no access-order consequence.** §10.2 says "heavy-low, fragile-protected,
+stable-base, and UNLOAD-ORDER strategies emerge from consequences", and there is no
+consequence for packing the first item you need at the front of the truck. The cargo box has
+one door and everything in it is equally reachable, because nothing has to be reached.
+
+**The destination has no truck.** The truck is parked permanently at the pickup driveway.
+There is no second parking position at the destination, so §8.1's "park position should
+affect ramp angle and carry distance" has no second instance to be true of, and the carry
+from the truck to the destination door does not exist.
+
+**Room labels are lime pads on the floor.** §13.1 asks for "labeled" zones and §21.2 wants
+contract UX that can name a room. What exists is a marker in the middle of each room and a
+`label` string nothing renders. A player has no way to learn which room is the bedroom.
+
+**Delivery is site-level by decision, and the decision is reversible.** If playtesting says
+wrong-room delivery should block completion, the change is one predicate in `stepManifest`
+and the inversion of m9's D1. It is recorded here because the next person will have an
+opinion and should know it was a choice rather than an oversight.
+
+**`fromZone` is still null on every manifest row.** It is filled at spawn in principle; in
+practice nothing sets it, so the invoice cannot yet say an item came out of the bedroom and
+went into the kitchen — which is the most legible form of §15.1's room-accuracy line.

@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 8,
-  label: 'phase-8',
+  phase: 9,
+  label: 'phase-9',
   date: '2026-08-21',
 });
 

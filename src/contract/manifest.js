@@ -32,6 +32,7 @@
 
 import { MANIFEST } from '../config.js';
 import { ZONES, zoneAt, zoneById } from '../world/house.js';
+import { DEST_ZONES, destZoneAt, insideDestination, destZoneIds } from '../world/destination.js';
 import { OBJECT_DEFS } from '../objects/definitions.js';
 
 /**
@@ -92,18 +93,33 @@ export function stepManifest(rows, registry, stepMs, zones = ZONES) {
     const e = row.entityId ? registry.get(row.entityId) : null;
     if (!e) { row.dwellMs = 0; row.delivered = false; continue; }
 
-    const target = zoneById(row.toZone, zones);
-    if (!target) { row.dwellMs = 0; continue; }   // destination site not built yet (Phase 9)
-
     const t = e.body.translation();
     const centre = { x: t.x, y: t.y, z: t.z };
-    const inPlace = substantiallyInside(target, centre, e.def.dimensions);
 
-    // §12.3's dwell. Settled is the registry's single definition (§7.3), not a second one.
-    if (inPlace && e.state.settled) row.dwellMs = Math.min(MANIFEST.dwellMs, row.dwellMs + stepMs);
+    /* DELIVERED IS SITE-LEVEL. IN THE RIGHT ROOM IS A SEPARATE, SCORED FACT.
+     *
+     * The GDD pulls three ways on this and the tie has to be broken somewhere:
+     *   §3.4  Delivery exits when "required items settled in VALID destination zones" — a gate
+     *   §15.1 scores ROOM ACCURACY as a line item with a "small perfect bonus" — a price
+     *   §12.2 lists four hard-fail conditions and a lamp in the wrong room is not one
+     *
+     * Two of the three make it a price, and §2.1's "the game should rarely say no" settles
+     * it. A contract can complete with every item dumped in the hallway; it simply pays less.
+     * Making it a gate would mean a player who cannot find the right bedroom is stuck with a
+     * finished job the game will not accept, which is the exact shape §2.1 forbids. */
+    const inBuilding = insideDestination(centre);
+    const settledHere = inBuilding && e.state.settled;
+
+    if (settledHere) row.dwellMs = Math.min(MANIFEST.dwellMs, row.dwellMs + stepMs);
     else row.dwellMs = 0;
-
     row.delivered = row.dwellMs >= MANIFEST.dwellMs;
+
+    // …and the accuracy half, recorded whether or not it is right.
+    const room = destZoneAt(centre);
+    row.inZone = room ? room.id : null;
+    const target = zoneById(row.toZone, zones) || destZoneAt(centre, DEST_ZONES.filter((z) => z.id === row.toZone));
+    row.roomCorrect = !!row.delivered && !!room && room.id === row.toZone &&
+      substantiallyInside(target || room, centre, e.def.dimensions);
   }
 }
 
@@ -125,12 +141,48 @@ export function locateAll(rows, registry, zones = ZONES) {
 export function manifestSummary(rows) {
   const total = rows.length;
   const delivered = rows.filter((r) => r.delivered).length;
+  const roomCorrect = rows.filter((r) => r.roomCorrect).length;
   const byHandling = {};
   for (const r of rows) {
     const k = r.handling || 'standard';
     byHandling[k] = (byHandling[k] || 0) + 1;
   }
-  return { total, delivered, remaining: total - delivered, byHandling };
+  return {
+    total, delivered, remaining: total - delivered, byHandling,
+    /** §15.1's room-accuracy line. A fraction of what was DELIVERED, not of the manifest —
+     *  an item still on the truck is not a room-accuracy failure, it is an undelivered item,
+     *  and mixing the two would charge a player twice for one mistake. */
+    roomCorrect,
+    roomAccuracy: delivered > 0 ? roomCorrect / delivered : 1,
+    complete: delivered === total && total > 0,
+  };
+}
+
+/**
+ * §3.4's Delivery exit condition, as a report rather than a verdict.
+ *
+ * Returns what is outstanding and why. Nothing here ends a phase or refuses one — §12.2
+ * reserves hard failure for four rare cases and "the contract is not finished yet" is not
+ * one of them. The caller decides; this only counts.
+ */
+export function deliveryStatus(rows, registry) {
+  const outstanding = [];
+  for (const row of rows) {
+    if (row.delivered) continue;
+    const e = row.entityId ? registry.get(row.entityId) : null;
+    if (!e) { outstanding.push({ id: row.id, defId: row.defId, why: 'missing' }); continue; }
+    const t = e.body.translation();
+    const inBuilding = insideDestination({ x: t.x, y: t.y, z: t.z });
+    outstanding.push({
+      id: row.id,
+      defId: row.defId,
+      why: !inBuilding ? 'not at the destination'
+         : !e.state.settled ? 'still moving'
+         : 'settling',
+    });
+  }
+  const sum = manifestSummary(rows);
+  return { ...sum, outstanding };
 }
 
 /**
@@ -150,6 +202,12 @@ export function validateManifest(spawns, zones = ZONES) {
   for (const [i, s] of spawns.entries()) {
     const def = OBJECT_DEFS[s.def];
     if (!def) { problems.push(`row ${i}: unknown definition "${s.def}"`); continue; }
+
+    // §24.4: a manifest may not name a room that does not exist. Before Phase 9 the toZone
+    // values were seams with nothing to resolve against; now they must resolve.
+    if (s.to && !destZoneIds().includes(s.to)) {
+      problems.push('row ' + i + ' (' + s.def + '): unknown destination zone "' + s.to + '"');
+    }
 
     // Must start somewhere named, or the object is unreachable and unfindable.
     const z = zoneAt({ x: s.x, y: s.y, z: s.z }, zones);

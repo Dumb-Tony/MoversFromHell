@@ -313,3 +313,41 @@ player should be sweating through it. Right now they would be watching.
 **Would I tell a friend about it?** Yes: "I stacked the fridge on the dresser, and by the time
 we arrived the telly was face-down in the doorway." That is the sentence this game is for, and
 it is the first one since Phase 3 that came out of consequences rather than out of a tool.
+
+## Phase 9 — the destination — 2026-08-21
+
+**The first build with two ends to it.** Author's note; still no external playtest.
+
+**Seeing all 23 objects standing in the right three rooms is oddly satisfying**, and I think
+that is a real signal rather than author's pride. The floor-plan shot of the destination is
+the first image in this project that looks like a JOB FINISHED rather than a system working.
+Whatever else is wrong with the build, the shape of the loop — empty that house, fill this
+one — reads at a glance.
+
+**The decision I am least sure about.** Delivery completes at the building, and the right
+room is scored rather than required. §3.4 can be read the other way, and a stricter reading
+would make the manifest more like a checklist and probably more tense. I went with the
+reading that never says no, because two of the three relevant sections and §2.1 all point
+that way — but this is the one Phase 9 decision I would put in front of a playtester as an
+explicit A/B rather than defending.
+
+**Actively worse: nothing was carried.** The manifest completes because the test puts objects
+where they belong. That is the correct way to test *validation*, and it is not a test of
+unloading, and I should not pretend otherwise. Four phases have now proven physics that no
+player can reach. The gap between "this project is correct" and "this project is playable" is
+the biggest thing in it.
+
+**Three fixtures in a row measured the wrong thing** — piling the manifest into one room, then
+rotating rooms, then swapping target rooms — and each failure looked like a delivery bug when
+it was a fact about whether 23 objects fit in a 4.5 × 3.0 m room. The fix was to change the
+one variable I actually meant to change: swap two IDENTICAL objects between rooms, so nothing
+about the geometry moves. Fourth phase running where the tell was a number that was too
+plausible to be a bug.
+
+**Cannot be judged yet.** Whether being told "the dresser goes in the bedroom" and then having
+to get it there is interesting or just admin. It depends entirely on the carry, which is the
+part not built.
+
+**Would I tell a friend about it?** Not about this phase on its own. "The game correctly
+notices when the sofa is in the right room" is not a story. But the two houses together are
+the first time the build has a beginning and an end, and that is worth something.

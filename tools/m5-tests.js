@@ -451,21 +451,32 @@ lines.push('--- E. zones and delivery (GDD §12.3) ---');
 
   /* §12.3's dwell. A thrown object passing through the right room must not bank credit on
    * the frame it crosses, and the only way to be sure is to check that a MOVING object in
-   * the right place scores nothing. */
+   * the right place scores nothing.
+   *
+   * TESTED AT THE DESTINATION, not in the pickup living room. When this was written the
+   * destination site did not exist and a pickup zone stood in for one; Phase 9 built the real
+   * thing, and `delivered` now means "settled inside the destination building" — so the
+   * stand-in stopped being one and E7 failed with `settled=true dwell 0`. The dwell mechanism
+   * being asserted here is unchanged; only the address is. */
   const e = registry.get(rows[0].entityId);
-  const fake = [{ id: 'x', defId: e.defId, entityId: e.id, toZone: 'living_room', delivered: false, dwellMs: 0 }];
-  parkAt(e, mid.x, 0.4, mid.z);
+  const dest = {
+    x: (M.destShell.minX + M.destShell.maxX) / 2,
+    z: M.destShell.minZ + 1.2,
+  };
+  const fake = [{ id: 'x', defId: e.defId, entityId: e.id, toZone: rows[0].toZone,
+                  delivered: false, dwellMs: 0 }];
+  parkAt(e, dest.x, 0.4, dest.z);
   e.body.setLinvel({ x: 6, y: 0, z: 0 }, true);
   e.state.settled = false;
   stepManifest(fake, registry, MANIFEST.dwellMs * 2);
-  ok('E6 an object skidding through the right room is not delivered (§12.3 dwell)',
+  ok('E6 an object skidding through the destination is not delivered (§12.3 dwell)',
      !fake[0].delivered, `dwell ${fake[0].dwellMs}`);
 
-  parkAt(e, mid.x, 0.4, mid.z);
+  parkAt(e, dest.x, e.def.dimensions.y / 2 + 0.05, dest.z);
   step(40);                                  // let it come to rest, so `settled` is earned
   fake[0].dwellMs = 0;
   stepManifest(fake, registry, MANIFEST.dwellMs);
-  ok('E7 …and one settled in the right room for the dwell IS delivered',
+  ok('E7 …and one settled at the destination for the dwell IS delivered',
      fake[0].delivered, `settled=${e.state.settled} dwell ${fake[0].dwellMs}`);
 }
 emit('running...');
