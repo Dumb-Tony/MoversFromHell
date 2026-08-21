@@ -3,15 +3,25 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 9 of 13**: a house to empty, two movers, four tools, a truck with a
-real cargo box, a drive that finds out how well you packed it, and a second house to fill.
-WASD move,
+*is* the site. **Phase 10 of 13**: a house to empty, two movers, four tools, a truck with a
+real cargo box, a drive that finds out how well you packed it, a second house to fill, and an
+invoice that prices every mistake you made getting there. WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
 one end, Tab to the other mover, grab the other end, and watch it come off the ground.
 
 ---
+
+> ### ⚠ What you can actually reach right now
+>
+> Phases 0–5 are playable with a keyboard: walk, grab, carry, drag, swap movers, wreck your
+> back on a couch. **Phases 6–10 are not.** The tools, straps, cargo loading, the drive and
+> the invoice are all real, all measured and all asserted by 669 tests — and none of them has
+> an input binding or a HUD, so a player cannot touch any of it. Each phase was gated on
+> physics and each deferred its interface; the compound effect is a build that is much more
+> correct than it is playable. It is the first thing that should be fixed and it is at the top
+> of [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 A 1–4 player physics-driven moving-company co-op game. You and your friends carry
 furniture down stairs, through doorways it does not fit through, into a truck that is a
@@ -79,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 9 complete
+## Current state — Phase 10 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -95,9 +105,23 @@ GDD §25.2 defines a 13-phase roadmap.
 | 7. Cargo | secured pack remains stable | done — 53 assertions |
 | 8. Drive | poor pack shifts or damages visibly | done — 38 assertions |
 | 9. Destination | manifest completes reliably | done — 41 assertions |
-| 10. Economy | ledger matches events | next |
+| 10. Economy | ledger matches events | done — 45 assertions |
+| 11. Playtest | external groups complete and replay | next — and it is the only one that matters |
 
-**624 assertions across ten suites, all passing.**
+**669 assertions across eleven suites, all passing.**
+
+![Phase 10](docs/phase10-invoice.png)
+
+§15.1's invoice, on a real contract: 21 of 23 items delivered, all in the right rooms,
+ninety seconds over the estimate, one television destroyed on the way in. Every line names
+the events it came from — item damage is the §8.4 ledger written *as the impacts happened*,
+never recomputed at settlement — and `reconcile()` re-derives the whole thing from the event
+records. It refuses an invoice with a charge nothing caused, and one that drops a ledger
+entry.
+
+The result is a **630.64 loss at grade D** on a job that went almost perfectly. One broken
+television is roughly the entire margin, which is not a number anyone tuned toward: §7.1's
+replacement values met §15.1's labour rate and that is where it landed.
 
 ![Phase 9](docs/phase9-destination.png)
 

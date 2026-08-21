@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 9,
-  label: 'phase-9',
+  phase: 10,
+  label: 'phase-10',
   date: '2026-08-21',
 });
 
@@ -535,6 +535,27 @@ export const ECONOMY = Object.freeze({
   roomAccuracyBonus: 90,
   recoveryFee: 45,           // §18.3 documented fee for a state-safe unstick
   collisionFeeBase: 60,
+
+  /* Added in Phase 10, when §15.1's formula finally had to be computed rather than named. */
+
+  /** §15.1: "Base contract | Rewards completion and scope | Fixed value." Sized against the
+   *  cost side rather than picked: two movers across the 18-minute estimate is
+   *  18 x 14 x 2 = 504, so a base of 900 leaves a competent job comfortably profitable and a
+   *  shambolic one genuinely not — which is what makes §15.2's "negative profit still
+   *  completes the job" a real possibility rather than a theoretical one. */
+  basePayout: 900,
+
+  /** How far under the estimate earns the FULL efficiency bonus, as a fraction of the
+   *  estimate. 0.25 is four and a half minutes early on an 18-minute job. §15.1 says
+   *  "graduated; no hard cutoff", so this scales a ramp and is never a threshold. */
+  efficiencyFullAt: 0.25,
+
+  /** §15.1's room-accuracy bonus is for a PERFECT unload; a partial one earns this fraction
+   *  of it, pro rata. Not zero — §2.3 wants trying-and-mostly-succeeding to beat not trying. */
+  roomAccuracyPartial: 0.5,
+
+  /** §13.3's "short contained street". The prototype route is one leg of it. */
+  routeDistanceKm: 4.2,
 });
 
 /** §18.3 recovery. Validated: Phase 5. */

@@ -3,6 +3,71 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 10 — the economy — 2026-08-21
+
+**Gate (§25.2):** "Time, damage, bonuses, invoice, review" → **ledger matches events**.
+**PASSED** — 45 assertions (669 across eleven suites).
+
+**Hypothesis:** "ledger matches events" is a stronger claim than "the arithmetic is right",
+and the difference is the whole phase. An invoice whose numbers add up but were computed at
+settlement from the final state of the world does not MATCH events — it agrees with them,
+which is a different thing and stops being true the moment the two diverge. So every line
+carries the events it came from, item damage is the §8.4 ledger the damage system wrote *as
+impacts happened*, and `reconcile()` re-derives the whole invoice from the event records.
+
+**§15.1's formula, implemented as written:** "Profit = base contract + bonuses + tips −
+labor time − overtime − vehicle/fuel − property damage − item damage − violations −
+recovery/service fees."
+
+**Measured — a real contract, 19.5 minutes against an 18-minute estimate, one television
+dropped on the way in**
+
+| line | amount |
+|---|---|
+| base contract | 900.00 |
+| room accuracy — 21/21 in the right room | 90.00 |
+| labor time — 18.0 min × 2 movers @ 14/min | −504.00 |
+| overtime — 1.5 min over, ×1.6 | −67.20 |
+| vehicle/fuel — 4.2 km @ 3.2/km | −13.44 |
+| furniture damage — 2 damage events | −991.00 |
+| recovery/service fees — 1 recovery callout | −45.00 |
+| **profit** | **−630.64** — grade D |
+
+> *"I heard the television before I saw it."*
+> broke_something_expensive · cost_them_money · items_left_behind
+
+**`reconcile()` IS the gate, and it is tested from both sides.** It starts from the event
+records — ledger lines, recovery counts, the work clock — and asks whether each invoice line
+is accounted for. m10 B10-B12 then hand it two deliberately corrupt invoices: one with a
+£250 property-damage charge nothing caused, and one that quietly drops a ledger entry. Both
+are refused, by name. A reconcile that always returns true would make the gate worthless.
+
+**Three §15.1 phrases that changed the implementation**
+
+- *"Graduated; no hard cutoff"* (efficiency bonus). §2.3 wants a player to be able to "spend
+  several hilarious minutes trying a terrible idea", and a bonus that cliffs at the estimate
+  would make the funny option the economically wrong one. Asserted as SMOOTHNESS: the worst
+  half-minute anywhere on the curve costs **28.89** of a 260 bonus, and three wasted minutes
+  costs 218 against a 900 base.
+- *"Negative profit still completes the job"* (§15.2). A 90-minute disaster with eight
+  recoveries and four collisions returns −3173.04, a grade, a full invoice and
+  `complete: true`. §12.2's four hard-fail conditions do not include an expensive afternoon.
+- *"Use profit margin, delivered completeness, damage ratio and constraints rather than
+  SPEED ALONE"* (§15.2). Two jobs at identical speed grade differently when one breaks six
+  items or leaves half the load behind — both asserted.
+
+**THE BUG OF THE PHASE: the review could not tell a disaster from a triumph.**
+§15.2 says to "select only the two or three MOST SALIENT events", and I was taking the first
+three tags in insertion order. A catastrophic job and a flawless one produced the identical
+review — *everything delivered, every room right, nothing broken* — because the tags that
+distinguished them (`needed_a_callout`, `cost_them_money`) were appended later and sliced
+off. Tags are now weighted by salience and the top three selected, on the principle that
+things going wrong are more remarkable than things going right. Nobody tells a story about
+the day the movers did not break anything.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61, m6 66, m7 53, m8 38, m9 41, m10 45 —
+669 assertions, all passing.
+
 ## Phase 9 — the destination — 2026-08-21
 
 **Gate (§25.2):** "Unload, room zones, settled validation" → **manifest completes

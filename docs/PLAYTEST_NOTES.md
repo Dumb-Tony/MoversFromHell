@@ -351,3 +351,48 @@ part not built.
 **Would I tell a friend about it?** Not about this phase on its own. "The game correctly
 notices when the sofa is in the right room" is not a story. But the two houses together are
 the first time the build has a beginning and an end, and that is worth something.
+
+## Phase 10 — the economy — 2026-08-21
+
+**The first time the game told me a story I had not written.** Author's note; still no
+external playtest.
+
+**The invoice is the best thing in the project.** Twenty-one items delivered, all in the
+right rooms, ninety seconds over the estimate, one television destroyed on the way in, one
+recovery callout — and a loss of 630.64 at grade D, with every line saying exactly which of
+those facts it came from. I did not author any of that. I dropped a television and the
+invoice explained the afternoon.
+
+**"I heard the television before I saw it."** The review picking that line out of what
+happened, over "everything delivered", is the moment §15.2's design clicked for me. A review
+that leads with the good news is a press release. The salience ordering that makes it lead
+with the bad news is ten lines of code and it changes the whole tone of the screen.
+
+**Actively worse — and it is the same sentence I have written five times now.** There is no
+invoice screen. Every number is real and none of them is on screen in the shipping build.
+Phases 6 through 10 have each banked a system and deferred its interface, and the compound
+effect is a game that is correct in eleven test suites and unplayable in a browser. That is
+the single most important fact about this build and no further phase will change it.
+
+**What genuinely surprised me.** That a competent job loses money if you break one expensive
+thing. The television is 900, the base contract is 900, and the labour on an 18-minute job
+with two movers is 504 — so one broken TV is roughly the entire margin. That is not a number
+I tuned toward; it fell out of §7.1's replacement values meeting §15.1's labour rate. It also
+happens to be exactly the tension the game wants: hurry and you break things, take care and
+the clock eats you.
+
+**The one I am least sure about.** Property damage is priced in config and charged nowhere,
+because Phase 8's damage model measures what an object lost rather than what it hit. So you
+can destroy a hallway for free. §8.2's whole preparation-versus-brute-force trade assumes
+otherwise, and I suspect that hole is why the doorway turn has never felt like a real
+decision — there is currently no cost to just shoving.
+
+**Cannot be judged yet.** Everything. Eleven gates have passed and the north-star question —
+is this fun with friends — is exactly as unanswered as it was at Phase 0. The build now has
+every system §25.2 asks for before the playtest phase, and §13.5 is blunt about what comes
+next: "a feature-complete prototype that is not fun is a failed prototype, and should be
+revised, not expanded."
+
+**Would I tell a friend about it?** Yes, and for the first time I would show them the invoice
+rather than the game: "we moved a whole house, and lost six hundred quid because I dropped
+the telly." That is the sentence this project has been trying to produce since Phase 0.

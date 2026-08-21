@@ -41,6 +41,8 @@ import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
 import { DEST_ZONES, DEST_SHELL, insideDestination } from './world/destination.js';
 import { DamageSystem } from './damage/damage.js';
+import { buildInvoice, reconcile, reviewFor, contributionStats } from './contract/invoice.js';
+import { manifestSummary } from './contract/manifest.js';
 import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
@@ -375,6 +377,7 @@ async function boot() {
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
     destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
     damage, route,
+    buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },
     get activeMoverIndex() { return activeMover; },

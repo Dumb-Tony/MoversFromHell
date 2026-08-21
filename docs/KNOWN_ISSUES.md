@@ -363,3 +363,41 @@ opinion and should know it was a choice rather than an oversight.
 **`fromZone` is still null on every manifest row.** It is filled at spawn in principle; in
 practice nothing sets it, so the invoice cannot yet say an item came out of the bedroom and
 went into the kitchen — which is the most legible form of §15.1's room-accuracy line.
+
+## Phase 10 open items
+
+**There is no invoice screen.** §21.2's contract UX is Phase 11 work and the build has none
+of it. The Phase 10 screenshot draws its own panel — every NUMBER in it comes from
+`buildInvoice()` running on the real ledger, so the content is the shipping build's and only
+the rendering belongs to the screenshot. Same arrangement as the Phase 7 strap lines, and
+called out here for the same reason.
+
+**Property damage is priced and unbuilt.** `DAMAGE.property` exists, keyed on impulse
+because what a wall suffers really does scale with the mass that hit it, and §15.1 lists it
+as its own line. Nothing writes to `ledger.propertyDamage`, because Phase 8's damage system
+measures an object's own lost speed and cannot say WHAT it hit. So a scraped wall is free,
+which is the single largest hole in the economy: §8.2's whole "preparation versus brute
+force" trade assumes wrecking the hallway has a price.
+
+**Tips, and the customer archetype behind them, do not exist.** §12.1 lists "customer
+archetype" and §15.2 says reviews assemble from "event tags, outcome, and CUSTOMER
+PERSONALITY". The invoice accepts a `tips` argument and nothing ever passes one, and every
+customer is the same customer.
+
+**Reputation is not modelled.** §15.1: "Reputation is separate and uses timeliness,
+completion, damage ratio, special constraints, and customer tolerance." The grade computes
+three of those five and is not persisted anywhere. §16.1's progression loop needs it.
+
+**The prototype route is 4.2 km of constant.** Fuel is `distance × rate` where the distance
+is a config value, not a measured drive — which follows from the truck not moving (Phase 7).
+It is honest as a fixed cost and it is not yet a "route mistake" the way §15.1's
+traffic/vehicle line intends.
+
+**One-trip is assumed, not enforced.** `tripCount` is on the state and nothing increments it,
+because nothing yet models going back for a second load. The bonus is therefore always
+available, which makes it free rather than earned.
+
+**Nothing is saved.** §23.4 asks for save data and §13.4 permits "a saved best invoice, cash,
+and reputation stub". The invoice is computed and discarded, so replaying a contract cannot
+yet be compared to the last attempt — which is most of what makes §19.1's replay sources
+work.
