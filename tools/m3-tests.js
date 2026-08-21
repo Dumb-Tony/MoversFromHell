@@ -324,9 +324,17 @@ lines.push('--- E. no hard denial (GDD §2.1, §6.3, gate) ---');
       grips.releaseAll('test');
     }
 
-    // Nothing anywhere refuses a grab because of mass class. §6.3: guidance, not gates.
+    /* Nothing anywhere refuses a grab because of mass class. §6.3: guidance, not gates.
+     *
+     * The step(12) is not padding. Both bodies have just been teleported, and a raycast reads
+     * a query pipeline that only world.step() refreshes — the same hazard that cost an
+     * afternoon in Phase 1 and is written up in Dev\INDEX.md. It went unnoticed here until
+     * Phase 6 fixed the friction combine rule: the drag loop above exits early now that the
+     * couch really moves, so the two teleports landed on a different frame and the ray
+     * started missing. The test was always fragile; it just never had reason to show it. */
     parkAt(couch, 74, 0.44, 74);
     placePlayer(74, 75.6);
+    step(12);
     const g2 = aimAtAndGrab('right', { x: 74, y: 0.6, z: 74 });
     ok('E5 a heavy object is never refused on the grounds of being heavy', !!g2);
     grips.releaseAll('test');

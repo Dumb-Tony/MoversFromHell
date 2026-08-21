@@ -222,3 +222,47 @@ and asserted again by m5 B8. It is on the front wall, not on the couch's route, 
 nothing — it is there as a legible example of a clearance that cannot be brute-forced, and
 becomes a real decision once Phase 6 can remove a door.
 
+## Phase 6 open items
+
+**The friction combine rule is Average everywhere except under a dolly.** Rapier averages the
+two colliders' coefficients, so every object's declared friction is roughly (its own + 0.9)/2
+against the floor — the couch's 0.35 is really 0.625, and 309 N of resistance is really
+552 N. `Min` is the better rule and was tried; it re-tuned four phases of measured behaviour
+in one edit (m2 lost a released box at 40 m/s, m3 lost a grab). The game is tuned correctly
+because it was tuned by measurement; only the arithmetic in the comments was wrong, and those
+are now corrected in place. **The Unity rebuild should set `Min` from the start and re-tune
+against it.** Until then, treat every friction number in `definitions.js` as a coefficient to
+be averaged, not as a force.
+
+**Solo couch dragging got harder, not easier.** With the tow speed limit in place, a lone
+mover hauling the couch one-handed for three seconds now moves it 0.00 m, where Phase 3
+measured a shuffle of 8 mm. m3 E3 still passes — a lone mover can put 90 kg into motion at
+all, which is the no-hard-denial claim — but the margin is thinner than it was. §2.1 asks to
+"allow awkward solo dragging of objects intended for two players", and the honest position is
+that solo dragging is now *technically* possible and *practically* not. The dolly is the
+intended answer (0.00 m → 2.12 m), which is a defensible design, but it means a player
+without a dolly has fewer options than §3.3's "at least two approaches" wants.
+
+**Tools have no interaction verb yet.** §9.2 requires deploy/attach/tension/fold/retrieve
+"through the common interaction system", and the `interact` binding (E / pad X) already
+exists in `src/core/input.js`. What does not exist is the code that reads it, finds what is
+under the reticle, and calls the right ToolSystem method. Every tool in m6 is driven by
+calling the API directly. The physics is real and asserted; the *player* cannot use any of it
+yet. This is the single biggest gap in Phase 6 and it is the first thing Phase 7 needs, since
+straps are useless without a way to attach them.
+
+**§9.2's placement preview does not exist.** "Placement provides a readable preview and
+valid/invalid affordance." The ramp computes its lip and alignment (`rampGeometry`) but
+nothing draws it, so a player would find out the ramp was badly laid by walking into the step.
+
+**Damage is modelled but not applied.** `conditionLossFor()` is exact and asserted, and the
+blanket measurably changes it, but nothing yet reads contact events and calls it. That wiring
+is Phase 8's gate ("poor pack shifts or damages visibly"), and doing it here would have been
+building ahead of the build order.
+
+**Detached parts are recorded, not spawned.** §9.1's failure mode for the screwdriver is
+"loose pieces get lost", and `state.removedParts` records what came off so it CAN be lost —
+but the doors do not become real bodies you have to carry. That is honest for the gate as
+written (the payoff asserted is packed volume) and it is a smaller version of §7.4's
+"every broken state must remain movable and completable" than that section deserves.
+

@@ -108,7 +108,16 @@ export const OBJECT_DEFS = Object.freeze({
      * MEASURED with real forces: a one-handed drag develops about 358 N before the grip
      * gives way. 0.45 resists 397 N (still stuck), 0.35 resists 309 N (drags, slowly).
      * 0.35 is also the honest figure for a fabric-and-wood base on a hard floor, and §9.1's
-     * furniture sliders exist to reduce it further still. */
+     * furniture sliders exist to reduce it further still.
+     *
+     * CORRECTION, Phase 6: those resistance figures are the ones this number IMPLIES, not
+     * the ones the solver applies. Rapier averages the two colliders' coefficients and the
+     * ground is 0.9, so the effective value against the floor is (0.35 + 0.9)/2 = 0.625 and
+     * the real resistance is 552 N, not 309 N. Everything tuned against it was tuned by
+     * measurement, so the FEEL is right and only the arithmetic in this comment was wrong.
+     * The rule is left at Average deliberately — see registry.js — and the dolly switches
+     * this object to Min while it is underneath. It is also why a lone mover can barely
+     * shift this couch: 552 N against a ~422 N one-handed budget. */
     physics: { friction: 0.35, restitution: 0.02, linearDamping: 0.2, angularDamping: 0.8 },
     grip: { forceMult: 1.0, surface: 'fabric' },
     fragility: 'normal',
@@ -212,7 +221,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'stackable'],
     colour: 0x8f6f45,
     cargoHints: ['nest'],
-    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 40, shrinksTo: { x: 0.46, y: 0.52, z: 0.50 } }],
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 40, reversible: true, shrinksTo: { x: 0.46, y: 0.52, z: 0.50 } }],
   },
 
   /* 5 kg and 1.65 m tall. §13.2 wants small furniture to test "awkward silhouettes", and
@@ -259,7 +268,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture'],
     colour: 0x9c7c50,
     cargoHints: [],
-    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 35, shrinksTo: { x: 0.55, y: 0.12, z: 0.55 } }],
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 35, reversible: true, shrinksTo: { x: 0.55, y: 0.12, z: 0.55 } }],
   },
 
   nightstand_01: {
@@ -306,7 +315,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['fragile', 'electronics', 'flat'],
     colour: 0x2b2f36,
     cargoHints: ['upright-only', 'no-stack-on', 'strap'],
-    disassembly: [{ part: 'stand', tool: 'screwdriver', seconds: 50, shrinksTo: { x: 1.24, y: 0.72, z: 0.07 } }],
+    disassembly: [{ part: 'stand', tool: 'screwdriver', seconds: 50, reversible: true, shrinksTo: { x: 1.24, y: 0.72, z: 0.07 } }],
   },
 
   bookshelf_01: {
@@ -328,7 +337,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'tall'],
     colour: 0x7d5f3c,
     cargoHints: ['heavy-low', 'lay-flat'],
-    disassembly: [{ part: 'shelves', tool: 'screwdriver', seconds: 90, shrinksTo: { x: 0.80, y: 1.80, z: 0.06 } }],
+    disassembly: [{ part: 'shelves', tool: 'screwdriver', seconds: 90, reversible: true, shrinksTo: { x: 0.80, y: 1.80, z: 0.06 } }],
   },
 
   armchair_01: {
@@ -400,7 +409,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'tall'],
     colour: 0x6f5334,
     cargoHints: ['heavy-low', 'strap'],
-    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 120, shrinksTo: { x: 1.20, y: 2.00, z: 0.52 } }],
+    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 120, reversible: true, shrinksTo: { x: 1.20, y: 2.00, z: 0.52 } }],
   },
 
   mirror_framed_01: {
@@ -448,7 +457,7 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['appliance', 'showcase', 'tall'],
     colour: 0xc9ced4,
     cargoHints: ['upright-only', 'heavy-low', 'strap'],
-    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 100, shrinksTo: { x: 0.62, y: 1.75, z: 0.66 } }],
+    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 100, reversible: true, shrinksTo: { x: 0.62, y: 1.75, z: 0.66 } }],
   },
 });
 

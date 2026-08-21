@@ -3,6 +3,85 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 6 — tools — 2026-08-21
+
+**Gate (§25.2):** "Dolly, protection, ramp, disassembly" → **each solves a physical
+problem**. **PASSED** — 66 assertions (492 across seven suites).
+
+**Hypothesis:** §9.1 says tools "create new physical solutions; they do not erase physics",
+and that "better tools should introduce both new mastery and new accidents". The way to
+honour both sentences at once is to make each tool change exactly ONE physical quantity and
+then get out of the way — so that its benefit and its failure mode are the same change seen
+from two sides, rather than a permission with a penalty stapled to it.
+
+| Tool | Changes | Benefit | Failure mode, and it is the same change |
+|---|---|---|---|
+| Flat dolly | friction | rolls on the flat | rolls downhill just as well |
+| Moving blanket | impact tolerance | survives more | softer to hold, and sheds |
+| Loading ramp | clearance | bridges the deck | laid short, it leaves a lip |
+| Screwdriver | dimensions | packs smaller | loose parts to lose |
+
+**Measured — every tool against a baseline where the problem is unsolved**
+
+| Claim | without | with |
+|---|---|---|
+| couch hauled 3 s, one mover, one hand | **0.00 m** | **2.12 m** |
+| fridge (110 kg) hauled the same way | **0.00 m** | **1.49 m** |
+| dollied load on the 16° ramp, peak speed | 0.50 m/s | **2.97 m/s** |
+| TV condition lost by a 1.5 m/s knock | **72.0 pts → cracked** | **0.0 pts → perfect** |
+| mover height reached at a 1.20 m deck face | **0.01 m** | **1.22 m** |
+| bookshelf packed volume | — | **−80%** |
+
+**The honest negative, asserted rather than glossed.** Disassembly does not make anything
+fit through a door it did not fit through before. All six disassemblable objects already
+clear the tightest opening on their route (0.86 m) by at least 160 mm, and the one genuinely
+tight object — the couch at 0.850 m against 0.860 — has no authored disassembly path at all.
+The wardrobe's real constraint is its 2.00 m height against a 2.03 m opening, which taking
+the doors off does not touch. So the measured payoff is **packed volume**, which feeds
+Phase 7's one-trip question, and m6 E8 asserts the negative so a later phase cannot quietly
+claim the clearance win instead.
+
+**THE BUG OF THE PHASE: an object's declared friction is not what it experiences.**
+Rapier COMBINES the two colliders' coefficients and the default rule is AVERAGE. The ground
+is 0.9, so `couch_3seat_01`'s declared 0.35 is really an effective 0.625, and the "309 N of
+resistance" this project has quoted since Phase 3 is actually 552 N.
+
+It surfaced because it made the dolly useless. Dropping an object from 0.35 to 0.04 should be
+an 8.75× cut; averaged against a 0.9 floor it is (0.04+0.9)/2 = 0.47, a cut of 1.3×. Measured
+before the fix: a couch hauled for three seconds moved 0.20 m bare and 0.36 m on the dolly,
+and the fridge did not move at all either way. The tool was correct and invisible. A probe
+found it in one run — 400 N applied to the parked couch moved it **14 mm in two seconds**,
+where 400 N against 309 N should accelerate at 1 m/s².
+
+**The fix is deliberately narrow, and that is a judgement call worth recording.** Switching
+every object to `Min` is the more principled rule and was tried first. It also re-tuned four
+phases of validated behaviour at once: m2 lost a released box at 40 m/s and m3 lost a grab,
+both green since Phase 2. Phases 2–5 tuned friction, drag force, grip stretch and knockdown
+thresholds *by measurement* against the averaged value, so the game is correctly tuned and
+only the arithmetic in the comments was wrong. The rule therefore stays at Average, and
+`attachDolly` switches that one object to `Min` for as long as the dolly is under it — which
+is exactly what a dolly claims: this contact is now governed by the wheels, not the floor.
+The Unity rebuild (§24) should start with `Min` and re-tune against it.
+
+**Second fix: you cannot walk faster than what you are towing can follow.** A hand is a
+spring, so a towed object trails it by about v/ω where ω = √(k/m). At the full 3.1 m/s
+against the couch's ω of 3.16 that is ~0.98 m of lag against a 0.70 m tear threshold, so
+dragging tore the grip within a metre — and the dolly could not fix it, because a dolly
+removes resistance but not inertia. `GripSystem.towSpeedLimit()` now derives the limit from
+what is actually held: 3.85 m/s for a 9 kg box (never binds), 1.22 for the couch, 1.10 for
+the fridge. That is §6.3's carry tiers expressed through the legs instead of a number on
+screen, and it is why dragging works at all now.
+
+**Item damage rewritten from impulse to impact SPEED.** The old bands were
+`impulseThreshold` / `conditionPerImpulse`, and impulse is m·Δv — so an object was more
+fragile for being heavy. Setting the 90 kg couch down at a gentle 0.5 m/s cost 55 condition
+points and cracked it, while a 9 kg box at twice the speed stayed perfect. §8.3 exists to say
+the opposite. Mass moved to where it belongs: `DAMAGE.property` is keyed on impulse, because
+what a *wall* suffers really does scale with the mass that hit it, and §15.1 prices the two
+as separate line items anyway.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61, m6 66 — 492 assertions, all passing.
+
 ## Phase 5 — the house puzzle — 2026-08-21
 
 **Gate (§25.2):** "Pickup, 15-25 objects, manifest and zones" → **all objects recoverable

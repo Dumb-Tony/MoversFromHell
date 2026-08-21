@@ -276,6 +276,39 @@ export class GripSystem {
   }
 
   /** How many hands (of this player) are on a given entity. §6.2's hand-count factor. */
+  /**
+   * How fast this mover may walk without tearing what they are holding, m/s.
+   *
+   * A hand is a spring, so a towed object trails the hand by about v/omega, where
+   * omega = sqrt(k_eff/m) is the natural frequency of the hand-object pair. Walk faster than
+   * the spring can accelerate the object and that lag grows past GRIP.maxStretch and the
+   * hold lets go. Nothing enforces that; it is simply what a spring does.
+   *
+   * MEASURED before this existed: a mover hauling the 90 kg couch at the full 3.1 m/s tore
+   * the grip inside a metre — omega is 3.16, so 3.1 m/s implies about 0.98 m of lag against
+   * a 0.70 m tear threshold. The visible consequence was that DRAGGING NEVER WORKED, and
+   * worse, that the dolly appeared to do nothing: it removes an object's resistance but not
+   * its inertia, so the mover outran the couch either way. The fix is to walk at a speed the
+   * object can follow, which is what a person towing something heavy actually does.
+   *
+   * The result is §6.3's carry tiers expressed through the legs rather than through a
+   * number: a 9 kg box gives 3.85 m/s and never binds, a couch 1.22, a fridge 1.10.
+   */
+  towSpeedLimit() {
+    let limit = Infinity;
+    for (const hand of HANDS) {
+      const grip = this.grips[hand];
+      if (!grip) continue;
+      const entity = this.registry.get(grip.entityId);
+      if (!entity) continue;
+      const hands = Math.max(1, entity.state.grips.length);
+      const omega = Math.sqrt((GRIP.spring * hands) / entity.def.mass);
+      const v = omega * GRIP.maxStretch * GRIP.towSpeedSafety;
+      if (v < limit) limit = v;
+    }
+    return limit;
+  }
+
   handsOn(entityId) {
     let n = 0;
     for (const h of HANDS) if (this.grips[h] && this.grips[h].entityId === entityId) n++;
@@ -432,6 +465,7 @@ export class GripSystem {
 
     if (this.player) {
       this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs);
+      this.player.towSpeedLimit = this.towSpeedLimit();
     }
 
     // §7.3's caps apply to whatever the grips just did.

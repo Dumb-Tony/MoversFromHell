@@ -196,3 +196,47 @@ of a task, not a story. Phase 3's sentence was better because something went wro
 The house needs tools and consequences before it produces stories again — which is precisely
 the order §29.1 puts them in.
 
+## Phase 6 — tools — 2026-08-21
+
+**The first phase where the game got easier on purpose.** Author's note; still no external
+playtest.
+
+**The fridge on the dolly is the best thing in the build.** 110 kg, immovable by one person —
+measured at literally 0.00 m in three seconds of hauling — and then it glides. The number
+that changes is friction, 0.48 to 0.04, and nothing else about the object changes at all: it
+still weighs 110 kg, still has to be steered, still tips if you look at it wrong. That is
+exactly what §9.1 means by "new physical solutions" rather than permissions, and it is the
+first time a tool in this project has felt like a tool rather than an unlock.
+
+**And the dolly is genuinely dangerous, for free.** Nobody wrote a runaway. Taking the
+friction away is what a dolly IS, and 0.04 cannot hold 883 N of couch on a 16° slope: peak
+speed on the ramp goes from 0.50 m/s bare to 2.97 m/s on wheels. The best failure modes in
+this project keep turning out to be the same line of code as the feature.
+
+**Actively worse: none of it is reachable.** Every tool works and no player can touch one.
+There is no interaction verb wired up, so the entire phase is API-only. In a real playtest
+this phase would score zero, and that is not a physics problem — it is forty lines of input
+plumbing I chose to defer past the gate. It is at the top of KNOWN_ISSUES for a reason.
+
+**The near-miss, and it was a big one.** The dolly appeared to do nothing for an hour. Couch
+0.20 m bare, 0.36 m on wheels — a real improvement, easily rationalised as "well, it is still
+90 kg". It would have shipped as a tuning problem. The actual cause was that Rapier averages
+friction coefficients with the floor, so an 8.75× reduction was arriving as 1.3×, and every
+friction figure quoted in this repo since Phase 3 was wrong by about 1.8×. Found by a
+twenty-line probe that applied 400 N to a parked couch and watched it move 14 mm. Third phase
+running where the honest move was to stop reasoning and measure one thing directly.
+
+**What I decided not to do, and it was uncomfortable.** The principled fix — Min everywhere —
+broke two suites that had been green for four phases. Phases 2 through 5 were tuned by
+measurement against the wrong model, which means they were tuned correctly against the real
+one. Narrowing the fix to the dolly and writing the finding down properly is the right call,
+but it does leave a known-wrong comment set behind, corrected in place rather than by
+re-tuning. If this were the production codebase I would re-tune. It is not; it is the
+laboratory, and §24 says the tuning ranges transfer, not the code.
+
+**Cannot be judged yet.** Whether four tools is the right number, whether the dolly trivialises
+the heavy tier, and whether the blanket is interesting or just admin. All three need a player.
+
+**Would I tell a friend about it?** "I put the fridge on a dolly and then it got away from me
+down the ramp." That is a story again, and it is the first one since Phase 3.
+

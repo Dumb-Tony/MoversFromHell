@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 5,
-  label: 'phase-5',
+  phase: 6,
+  label: 'phase-6',
   date: '2026-08-21',
 });
 
@@ -276,7 +276,11 @@ export const GRIP = Object.freeze({
    *  enters that band is already doomed and merely takes another second to admit it. At
    *  1.15 m there was a 0.32 m dead band doing exactly that; 0.70 m keeps 16% margin.
    *  tools/m2-tests.js asserts the relationship so a later tweak cannot reintroduce it. */
-  maxStretch: 0.70,          // m between hand target and grip point before releasing
+  maxStretch: 0.70,
+  /** Fraction of the theoretical maximum tow speed a mover is allowed to use.
+   *  v_max = sqrt(k/m) * maxStretch would put the lag exactly ON the tear threshold, which
+   *  tears on the first bump. 0.55 leaves the steady lag at about half the budget. */
+  towSpeedSafety: 0.55,
 
   holdDistanceMin: 0.85,     // how close the hand target may be pulled
   holdDistanceMax: 2.0,      // …and how far it may be pushed
@@ -304,16 +308,130 @@ export const DAMAGE = Object.freeze({
     { name: 'cracked',   min: 35, costFraction: 0.35 },
     { name: 'broken',    min: 0,  costFraction: 1.00 },
   ],
+  /* ITEM DAMAGE IS KEYED ON IMPACT SPEED, NOT ON IMPULSE. This was rewritten in Phase 6,
+   * and the reason is worth keeping.
+   *
+   * The original bands were `impulseThreshold` / `conditionPerImpulse`, and impulse is
+   * m*dv — so the model made an object more fragile simply for being heavy. MEASURED
+   * against the old numbers: setting the 90 kg couch down at a gentle 0.5 m/s produced an
+   * impulse of 45 N.s, cost 55.3 condition points, and dropped it straight into the
+   * `cracked` band. A 9 kg box hitting the floor twice as fast took 4.9 points and stayed
+   * perfect. The couch was ten times more delicate than a box of glassware, purely by mass.
+   *
+   * That is precisely backwards from §8.3, which exists to say "a fragile television and a
+   * cheap box should not share a generic hit-point curve". Fragility is a property of the
+   * OBJECT, and what breaks something is how hard it is hit — its speed on contact — not
+   * how much it weighs.
+   *
+   * Mass has not stopped mattering; it moved to where it belongs. §15.1 prices property
+   * damage and item damage as SEPARATE line items, and §8.3 describes static surfaces in
+   * terms of "contact energy above threshold". So a heavy object still does more harm to a
+   * wall than a light one, through `property` below, which IS keyed on impulse.
+   *
+   * Sanity of the numbers, all in m/s:
+   *   couch set down at 0.5     below the 2.0 threshold, no damage
+   *   couch dropped at 3.0      (3.0-2.0)*26 = 26 points -> scratched
+   *   TV set down at 0.5        below its 0.7 threshold, no damage
+   *   TV dropped at 1.5         (1.5-0.7)*90 = 72 points -> cracked, 0.35 x 900 = 315
+   *   TV dropped at 2.0         117 points -> broken, the full 900
+   */
   fragility: {
-    sturdy:  { impulseThreshold: 9.0, conditionPerImpulse: 0.6 },
-    normal:  { impulseThreshold: 5.5, conditionPerImpulse: 1.4 },
-    fragile: { impulseThreshold: 2.4, conditionPerImpulse: 4.0 },
-    extreme: { impulseThreshold: 1.2, conditionPerImpulse: 8.5 },
+    sturdy:  { impactSpeed: 3.2, conditionPerMps: 14 },
+    normal:  { impactSpeed: 2.0, conditionPerMps: 26 },
+    fragile: { impactSpeed: 1.1, conditionPerMps: 55 },
+    extreme: { impactSpeed: 0.7, conditionPerMps: 90 },
+  },
+  /** §8.3 static surfaces: "contact energy above threshold accumulates damage". THIS half
+   *  is keyed on impulse, because what a wall suffers really does scale with the mass that
+   *  hit it. §15.1's separate "property damage" line item. Validated: Phase 8. */
+  property: {
+    impulseThreshold: 12,
+    costPerImpulse: 1.6,
+    maxChargePerSurface: 400,   // §8.3 "maximum charge"
   },
   /** §7.3 + §8.3: "aggregate repeated scrape contacts into one coherent damage event".
    *  Without this a couch dragged along a wall bills the player forty times. */
   aggregationWindowMs: 700,
   aggregationRadius: 0.8,    // m — contacts within this of each other merge
+});
+
+/** §9.1 tools, §9.2 interaction contract, §8.2 modifiable environment. Validated: Phase 6.
+ *
+ *  §9.1's rule governs every number here: "Tools create new physical solutions; they do not
+ *  erase physics. Each tool changes leverage, friction, protection, clearance, containment,
+ *  or securing. Better tools should introduce both new mastery and new accidents."
+ *
+ *  So each tool below changes ONE physical quantity, and each one's benefit and its failure
+ *  mode come from the SAME change rather than from a separate penalty bolted on:
+ *
+ *    dolly       lowers friction  -> rolls on the flat, and runs away on a slope
+ *    blanket     raises the impact-speed threshold -> protects, and is harder to grip
+ *    ramp        adds a walkable surface -> bridges the deck, and can be laid badly
+ *    screwdriver changes dimensions -> packs smaller, and makes loose parts to lose
+ */
+export const TOOLS = Object.freeze({
+  /** One reach for everything, matching GRIP.reach. §9.2 wants deploy/attach/fold/retrieve
+   *  "through the common interaction system", and two different ranges would make the same
+   *  gesture work at different distances depending on what you were pointing at. */
+  interactRange: 2.1,
+
+  dolly: {
+    mass: 14,
+    dimensions: { x: 0.78, y: 0.14, z: 0.48 },
+    /* THE WHOLE TOOL, in one number. A loaded object's friction is replaced by this while
+     * the dolly is under it: couch 0.35 -> 0.04 is an 8.75x cut in the force needed to
+     * shift it, and fridge 0.48 -> 0.04 is 12x.
+     *
+     * §9.1's failure mode falls out of the same substitution rather than being authored:
+     * with friction that low, a loaded dolly on the scene's 16-degree ramp has 244 N
+     * pushing it downhill against 34 N of resistance. It runs. Nothing had to be added to
+     * make it run — taking the friction away is what a dolly IS. */
+    rollingResistance: 0.04,
+    /** Above this slope a loaded dolly is a hazard rather than a help (§9.1 "runs on
+     *  slopes"). Not a refusal — it still works, it just stops being your friend. */
+    slopeRunawayDeg: 4.0,
+    liftM: 0.14,               // deck height; the load sits this much higher
+  },
+
+  blanket: {
+    mass: 3,
+    dimensions: { x: 1.80, y: 0.06, z: 1.40 },
+    /** §9.1 "reduce scratches/impact". Multiplies the impact speed an object tolerates
+     *  before losing condition: a TV goes from 0.7 m/s to 1.54 m/s. */
+    thresholdMult: 2.2,
+    /** …and softens what does get through. */
+    conditionMult: 0.45,
+    /** §9.1's failure mode: "bad wrap obscures grip or falls off". A wrapped object is
+     *  harder to hold — there is nothing rigid under your hands. */
+    gripForceMult: 0.82,
+    /** Above this impact speed the wrap comes off and stops protecting anything. */
+    shedSpeed: 3.4,
+  },
+
+  ramp: {
+    mass: 22,
+    /** 2.70 m long against a 1.20 m deck is asin(1.20/2.70) = 26.4 degrees — inside
+     *  PLAYER.maxSlopeClimbDeg (48), so it is walkable, and steep enough that a loaded
+     *  dolly on it is a genuine problem. */
+    length: 2.70,
+    width: 1.10,
+    thickness: 0.10,
+    deckHeight: 1.20,          // matches PLATFORM.y; the scene's ramp already rises 1.2022
+    /** §9.1 "misalignment or steep approach". Laid further than this from the deck edge,
+     *  the ramp leaves a lip instead of a joint. */
+    alignToleranceM: 0.18,
+  },
+
+  screwdriver: {
+    mass: 1,
+    dimensions: { x: 0.05, y: 0.05, z: 0.26 },
+    /** §23.1's disassembly entries carry their own `seconds`; this scales all of them, so
+     *  one number tunes how much preparation costs without re-authoring every object. */
+    timeScale: 1.0,
+    /** §9.1 "loose pieces get lost" — detached parts are real bodies with real recovery,
+     *  not a flag on the parent. This is how heavy they are relative to what they came off. */
+    partMassFraction: 0.14,
+  },
 });
 
 /** §10.3 straps. Validated: Phase 7. */

@@ -64,6 +64,34 @@ export class ObjectRegistry {
       .setRestitution(def.physics.restitution)
       .setMass(def.mass);
 
+    /* AN OBJECT'S DECLARED FRICTION IS NOT WHAT IT EXPERIENCES. Discovered in Phase 6.
+     *
+     * Rapier COMBINES the two colliders' coefficients, and the default rule is AVERAGE. The
+     * ground is 0.9 and the static architecture 0.8, so couch_3seat_01's 0.35 is really an
+     * effective (0.35 + 0.9)/2 = 0.625 against the floor. The "309 N of resistance" quoted
+     * in its definition is actually 552 N.
+     *
+     * MEASURED, and this is what found it: 400 N applied to the parked couch moved it 14 mm
+     * in two seconds, where 400 N against 309 N should accelerate it at 1 m/s^2.
+     *
+     * THE RULE IS DELIBERATELY LEFT AT AVERAGE ANYWAY, which needs justifying.
+     *
+     * Switching every object to Min was tried first, and it is the more principled rule —
+     * "how slippery is this contact" really is a property of the smoother surface. But
+     * Phases 2 through 5 tuned couch friction, drag force, grip stretch and knockdown
+     * thresholds BY MEASUREMENT against the averaged value, so the game is correctly tuned
+     * and only the stated interpretation was wrong. Flipping the rule globally re-tuned all
+     * of it at once: m2 lost a released box at 40 m/s and m3 lost a grab, both of which had
+     * been green for four phases. Correcting a comment is not worth destabilising validated
+     * behaviour.
+     *
+     * The one place it genuinely matters is the dolly, whose entire existence is a friction
+     * substitution — and ToolSystem.attachDolly switches THAT object's rule to Min for as
+     * long as the dolly is under it. See tools.js for why that is the right scope.
+     *
+     * When this build is rebuilt in Unity (§24), set the rule to Min from the start and
+     * re-tune against it; the numbers in this file will then mean what they say. */
+
     // §7.1's centerOfMassOffset. Rapier derives the COM from the collider unless told
     // otherwise, so an off-centre COM has to be set explicitly via mass properties.
     const com = def.centerOfMassOffset || { x: 0, y: 0, z: 0 };

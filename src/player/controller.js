@@ -101,6 +101,9 @@ export class PlayerController {
     this.exertion = 0;
     this._downMs = 0;         // remaining knockdown time
     this.knockdowns = 0;
+    /** Fastest this mover may walk while towing, m/s. Set each step by the grip system from
+     *  the mass and stiffness of what is actually held; Infinity when nothing is. */
+    this.towSpeedLimit = Infinity;
     /** Set by the grip system when it wants the mover to let go (knocked down). */
     this.onForcedRelease = null;
   }
@@ -248,6 +251,26 @@ export class PlayerController {
     // §6.2: what you are carrying slows you, and §5.1's stumbling reduces control further.
     speed *= this.loadSpeedMult;
     if (this.stumbling) speed *= CARRY.stumbleSpeedMult;
+
+    /* YOU CANNOT WALK FASTER THAN WHAT YOU ARE TOWING CAN FOLLOW. Added in Phase 6.
+     *
+     * A hand is a spring, so a held object trails the hand by roughly v/omega, where omega
+     * is sqrt(k/m). Walk faster than the spring can accelerate the object and the lag grows
+     * past GRIP.maxStretch and the hold tears — which is not a rule anywhere, it is just
+     * what a spring does. MEASURED before this existed: a mover hauling a 90 kg couch at
+     * full walking pace tore the grip within a metre, dolly or no dolly, because 3.1 m/s
+     * against omega = 3.16 implies about a metre of lag and the tear threshold is 0.70 m.
+     *
+     * The effect was that dragging never really worked and the DOLLY LOOKED USELESS: it
+     * removes the resistance but not the inertia, so the mover still outran the couch. That
+     * is a real physical fact about towing mass, and the honest fix is to walk slower, not
+     * to make the spring stronger.
+     *
+     * GripSystem computes the limit from the objects actually held (see towSpeedLimit) and
+     * it is Infinity when nothing is. A 9 kg box gives 3.85 m/s and never binds; a couch
+     * gives 1.22 m/s and a fridge 1.10, which is §6.3's carry tiers expressed through the
+     * legs instead of through a number on screen. */
+    if (this.towSpeedLimit > 0 && speed > this.towSpeedLimit) speed = this.towSpeedLimit;
 
     const targetVx = wx * speed, targetVz = wz * speed;
 

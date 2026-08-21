@@ -3,8 +3,8 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 5 of 13**: a three-room house with 23 things to move out of it, and
-two movers to do it with. WASD move,
+*is* the site. **Phase 6 of 13**: a three-room house, 23 things to move out of it, two
+movers, and four tools that change the physics rather than granting permission. WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
@@ -78,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 5 complete
+## Current state — Phase 6 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -90,9 +90,30 @@ GDD §25.2 defines a 13-phase roadmap.
 | 3. Heavy object | weight legible without hard denial | done — 61 assertions |
 | 4. Cooperative seam | multiple grips combine predictably | done — 59 assertions |
 | 5. House puzzle | all objects recoverable and movable | done — 61 assertions |
-| 6. Tools | each solves a physical problem | next |
+| 6. Tools | each solves a physical problem | done — 66 assertions |
+| 7. Cargo | secured pack remains stable | next |
 
-**426 assertions across six suites, all passing.**
+**492 assertions across seven suites, all passing.**
+
+![Phase 6](docs/phase6-tools.png)
+
+The four §9.1 tools on the driveway: the fridge up on the flat dolly, the loading ramp
+against a 1.20 m deck, a moving blanket over the television, a screwdriver on the ground.
+Each tool changes one physical quantity and nothing else — which is why each one's failure
+mode is the same change seen from the other side.
+
+### What Phase 6 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| Four tools | `src/tools/` | Dolly (friction), blanket (impact tolerance), ramp (clearance), screwdriver (dimensions). Real world bodies with mass — §9.2's "tools are world objects". |
+| Tow speed limit | `src/player/grip.js` | You cannot walk faster than what you are towing can follow. A hand is a spring; walk past √(k/m)·maxStretch and the hold tears. |
+| Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs. |
+| Friction combine fix | `src/tools/tools.js` | An object's declared friction is averaged with the floor's. The dolly switches to `Min` so its 8.75× cut is not delivered as 1.3×. |
+
+**Measured:** couch hauled by one hand for 3 s — **0.00 m bare, 2.12 m on the dolly**. Fridge
+**0.00 m → 1.49 m**. A 1.5 m/s knock costs a bare TV 72 condition points and a wrapped one
+**zero**. A 1.20 m deck face: **0.01 m reached without a ramp, 1.22 m with one**.
 
 ![Phase 5](docs/phase5-house.png)
 

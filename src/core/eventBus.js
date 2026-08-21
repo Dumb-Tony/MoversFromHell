@@ -27,6 +27,11 @@ export const EVENTS = Object.freeze({
   IMPACT:           'IMPACT',           // entities, point, impulse, materials, relVelocity
   DAMAGE_APPLIED:   'DAMAGE_APPLIED',   // target, source, category, amount, cost, position
   STRAP_CHANGED:    'STRAP_CHANGED',    // strapId, endpoints, tension, state, actor
+  /* Phase 6. §9.2 requires tools to have "stable IDs and state so multiplayer authority and
+   * save snapshots can represent them", which means their transitions have to be observable
+   * rather than inferred from watching a body move. */
+  TOOL_STATE:       'TOOL_STATE',       // toolId, entityId, state: attached|covered|deployed|detached
+  PART_CHANGED:     'PART_CHANGED',     // entityId, part, removed|restored, dimensions
   ZONE_CHANGED:     'ZONE_CHANGED',     // entityId, zoneId, entered|exited, settled
   CARGO_STATE:      'CARGO_STATE',      // entityId, truckId, secured, support, risk
   ROAD_FORCE:       'ROAD_FORCE',       // truckId, type, vector, severity

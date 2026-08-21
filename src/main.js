@@ -35,6 +35,8 @@ import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
 import { overlappingZones } from './world/house.js';
+import { ToolSystem } from './tools/tools.js';
+import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
 import { BUILD, MOVERS } from './config.js';
@@ -94,6 +96,16 @@ async function boot() {
     const e = registry.spawn(s.def, s);
     game.state.manifest[i].entityId = e.id;
   });
+
+  /* ---- tools (Phase 6) -------------------------------------------------------------------
+   * §9.2: "Tools are world objects and consume cargo space unless mounted." They spawn on a
+   * rack in the driveway (§9.3) as real bodies with mass, so leaving one behind is a mistake
+   * you make with your hands rather than a menu you failed to read. */
+  const toolProblems = validateAllToolDefs();
+  if (Object.keys(toolProblems).length) console.warn('[MFH] tool validation', toolProblems);
+  const tools = new ToolSystem(physics, registry, world.scene, bus);
+  for (const s of PHASE6_TOOL_SPAWNS) tools.spawn(s.def, s);
+  physics.primeQueries();
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
@@ -286,6 +298,7 @@ async function boot() {
     const p = game.state.players[game.state.localPlayerId];
     rig.update(p.position, dt);   // the rig follows whoever you are driving
     registry.syncMeshes();
+    tools.syncMeshes();
     hud.update(active().grips.status());
 
     renderer.render(world.scene, camera);
@@ -312,7 +325,7 @@ async function boot() {
    * is being driven, so a suite that swaps movers does not silently keep poking mover 0. */
   const api = {
     game, input, rig, world, overlay, hud, renderer, camera, syncSize,
-    physics, registry, movers,
+    physics, registry, movers, tools,
     get player() { return active().controller; },
     get grips() { return active().grips; },
     get activeMoverIndex() { return activeMover; },
