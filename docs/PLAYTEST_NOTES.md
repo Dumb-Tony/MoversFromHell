@@ -158,3 +158,41 @@ simulation, not about a game. Phase 3's was "I tried to carry a couch on my own 
 knocked me over" — a story. Phase 4 made the game more correct and less funny, which is
 probably the right trade at this point in the build order, but it is worth noticing.
 
+## Phase 5 — the house puzzle — 2026-08-21
+
+**The first build that looks like a job rather than a laboratory.** Author's note; still no
+external playtest, and Phase 4's warning about that has now become the project's main risk.
+
+**Seeing the plan view changed my mind about the layout.** Three rooms, 23 objects, and the
+route from the front door to the bedroom passing through two openings on perpendicular axes.
+Reading it as a floor plan makes the job legible in a way the object list never did: you can
+see which room is going to be the problem before you touch anything, which is exactly what
+§8.1 means by "critical clearances must be visually legible".
+
+**The fridge is the best thing in the house.** 110 kg, 1.75 m tall, narrow, and top-heavy
+because its centre of mass is set ABOVE its geometric centre. It does not drag like the
+couch — it wants to tip, and it takes two people leaning on it to do anything at all. It is
+the first object that suggests its own solution (get a dolly) rather than just being heavy.
+
+**Actively worse: the house is now full of things I cannot pick up conveniently.** With 23
+objects and no dolly, no straps and nowhere to put anything, the honest verdict is that
+Phase 5 built the PROBLEM and Phase 6 builds the answer. Walking into a full living room
+with two hands and no equipment is faintly demoralising, which I suspect is the correct
+feeling for about ninety seconds and the wrong one after that.
+
+**The near-miss.** 17 of 23 objects reported as immovable, including a 9 kg box — and the
+game was fine. The test was staging every object on the same square metre of ground and
+leaving it there, so each new object spawned inside a growing heap of the previous ones. It
+looked exactly like a physics regression. The tell was that the couch and armchair passed:
+they went first, when the pad was still empty. Second phase running where the measurement
+was wrong rather than the game.
+
+**Cannot be judged yet.** Whether the doorway turn is fun. Everything about this phase
+points at that one question and none of it answers it.
+
+**Would I tell a friend about it?** Not yet, and that is a change from Phase 3. "Here is a
+house with 23 things in it and a corner you have to pivot a couch around" is a description
+of a task, not a story. Phase 3's sentence was better because something went wrong in it.
+The house needs tools and consequences before it produces stories again — which is precisely
+the order §29.1 puts them in.
+

@@ -20,7 +20,8 @@ $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chrome)) { $chrome = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" }
 if (-not (Test-Path $chrome)) { Write-Host "Chrome not found." -ForegroundColor Red; exit 2 }
 
-$scratchName = "_shot.html"
+# Per-PORT scratch name; see the note in smoketest.ps1.
+$scratchName = "_shot-$Port.html"
 $scratch = Join-Path $root $scratchName
 $html = Get-Content (Join-Path $root "index.html") -Raw -Encoding UTF8
 if ($Setup) {

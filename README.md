@@ -3,7 +3,8 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 4 of 13**: two movers, and a 90 kg couch that argues back. WASD move,
+*is* the site. **Phase 5 of 13**: a three-room house with 23 things to move out of it, and
+two movers to do it with. WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
@@ -77,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 4 complete
+## Current state — Phase 5 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -88,9 +89,27 @@ GDD §25.2 defines a 13-phase roadmap.
 | 2. One box | controllable; no wall ghosting | done — 66 assertions |
 | 3. Heavy object | weight legible without hard denial | done — 61 assertions |
 | 4. Cooperative seam | multiple grips combine predictably | done — 59 assertions |
-| 5. House puzzle | architecture creates real choices | next |
+| 5. House puzzle | all objects recoverable and movable | done — 61 assertions |
+| 6. Tools | each solves a physical problem | next |
 
-**365 assertions across five suites, all passing.**
+**426 assertions across six suites, all passing.**
+
+![Phase 5](docs/phase5-house.png)
+
+The pickup house with its ceiling hidden. Living room at the front, kitchen and bedroom
+behind, and two interior doorways **on perpendicular axes** — §13.1's "doorway turn". 23
+objects, from a 5 kg floor lamp to a 110 kg fridge. Getting the 2.10 m couch to the bedroom
+means pivoting it round that corner through 10 mm of clearance.
+
+### What Phase 5 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| The house | `src/world/house.js` | Three rooms and two openings, cut out of the partitions from one shared record so the visible gap and the collider cannot disagree (§8.1). |
+| §13.2's manifest | `src/objects/definitions.js` | 23 objects: 9 boxes, 5 small, 3 medium, 3 large, 2 fragile, 1 showcase. Replacement values spanning 30x. |
+| Zones + delivery | `src/contract/manifest.js` | §12.3: substantially inside, settled, for a dwell. "Substantially" is a fraction — demanding full containment would make a couch undeliverable to a small room. |
+| Object recovery | `src/objects/registry.js` | §18.3. A dropped object is somewhere inconvenient, never gone (§2.2). |
+| Content validators | both | Run at load in the shipping build, not only in tests (§24.4). They caught two real authoring bugs in this phase alone. |
 
 ![Phase 4](docs/phase4-coop.png)
 

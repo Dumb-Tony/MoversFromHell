@@ -182,3 +182,43 @@ grab. Raising the hands is currently a side effect of looking up, which is why t
 manipulate the hold offset instead of the camera. Whether lifting deserves its own input is a
 §4.2 control-map question that Phase 6's tools will force an answer to.
 
+## Phase 5 open items
+
+**The doorway turn has never been driven by a human.** The layout forces a 90-degree change
+of heading between two openings 3.2 m apart, with a 2.10 m couch — on paper that is §3.3's
+"preparation versus brute force" with both branches open, and m5 proves the couch can
+geometrically reach the bedroom with 10 mm to spare. Whether pivoting it round that corner
+is *satisfying* or merely *fiddly* is the single most important open question in the
+project, and it cannot be answered by a test. It is the first thing to put in front of a
+playtester.
+
+**§8.2's two other answers to the turn do not exist yet.** The GDD offers three ways past a
+tight corner: pivot it, take the door off its hinges, or unscrew the legs. Only the first is
+buildable in Phase 5, so right now the turn has exactly one solution — which is thinner than
+§3.3 asks for ("at least two approaches"). Phase 6's tools close this, and the layout was
+built now specifically so Phase 6 has a real problem to solve rather than an invented one.
+Until then the route puzzle is honest but narrow.
+
+**Destination zones are named and unbuilt.** Every manifest row carries a `toZone`
+(`dest_living`, `dest_kitchen`, `dest_bedroom`) because §12.1 defines a manifest as
+"required objects, destination zones, special handling" and leaving a third of that out
+would mean changing the shape later. Nothing reads it — the destination site is Phase 9.
+`stepManifest` deliberately does nothing for a row whose zone does not resolve, so no object
+can be accidentally marked delivered before there is anywhere to deliver it to.
+
+**Objects are still boxes.** Every definition renders as a coloured cuboid matching its
+collider exactly. That is §20.4's diagnostic-visuals rule working as intended, and it is
+also why the floor lamp reads as a tall thin box rather than as a lamp. Faithful collision
+is the mandate (§13.4: "collision-faithful proportions are mandatory"); silhouettes come
+with the art pass, which is Unity-side.
+
+**Recovery is free.** §18.3 restores an object to its last settled transform at no cost. It
+should be a §15.1 line item — a callout fee — and `state.recoveries` is counted per object
+so Phase 10 can charge for it. Until then, dropping something off the world is a fast
+teleport rather than a mistake, which is the wrong incentive and is fixed by the invoice.
+
+**The 32" opening is still impossible for the couch, on purpose.** Unchanged from Phase 0
+and asserted again by m5 B8. It is on the front wall, not on the couch's route, so it denies
+nothing — it is there as a legible example of a clearance that cannot be brute-forced, and
+becomes a real decision once Phase 6 can remove a door.
+

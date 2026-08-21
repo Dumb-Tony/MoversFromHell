@@ -206,7 +206,16 @@ emit('running...');
 lines.push('--- C. acquire and release (GDD §6.1, §23.3) ---');
 {
   placePlayer(-2.4, 3.0);
-  const target = registry.get(PHASE2_SPAWNS.length ? Array.from(registry.entities.keys())[0] : null);
+  /* ASK FOR A BOX, rather than for whatever spawned first.
+   *
+   * This used to take entities[0], which was a box for as long as the Phase 2 spawn list was
+   * the only one. Phase 5 replaced it with §13.2's manifest, whose first row is the couch —
+   * parked in the living room, behind a wall, out of reach of a test that places the player
+   * 1.3 m to its south and expects clear line of sight. The grab correctly found nothing.
+   *
+   * A test that depends on spawn order is asserting something it does not mean to. */
+  let target = null;
+  for (const e of registry.entities.values()) if (e.defId === 'box_small_01') { target = e; break; }
   ok('C1 there is a box to grab', !!target);
 
   const events = [];

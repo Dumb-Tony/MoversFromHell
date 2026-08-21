@@ -18,7 +18,7 @@
 
 import { OBJECT_DEFS, validateDef } from './definitions.js';
 import { GROUP_PRESETS } from '../physics/world.js';
-import { SIM } from '../config.js';
+import { RECOVERY, SIM } from '../config.js';
 
 let _nextId = 0;
 
@@ -150,6 +150,7 @@ export class ObjectRegistry {
    *  §12.3 defines "settled" as below velocity thresholds for a dwell, and the same test
    *  serves cargo membership in Phase 7, so it lives here rather than in a later system. */
   step(stepMs) {
+    const recovered = [];
     for (const e of this.entities.values()) {
       const v = e.body.linvel(), w = e.body.angvel();
       const speed = Math.hypot(v.x, v.y, v.z);
@@ -161,9 +162,48 @@ export class ObjectRegistry {
         e.state.lastStable.x = t.x; e.state.lastStable.y = t.y; e.state.lastStable.z = t.z;
       }
 
-      const oob = t.y < -8 || Math.abs(t.x) > 120 || Math.abs(t.z) > 120;
+      const oob = t.y < RECOVERY.objectFloorY || Math.abs(t.x) > 120 || Math.abs(t.z) > 120;
       e.state.outOfBoundsMs = oob ? e.state.outOfBoundsMs + stepMs : 0;
+
+      /* §18.3 RECOVERY, for objects rather than players — the half of Phase 5's gate that
+       * makes "all objects RECOVERABLE" true.
+       *
+       * §2.2 is the reason this exists at all: "failure becomes state ... a dropped object
+       * is now somewhere inconvenient", not gone. An object that falls out of the world and
+       * stays gone silently converts a comic mistake into an unwinnable contract, which is
+       * a hard fail §12.2 does not permit — it lists four rare cases and this is not one.
+       *
+       * Recovery is deliberately DULL: it puts the object back on the last spot where it was
+       * genuinely settled, with its velocity zeroed. It is not a rescue that undoes damage,
+       * and it is not free — Phase 10 will price the callout as a §15.1 fee. Nothing about
+       * the object's condition changes here. */
+      if (e.state.outOfBoundsMs >= RECOVERY.outOfBoundsGraceSeconds * 1000) {
+        this.recover(e);
+        recovered.push(e.id);
+      }
     }
+    return recovered;
+  }
+
+  /**
+   * Put one object back on its last known good transform (§18.3).
+   * Also callable on demand, which is what the Phase 5 suite uses to prove that EVERY
+   * object in the manifest can come back rather than only the ones that happened to fall.
+   */
+  recover(entity) {
+    const s = entity.state.lastStable;
+    entity.body.setTranslation(
+      { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z }, true);
+    // Upright, not the tumbling orientation it left in: a recovered wardrobe lying on its
+    // face reads as the recovery being broken.
+    entity.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+    entity.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    entity.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    entity.body.wakeUp();
+    entity.state.outOfBoundsMs = 0;
+    entity.state.settled = false;
+    entity.state.recoveries = (entity.state.recoveries || 0) + 1;
+    return entity;
   }
 
   /** §7.3's velocity caps apply to grabbable objects too — an object yanked by a grip is

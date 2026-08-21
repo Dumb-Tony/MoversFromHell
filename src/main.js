@@ -32,7 +32,9 @@ import { DebugOverlay } from './dev/debugOverlay.js';
 import { initPhysics, PhysicsWorld } from './physics/world.js';
 import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
-import { PHASE2_SPAWNS, PHASE3_SPAWNS } from './objects/definitions.js';
+import { PHASE5_SPAWNS } from './objects/definitions.js';
+import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
+import { overlappingZones } from './world/house.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
 import { BUILD, MOVERS } from './config.js';
@@ -69,10 +71,29 @@ async function boot() {
   const input = new Input(window, canvas).attach();
   const game = new Game({ contractId: 'suburban_starter', input, bus });
 
-  // ---- movable objects (Phase 2/3) -------------------------------------------------------
+  /* ---- the contract's objects (Phase 5) -------------------------------------------------
+   * PHASE5_SPAWNS replaces the Phase 2 and Phase 3 spawn lists outright. Those were four
+   * and two objects placed on the driveway to have something to grab; this is §13.2's
+   * manifest placed in the rooms it belongs in, and keeping the old lists as well would
+   * leave loose boxes in the front garden of what is now a real pickup site.
+   *
+   * §24.4 asks for content validators early: "incorrect colliders, zones, anchors and
+   * manifests will dominate production bugs". All three run at LOAD, in the shipping build
+   * and not only in the suite — an authoring error should announce itself in the build it
+   * is in, rather than waiting for someone to run tests. */
+  const manifestProblems = validateManifest(PHASE5_SPAWNS);
+  const spawnOverlaps = overlappingSpawns(PHASE5_SPAWNS);
+  const zoneOverlaps = overlappingZones();
+  if (manifestProblems.length + spawnOverlaps.length + zoneOverlaps.length > 0) {
+    console.warn('[MFH] content validation', { manifestProblems, spawnOverlaps, zoneOverlaps });
+  }
+
   const registry = new ObjectRegistry(physics, world.scene);
-  for (const s of PHASE2_SPAWNS) registry.spawn(s.def, s);
-  for (const s of PHASE3_SPAWNS) registry.spawn(s.def, s);
+  game.state.manifest = buildManifest(PHASE5_SPAWNS);
+  PHASE5_SPAWNS.forEach((s, i) => {
+    const e = registry.spawn(s.def, s);
+    game.state.manifest[i].entityId = e.id;
+  });
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
@@ -210,7 +231,12 @@ async function boot() {
   // After the step, because it reads post-step velocities to decide "settled" (§12.3).
   game.addSystem('objects', (state, stepMs) => { registry.step(stepMs); });
 
-  game.addSystem('contract', () => {});   // Phase 5
+  /* §12.3 delivery bookkeeping. Runs after 'objects' because it consumes the settled flag
+   * that step computes, and it only ever writes manifest rows — it observes entities and
+   * never moves one (§22.2's observe-don't-own boundary). */
+  game.addSystem('contract', (state, stepMs) => {
+    stepManifest(state.manifest, registry, stepMs);
+  });
 
   game.setPhase(PHASES.PICKUP);
 

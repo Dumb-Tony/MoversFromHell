@@ -19,9 +19,9 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 4,
-  label: 'phase-4',
-  date: '2026-08-20',
+  phase: 5,
+  label: 'phase-5',
+  date: '2026-08-21',
 });
 
 /** Simulation cadence. Validated by Phase 0. */
@@ -365,6 +365,28 @@ export const RECOVERY = Object.freeze({
   outOfBoundsGraceSeconds: 4,
   noProgressGraceSeconds: 12,
   stableTransformIntervalMs: 900,   // how often a last-known-good transform is banked
+  /** §18.3: an OBJECT that leaves the world is recovered too, not only a player. Phase 5's
+   *  gate is "all objects recoverable and movable", so this is the half that makes the
+   *  first word true. Lifted slightly above the banked transform so it drops onto the
+   *  surface rather than starting interpenetrated with it. */
+  objectRecoveryLiftM: 0.12,
+  objectFloorY: -8,                 // below this an object is gone and gets recovered
+});
+
+/** §12.1 manifest + §12.3 destination placement. Validated: Phase 5 (pickup half),
+ *  Phase 9 (delivery half). */
+export const MANIFEST = Object.freeze({
+  /** §13.1: "Objects | Roughly 15-25". Asserted against the spawn table at load. */
+  minObjects: 15,
+  maxObjects: 25,
+  /** §12.3 "substantially inside" — the share of an object's footprint that must lie in the
+   *  zone. NOT 1.0: a couch delivered into a small room may legitimately overhang the
+   *  doorway, and demanding full containment would make large objects undeliverable, which
+   *  is the kind of accidental hard denial §2.1 forbids. */
+  containedFraction: 0.6,
+  /** §12.3 "settled ... for a dwell time". Long enough that skidding through does not
+   *  count, short enough that it never feels like the game is withholding credit. */
+  dwellMs: 1200,
 });
 
 /** §22.5 debug + performance instrumentation. Validated: Phase 0. */

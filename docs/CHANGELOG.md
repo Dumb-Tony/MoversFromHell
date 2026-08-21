@@ -3,6 +3,85 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 5 — the house puzzle — 2026-08-21
+
+**Gate (§25.2):** "Pickup, 15-25 objects, manifest and zones" → **all objects recoverable
+and movable**. **PASSED** — 59 assertions (424 across six suites).
+
+**Hypothesis:** the contract becomes a place rather than a test range when the objects live
+in rooms that constrain how they can leave. The gate is deliberately about the OBJECTS, not
+about the architecture: a house full of furniture is worth nothing if one item is welded
+into a wall or can be lost for good, so both claims are asserted for every one of the 23
+objects rather than for a sample.
+
+**Added**
+- **The house.** `src/world/house.js` subdivides the Phase 1 shell into living room,
+  kitchen and bedroom, with two interior openings **on perpendicular axes** — §13.1's
+  "doorway turn". Openings are cut out of the partitions by `wallSegments()`, so the visible
+  gap and the collider are generated from one record and cannot disagree (§8.1).
+- **§13.2's manifest, in full.** 23 objects: 9 cardboard boxes, 5 small furniture, 3 medium,
+  3 large, 2 fragile/high-value, and the fridge as the showcase item. Every count lands
+  inside §13.2's own table, asserted by A11-A16. Twelve new object definitions, from a 5 kg
+  floor lamp to a 110 kg fridge, with replacement values spanning 40 to 1250 — the spread
+  §8.3 needs when it says "a fragile television and a cheap box should not share a generic
+  hit-point curve".
+- **Zones and the manifest** (`src/contract/manifest.js`), implementing §12.3's delivery
+  test: substantially inside the right zone, settled, for a dwell. All three parts matter
+  and each is asserted separately.
+- **Object recovery** (§18.3). An object that leaves the world comes back on the transform
+  it was last genuinely settled on. §2.2 makes this a requirement rather than a nicety: a
+  dropped object must be "somewhere inconvenient", not gone.
+- **Content validators that run in the shipping build**, not only in the suite (§24.4:
+  "incorrect colliders, zones, anchors and manifests will dominate production bugs").
+
+**§12.3 "substantially inside" is a FRACTION, and that is a design decision.**
+Requiring full containment would make a couch undeliverable to a small room, because it will
+legitimately overhang the doorway it came in through. That is an accidental hard denial of
+exactly the kind §2.1 forbids, arriving through a geometry check nobody thinks of as a rule.
+`MANIFEST.containedFraction` is 0.6, and E4/E5 assert the rule from both sides.
+
+**Measured — the gate**
+
+| | result |
+|---|---|
+| objects that two movers could not shift | **0 of 23** |
+| hardest to shift | couch_3seat_01, 0.374 m (threshold 0.15 m) |
+| objects that could not be recovered | **0 of 23** |
+| couch clearance on the route to the bedroom | **10 mm** |
+
+**THE BUG OF THE PHASE was in the test, and it was a good one.**
+The first run reported 17 of 23 objects immovable — including boxes weighing 9 kg. The
+objects were fine. Every object was being staged for its movability test at the same
+coordinate and left there, so by the fourth test the pad held a heap of furniture and each
+new arrival spawned inside it. The couch and armchair "passed" only because they went first.
+Each object now gets its own slot on an 8 m grid and everything is restored to its spawn
+afterwards, so the later sections do not silently test a house whose contents are all in a
+field 40 m away.
+
+Two smaller ones, both worth the same lesson — assert the design, not a proxy for it:
+- §13.2 category counts were being INFERRED from mass class, which put the framed mirror in
+  "small furniture" (it is light and small) and pushed that category one over its ceiling of
+  5. The mirror is §13.2's fragile/high-value row. The design table and the §6.3 mass bands
+  are different axes; definitions now declare `category` and the suite asserts against that.
+- m2's "grab a box" test took `entities[0]`, which was a box only for as long as the Phase 2
+  spawn list was the only one. It is now the couch, in the living room, behind a wall. The
+  grab correctly found nothing. A test that depends on spawn order is asserting something it
+  does not mean to.
+
+**A second content bug, caught by reading rather than by running.** Two of the twelve new
+definitions declared `fragility: 'very_fragile'` — a band that does not exist. `DAMAGE`
+defines `sturdy | normal | fragile | extreme`, and `validateDef` did not check the field at
+all. The two definitions were `tv_55_01` and `mirror_framed_01`: the $900 television and the
+$480 mirror, the two most valuable breakable objects in the contract. Nothing would have
+thrown. Phase 8's damage lookup would have found `undefined` and either skipped them or
+crashed on first contact, so the two items whose damage matters most would have been the two
+the damage model did not cover — surfacing only when a $900 television turned out to be
+indestructible. Both now declare `extreme`, and `validateDef` checks the fragility band and
+the §13.2 category, with m5 F5/F6 asserting it. Third time §24.4's "build content validators
+early" has paid for itself in this file.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61 — 426 assertions, all passing.
+
 ## Phase 4 — the cooperative seam — 2026-08-20
 
 **Gate (§25.2):** "Second actor/test harness or command model" → **multiple grips combine

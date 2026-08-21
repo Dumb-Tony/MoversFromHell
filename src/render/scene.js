@@ -83,10 +83,19 @@ export const OBSTACLES = Object.freeze([
 
 /** A closed room behind the aperture wall — the "indoors" half of the gate, and the place
  *  §4.1's "indoors it should compress smoothly" camera behaviour gets exercised. */
-export const ROOM = Object.freeze({
-  minX: -5.0, maxX: 5.0, minZ: -9.0, maxZ: -2.0,
-  wallH: 2.7, wallT: 0.18, ceiling: true,
-});
+/* ROOM now LIVES IN world/house.js and is re-exported here.
+ *
+ * Phase 5 subdivides this shell into three rooms, so the shell and its partitions have to
+ * be one record — house.js needs the bounds to place partitions, and this file needs the
+ * partitions to build them. Defining ROOM here and importing it there made a genuine import
+ * cycle: scene.js would evaluate house.js first, which would read ROOM before this line had
+ * run, and get a temporal-dead-zone error rather than a value.
+ *
+ * The re-export keeps `import { ROOM } from '.../scene.js'` working for everything written
+ * against Phases 0-4, including m1's room assertions. One record, one direction of import.
+ */
+export { ROOM } from '../world/house.js';
+import { ROOM, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -264,6 +273,66 @@ export function buildScene() {
     ceil.receiveShadow = true;
     scene.add(ceil);
     addCollider((R.minX + R.maxX) / 2, (R.minZ + R.maxZ) / 2, roomW, roomD, R.wallH, R.wallH + 0.16, 'roomCeiling');
+  }
+
+  /* ---- Phase 5: interior partitions, and the doorway turn ------------------------------
+   *
+   * §13.1 wants "2-3 rooms, a doorway turn". The partitions subdivide the Phase 1 shell
+   * into living room / kitchen / bedroom; the openings are cut from INTERIOR_DOORS by
+   * wallSegments(), so a visible gap and a solid collider cannot disagree — the same
+   * one-shared-record rule (§8.1) the front aperture wall already follows.
+   *
+   * house.js owns ROOM as well, so the import runs one way only and there is no cycle.
+   */
+  {
+    const PW = ROOM.wallH;
+
+    for (const p of PARTITIONS) {
+      for (const seg of wallSegments(p, INTERIOR_DOORS)) {
+        const len = seg.hi - seg.lo;
+        if (len <= 1e-6) continue;
+        const mid = (seg.lo + seg.hi) / 2;
+        const sx = p.axis === 'x' ? len : PARTITION_T;
+        const sz = p.axis === 'x' ? PARTITION_T : len;
+        const cx = p.axis === 'x' ? mid : p.at;
+        const cz = p.axis === 'x' ? p.at : mid;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(sx, PW, sz), mat(PALETTE.wall));
+        m.position.set(cx, PW / 2, cz);
+        m.castShadow = true; m.receiveShadow = true;
+        scene.add(m);
+        addCollider(cx, cz, sx, sz, 0, PW, `partition_${p.id}`);
+      }
+    }
+
+    // Headers over the interior openings, so each is a real 2.03 m doorway rather than a
+    // floor-to-ceiling slot you could carry a wardrobe through sideways.
+    for (const dr of INTERIOR_DOORS) {
+      const hh = PW - dr.height;
+      if (hh <= 1e-6) continue;
+      const sx = dr.axis === 'x' ? dr.gap : PARTITION_T;
+      const sz = dr.axis === 'x' ? PARTITION_T : dr.gap;
+      const cx = dr.axis === 'x' ? dr.centre : dr.at;
+      const cz = dr.axis === 'x' ? dr.at : dr.centre;
+      const hd = new THREE.Mesh(new THREE.BoxGeometry(sx, hh, sz), mat(PALETTE.wall));
+      hd.position.set(cx, dr.height + hh / 2, cz);
+      hd.castShadow = true;
+      scene.add(hd);
+      addCollider(cx, cz, sx, sz, dr.height, PW, `doorHeader_${dr.id}`);
+
+      // Lime jambs: these are the clearances the route puzzle is made of, so they are
+      // marked the same way the front apertures are.
+      const passes = fitsThroughGap(REFERENCE_DIMS.couch3Seat.z, REFERENCE_DIMS.couch3Seat.y, dr.gap).fits;
+      const jc = passes ? PALETTE.reference : PALETTE.impossible;
+      for (const side of [-1, 1]) {
+        const jx = dr.axis === 'x' ? dr.centre + side * dr.gap / 2 : dr.at;
+        const jz = dr.axis === 'x' ? dr.at : dr.centre + side * dr.gap / 2;
+        const jsx = dr.axis === 'x' ? 0.04 : PARTITION_T + 0.02;
+        const jsz = dr.axis === 'x' ? PARTITION_T + 0.02 : 0.04;
+        const j = new THREE.Mesh(new THREE.BoxGeometry(jsx, dr.height, jsz), mat(jc));
+        j.position.set(jx, dr.height / 2, jz);
+        scene.add(j);
+      }
+    }
   }
 
   // ---- Phase 1: obstacles (autostep / mantle / refuse) --------------------------------
