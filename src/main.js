@@ -39,6 +39,8 @@ import { ToolSystem } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
+import { DamageSystem } from './damage/damage.js';
+import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
@@ -116,6 +118,14 @@ async function boot() {
    * physically inside the truck and has settled there. */
   const straps = new StrapSystem(registry, bus);
   const cargo = new CargoSystem(registry, straps, tools, bus);
+
+  /* ---- damage and the drive (Phase 8) ----------------------------------------------------
+   * §10.4 is the rule: outcomes "derive from physical contacts, velocity, damage, and
+   * constraints during transport", and a heuristic "must not secretly damage items without a
+   * physical cause". So damage reads what bodies actually did, and the route applies forces
+   * to those bodies. There is no path from a pack-quality score to an object's condition. */
+  const damage = new DamageSystem(physics, registry, bus, game.state);
+  const route = new RouteDriver(cargo, bus);
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
@@ -252,6 +262,20 @@ async function boot() {
   // grips do (§10.3). A strap applied after the step would be a step behind the load.
   game.addSystem('straps', (state, stepMs, ctx) => { straps.step(stepMs, ctx.simTimeMs); });
 
+  /* 'drive' BELONGS HERE, before 'physics', and it was registered after it to begin with.
+   *
+   * The route applies §11.3's road forces to cargo, and Rapier consumes accumulated forces
+   * during world.step(). Registered after 'physics', every road force was applied to bodies
+   * that had already been integrated and was then wiped by the next step's clearForces
+   * before it could do anything. MEASURED: a completely unstrapped pack driven through the
+   * whole route shifted 0.001 m. The route ran, the events fired, the forces were computed
+   * and applied to the right bodies — and nothing in the world ever felt one of them.
+   *
+   * Same class of bug as the Phase 3 force-persistence one, and the same shape: the physics
+   * was correct and the ORDER made it invisible. Anything that applies force goes before the
+   * step; anything that measures the result goes after. */
+  game.addSystem('drive', (state, stepMs, ctx) => { route.step(stepMs, ctx.simTimeMs); });
+
   game.addSystem('physics', () => { physics.step(); });
 
   // After the step, because it reads post-step velocities to decide "settled" (§12.3).
@@ -259,6 +283,10 @@ async function boot() {
 
   // §10.2's "settling inside the closed volume" reads the flag registry.step just set.
   game.addSystem('cargo', (state, stepMs, ctx) => { cargo.step(stepMs, ctx.simTimeMs); });
+
+  /* Damage reads the velocities the solver produced, so it runs AFTER 'physics'. 'drive' is
+   * registered further up, next to 'straps', for the opposite reason — see the note there. */
+  game.addSystem('damage', (state, stepMs, ctx) => { damage.step(stepMs, ctx.simTimeMs); });
 
   /* §12.3 delivery bookkeeping. Runs after 'objects' because it consumes the settled flag
    * that step computes, and it only ever writes manifest rows — it observes entities and
@@ -344,6 +372,7 @@ async function boot() {
     game, input, rig, world, overlay, hud, renderer, camera, syncSize,
     physics, registry, movers, tools, straps, cargo,
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
+    damage, route,
     get player() { return active().controller; },
     get grips() { return active().grips; },
     get activeMoverIndex() { return activeMover; },

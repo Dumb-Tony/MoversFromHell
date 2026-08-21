@@ -275,3 +275,41 @@ Loading is currently a solitary API call, which answers nothing.
 **Would I tell a friend about it?** Not from this build. "The truck is a real box and the
 straps really hold" is an engineering claim, not a story.
 
+
+## Phase 8 — the drive — 2026-08-21
+
+**The first time the game punished a mistake without being told to.** Author's note; still no
+external playtest.
+
+**The three-row table is the whole project in miniature.** A good pack arrives with nothing
+broken. A bad pack arrives with the television face-down by the door and a charge on the
+invoice. The same bad pack, parked for the same 28 seconds, arrives perfect. Nothing anywhere
+reads a score and decides an outcome — §10.4 forbids it, and building it that way is what
+makes the third row possible at all. It is the strongest evidence so far that the design's
+central bet is sound.
+
+**The screenshot took no arranging.** I placed six objects badly, applied one brake, one turn
+and one bump, and photographed where they ended up. The television sliding flat to the open
+rear door is not a scripted moment; it is 22 kg with nothing holding it on a 0.32-friction
+deck.
+
+**Actively worse — and this is now a pattern worth naming.** Phase 6 deferred the interaction
+verb, Phase 7 deferred strap UI, and Phase 8 has deferred all of §11.2's driving. Three phases
+of physics with no way to reach any of it. Each deferral was individually defensible against
+its own gate; together they mean the build has advanced four phases without becoming more
+playable. If I were advising someone else on this project I would tell them to stop and spend
+a day on input and HUD before going further.
+
+**The near-miss.** An unstrapped load driven through the entire route shifted one millimetre,
+and the route, the events, the forces and the targets were all correct. The system was
+registered one slot too late in the frame. Second time in this project that a force system
+was defeated by ordering rather than by arithmetic, and the tell was the same both times: a
+number so small it could not be a tuning problem.
+
+**Cannot be judged yet.** Whether the drive is TENSE. A 28-second timeline with three events
+you cannot influence is not a test of nerve, and §11.1's "final exam for packing" implies the
+player should be sweating through it. Right now they would be watching.
+
+**Would I tell a friend about it?** Yes: "I stacked the fridge on the dresser, and by the time
+we arrived the telly was face-down in the doorway." That is the sentence this game is for, and
+it is the first one since Phase 3 that came out of consequences rather than out of a tool.

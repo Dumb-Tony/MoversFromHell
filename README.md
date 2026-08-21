@@ -3,8 +3,8 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 7 of 13**: a three-room house, 23 things to move out of it, two movers,
-four tools, and a truck whose cargo box is a real space you carry things into. WASD move,
+*is* the site. **Phase 8 of 13**: a house to empty, two movers, four tools, a truck with a
+real cargo box, and a drive that finds out how well you packed it. WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
@@ -78,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 7 complete
+## Current state — Phase 8 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -92,9 +92,26 @@ GDD §25.2 defines a 13-phase roadmap.
 | 5. House puzzle | all objects recoverable and movable | done — 61 assertions |
 | 6. Tools | each solves a physical problem | done — 66 assertions |
 | 7. Cargo | secured pack remains stable | done — 53 assertions |
-| 8. Drive | poor pack shifts or damages visibly | next |
+| 8. Drive | poor pack shifts or damages visibly | done — 38 assertions |
+| 9. Destination | manifest completes reliably | next |
 
-**545 assertions across eight suites, all passing.**
+**583 assertions across nine suites, all passing.**
+
+![Phase 8](docs/phase8-drive.png)
+
+What a badly packed truck looks like on arrival. Nothing here was arranged: six objects were
+placed loose and high, §13.3's route applied one hard brake, one turn and one bump as real
+forces, and this is where the solver left them.
+
+| the same route, the same objects | worst shift | damage |
+|---|---|---|
+| good pack — heavy low and forward, strapped | 0.470 m | **none** |
+| poor pack — stacked high, loose, unstrapped | **2.615 m** | television destroyed |
+| **the poor pack, parked for the same 28 s** | — | **none** |
+
+That third row is the one that matters. The pack is identically bad and the game knows it —
+and nothing happens, because §10.4's physical cause is missing. Damage is never inflicted by
+a score.
 
 ![Phase 7](docs/phase7-cargo.png)
 

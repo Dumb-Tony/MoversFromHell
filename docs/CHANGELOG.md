@@ -3,6 +3,62 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 8 — the drive — 2026-08-21
+
+**Gate (§25.2):** "Route, turn/brake/bump, cargo coupling" → **poor pack shifts or damages
+visibly**. **PASSED** — 38 assertions (583 across nine suites).
+
+**Hypothesis:** §11.1 says "driving is the FINAL EXAM FOR PACKING, not a racing minigame",
+which means the interesting output of a drive is what happened to the cargo. And §10.4 says
+outcomes must "derive from physical contacts, velocity, damage, and constraints during
+transport", and that a heuristic "must not secretly damage items without a physical cause" —
+so the gate cannot be satisfied by reading a pack-quality score and subtracting condition.
+The same route has to be driven twice and produce a worse result for the worse pack, through
+nothing but forces on bodies.
+
+**Measured — the same route, the same objects, two arrangements**
+
+| | worst shift | items moved | damage | worst condition |
+|---|---|---|---|---|
+| good pack (heavy low, forward, strapped) | 0.470 m | 2 | **0.00** | 100 |
+| poor pack (stacked high, loose, no straps) | **2.615 m** | 3 | **6.40** | 87 |
+| **the poor pack, parked for the same 28 s** | — | — | **0.00** | **100** |
+
+That third row is the assertion that matters most. The pack is identically bad and the
+heuristic knows it — but nothing happens, because §10.4's physical cause is missing. The
+damage in row two came from the road.
+
+**Added**
+- **§13.3's route** (`src/drive/route.js`): one hard brake, one meaningful turn, one bump,
+  over 28 s. §11.3's three prototype-required hazards and no others.
+- **The damage model reaching real contacts** (`src/damage/damage.js`), with §8.3's
+  aggregation so a scrape is billed once rather than once per step, and §8.4's ledger lines
+  naming the object, the condition change, the cost and where it happened.
+- **`canDepart()` that advises and never refuses.** §3.4's Secure exit is "warnings
+  ACKNOWLEDGED", not resolved, and §2.1 forbids the denial. A badly packed truck must be
+  drivable or this phase has nothing to measure.
+
+**THE BUG OF THE PHASE: the road forces were applied after the solver had already run.**
+`drive` was registered after `physics`, so every §11.3 road force landed on bodies that had
+been integrated already, and was then wiped by the next step's `clearForces` before it could
+do anything. Measured: a completely unstrapped pack driven through the entire route shifted
+**0.001 m**. The route ran, the events fired at the right times, the forces were computed
+correctly and applied to the right bodies — and nothing in the world ever felt one of them.
+
+Same shape as the Phase 3 force-persistence bug: the physics was right and the ORDER made it
+invisible. Anything that applies force goes before the step; anything that measures the
+result goes after.
+
+**A measurement that could not discriminate.** §8.3's "a fragile television and a cheap box
+should not share a generic hit-point curve" was first tested by dropping both from 2.4 m.
+That is 6.9 m/s, which destroys both — the television takes 558 condition points and the box
+127, both clamp at 100, and the result read "100.0 vs 100.0". The drop is now 0.18 m, or
+1.88 m/s, which sits deliberately between the two bands: above the television's 0.70 m/s
+tolerance and below the box's 2.00. The same knock now **ruins the television and does not
+mark the box**, which is a far stronger statement of §8.3 than any ratio.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61, m6 66, m7 53, m8 38 — 583 assertions.
+
 ## Phase 7 — cargo — 2026-08-21
 
 **Gate (§25.2):** "Interior, loading, stacks, anchors, straps" → **secured pack remains

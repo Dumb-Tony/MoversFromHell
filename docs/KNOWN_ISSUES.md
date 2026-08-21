@@ -300,3 +300,34 @@ on every object and read by nothing.
 should refuse an endpoint that is out of reach or the wrong side of the load. Any anchor can
 currently be paired with any point on any entity, including through a wall.
 
+
+## Phase 8 open items
+
+**The drive has no driving in it.** §11.2 asks for "arcade-accessible steering with readable
+body roll, braking distance, and wide turns" and none of that exists. The route is a timeline
+of three force events; the player does not steer, brake or choose a speed, and §11.2's
+`imbalanceSteerPenaltyMax` — "poor balance modestly affects steering and braking" — is
+declared and unused because there is no steering to affect. This follows from the §10.5
+force-proxy decision recorded in Phase 7, and it is the largest single thing §11 asks for
+that this build does not do.
+
+**Damage is measured as speed lost per step, not from contact manifolds.** It is unambiguous,
+cannot fire on a resting contact, and is exactly what §8.3's "contact energy" means for an
+item — but it cannot tell you WHAT was hit. §8.4 wants "object/location, category", and the
+location recorded is the damaged object's own position rather than the surface it struck.
+Property damage (§15.1's separate line item, keyed on impulse) is therefore configured and
+unbuilt: there is no way yet to charge for a scraped wall.
+
+**One drive, one direction, no reverse.** §11.3's hard brake always throws cargo forward, so
+the headboard takes everything and the open rear door never matters. A pack that would spill
+out of the back on a reversing manoeuvre is currently safe by omission.
+
+**The good pack still shifted 0.470 m.** That is above `CARGO.shiftToleranceM`, which means a
+well-packed, strapped load still moves further than it should. The gate is comfortably passed
+because the poor pack shifts 5.6x further, but "secured" is not yet "solid". Likely causes:
+two straps per item is thin for a 110 kg fridge, and the hook points are chosen by the test
+rather than by a player who can see what they are doing.
+
+**Nothing renders any of it.** No route progress, no §11.2 "coarse cargo-status indicator",
+no §8.4 "small cost notice" at impact, no condition icons. The drive currently happens
+entirely in the log.
