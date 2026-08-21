@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 6,
-  label: 'phase-6',
+  phase: 7,
+  label: 'phase-7',
   date: '2026-08-21',
 });
 
@@ -436,18 +436,77 @@ export const TOOLS = Object.freeze({
 
 /** §10.3 straps. Validated: Phase 7. */
 export const STRAP = Object.freeze({
-  stiffness: 2600,
-  damping: 90,
-  ratingNewtons: 3400,       // force at which state → overstressed
-  failureNewtons: 5200,      // …and at which it snaps
+  /* THESE WERE WRONG AND ARE NOW DERIVED. The declared pair was stiffness 2600 N/m against
+   * ratingNewtons 3400, which requires 3400/2600 = 1.31 m of stretch to reach §10.3's
+   * "overstressed" and 2.00 m to fail — across a cargo box 4.20 m long. Two of §10.3's four
+   * states were unreachable and the strap was a bungee cord.
+   *
+   * Stiffness now comes from how far webbing actually gives at its rating. 30 mm at
+   * 1200 N is about 1% of a 3 m strap, which is the right order for polyester webbing on a
+   * ratchet, and it is stiff enough that the four states are separated by centimetres
+   * instead of by metres. */
+  stretchAtRating: 0.030,
+  get stiffness() { return this.ratingNewtons / this.stretchAtRating; },   // 40 000 N/m
+
+  /* THE RATING COMES FROM WHAT THE LOAD DEMANDS, not from a catalogue.
+   *
+   * The worst §11.3 road event is a hard brake at TRUCK.brakeForce = 5.2 m/s^2. The heaviest
+   * single item is the 110 kg fridge, so one strap holding it alone sees 110 * 5.2 = 572 N
+   * statically, and a spring-restrained mass overshoots roughly 2x on a step input — about
+   * 1150 N. Setting the rating at 1200 N puts a SINGLE strap on the heaviest item right at
+   * the edge of "overstressed" during a hard brake, and comfortably inside it with two.
+   *
+   * That is the decision the player should be making, so that is where the threshold goes.
+   * A real 50 mm ratchet strap is rated far higher; §7.1's licence to use "exaggerated,
+   * stable mass tuning rather than literal kilograms when realism harms feel" applies to
+   * forces for the same reason. */
+  ratingNewtons: 1200,       // §10.3 state → overstressed
+  failureNewtons: 1900,      // …and at which it gives way
+
+  /* Damping acts on the rate of separation only. Near-critical for a mid-weight item:
+   * 2*sqrt(k*m) at m = 40 kg is 2530, and a strap wants to be slightly under-damped so a
+   * hard brake produces a visible snatch rather than a silent absorb (§10.3's feedback
+   * column asks for "ratchet clicks", "creak, vibration"). */
+  damping: 1400,
+
+  /** How much a ratchet click takes up. 8 mm against a 40 000 N/m strap is about 320 N per
+   *  click — four clicks to a sensible pre-load and fifteen to break it. The default was
+   *  60 mm, which is 2400 N: above failureNewtons, so the FIRST click snapped every strap. */
+  ratchetStepM: 0.008,
   maxLength: 4.5,
   anchorCount: 6,            // §13.1 asks for 4-8 anchors in the prototype truck
+});
+
+/** §10.2 cargo rules, §10.4 pack quality. Validated: Phase 7. */
+export const CARGO = Object.freeze({
+  /** §10.2: "Required objects count as loaded only after crossing the cargo threshold and
+   *  SETTLING inside the closed volume." Settling is the registry's existing definition. */
+  loadedDwellMs: 800,
+  /** §10.4's advisory heuristic. Fraction of cargo mass that may be unrestrained before the
+   *  HUD warns. Advisory ONLY — §10.4 forbids it from damaging anything by itself. */
+  unsecuredWarnFraction: 0.35,
+  /** How far an item may shift during transport before the pack counts as having moved.
+   *  This is a MEASUREMENT threshold for scoring, not a rule that stops anything. */
+  shiftToleranceM: 0.25,
+  /** A strap is considered to be restraining an item while it is at least this taut. */
+  /** A strap counts as RESTRAINING while it has no more than this much slack in it.
+   *
+   *  Not instantaneous tension, which is the obvious choice and is wrong: a rope over a
+   *  stationary load carries almost no force, so a perfectly strapped pack at rest measured
+   *  as 100% unsecured. Slack is the property that actually distinguishes a strap doing its
+   *  job from one hanging off the side, and it is the same thing §10.3's SLACK state means. */
+  securedSlackM: 0.05,
+  restrainingTensionN: 40,
 });
 
 /** §11.2 truck. "Driving is the final exam for packing, not a racing minigame" (§11.1).
  *  Validated: Phase 8. */
 export const TRUCK = Object.freeze({
   mass: 2600,
+  /** Deck friction. A truck deck is plywood or steel, not carpet, and this is why real
+   *  loads are strapped. At the 0.8 of a house floor an unstrapped pack shifted 2 mm in a
+   *  hard brake and §10.3's straps had nothing to improve on. */
+  deckFriction: 0.32,
   acceleration: 3.4,         // m/s^2 — deliberately unexciting
   brakeForce: 5.2,
   maxSpeed: 13.5,            // ~48 km/h

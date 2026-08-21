@@ -266,3 +266,37 @@ but the doors do not become real bodies you have to carry. That is honest for th
 written (the payoff asserted is packed volume) and it is a smaller version of §7.4's
 "every broken state must remain movable and completable" than that section deserves.
 
+## Phase 7 open items
+
+**Straps are invisible.** §10.3 asks the game to "render the line, anchor validity, tension,
+and overload risk", with a colour per state — sagging grey, straight teal, orange pulse. None
+of that exists. The four states are real, asserted and event-emitting, and a player would see
+absolutely nothing. The Phase 7 screenshot draws the strap lines in its own setup script,
+which is honest for a documentation frame and is called out here so nobody mistakes it for a
+feature.
+
+**Nor is there a way to attach one.** Same gap as Phase 6's tools: `interact` is bound and
+unread, so every strap in m7 is created by calling the API. §10.3's whole interaction — select
+endpoint A, aim at B, confirm, tension — is unbuilt. Phases 6 and 7 have now both deferred
+this, and it is the single largest block of missing work in the project.
+
+**The truck does not move, and will not in Phase 8 either.** This is a deliberate reading of
+§10.5's "browser driving may use truck-local simulation or force proxies if full moving-world
+physics is unstable", and it is recorded here rather than buried because it is a real
+divergence from the naive reading of §11. Road events apply the pseudo-force cargo feels in
+the truck's frame. What this DOES cost: the world does not go past the windows, the drive has
+no route to steer along, and §11.2's "readable body roll" has nothing to roll.
+
+**A closed door is not modelled.** §10.2: "A closed door contains objects but does not
+prevent movement or damage." The rear is permanently open. Nothing currently stops a hard
+brake in reverse throwing the load out of the back, because there is no back.
+
+**Pack quality ignores stacking and fragility.** §10.4's heuristic reports unsecured mass and
+centre-of-mass offset, which is enough for a warning. It does not know that the TV is under
+the dresser, and §7.1's `cargoHints` (`heavy-low`, `no-stack-on`, `upright-only`) are authored
+on every object and read by nothing.
+
+**Anchors are geometry, not validated endpoints.** §10.3 wants "anchor validity" — a strap
+should refuse an endpoint that is out of reach or the wrong side of the load. Any anchor can
+currently be paired with any point on any entity, including through a wall.
+

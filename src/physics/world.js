@@ -203,7 +203,15 @@ export class PhysicsWorld {
       if (hx <= 0 || hy <= 0 || hz <= 0) continue;
       const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(
         (c.minX + c.maxX) / 2, base + hy, (c.minZ + c.maxZ) / 2));
-      const col = this.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.8)
+      /* Per-surface friction, defaulting to the 0.8 of house walls and floors.
+       *
+       * Added in Phase 7 because a TRUCK DECK is not a carpeted floor. At 0.8 the deck held
+       * every item through a §11.3 hard brake — measured, the worst shift in an entirely
+       * unstrapped pack was 2 mm — so straps had nothing to improve on and the phase gate
+       * was unmeasurable. It was also simply wrong: a plywood or steel deck is slippery,
+       * which is exactly why real loads are strapped. */
+      const friction = c.friction !== undefined ? c.friction : 0.8;
+      const col = this.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setFriction(friction)
         .setCollisionGroups(GROUP_PRESETS.world), body);
       out.push({ body, collider: col, tag: c.tag });
     }

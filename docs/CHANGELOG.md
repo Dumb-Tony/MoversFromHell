@@ -3,6 +3,66 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 7 — cargo — 2026-08-21
+
+**Gate (§25.2):** "Interior, loading, stacks, anchors, straps" → **secured pack remains
+stable**. **PASSED** — 53 assertions (545 across eight suites).
+
+**Hypothesis:** §10.1 is the differentiator and it forbids every shortcut — "the cargo box is
+a real collision-enabled space with floor, walls, roof, ramp, door, and anchor points.
+NOTHING TELEPORTS INTO STORAGE." So there is no inventory in this phase, no slot list and no
+load button. An object is in the truck when it is physically inside the truck.
+
+**Measured — the gate, one §11.3 hard brake over the same six-item pack**
+
+| | worst shift | items past tolerance | §10.4 heuristic |
+|---|---|---|---|
+| unstrapped | **1.645 m** | 1 | 100% unsecured, warns |
+| strapped | **0.141 m** | 0 | 0% unsecured, quiet |
+
+**Added**
+- **A real cargo box** (`src/world/truck.js`): deck, two sides, headboard and roof as
+  colliders, and a genuinely open rear — asserted as a point test in the doorway, because
+  the first version pattern-matched collider bounds and the *roof* matched.
+- **Six anchors**, three a side, spread along the length so strap ANGLE is a choice a player
+  can get wrong (§10.3's "poor angle or tension permits shift").
+- **Straps as one-sided ropes** (`src/cargo/straps.js`) with §10.3's four states, all four
+  reachable and asserted.
+- **Loading by physics** (`src/cargo/cargo.js`): §10.2's "crossing the cargo threshold AND
+  settling inside the closed volume" — three conditions, each tested separately, plus the
+  trip that moved each item.
+- **§10.4's advisory pack quality**, and nothing consumes it but a warning.
+
+**THREE BUGS, and every one was a number that made a state unreachable.**
+
+1. **The strap was a bungee cord.** `stiffness: 2600` against `ratingNewtons: 3400` means a
+   strap must stretch **1.31 m** to reach "overstressed" and **2.00 m** to fail — across a
+   cargo box 4.20 m long. Two of §10.3's four states were unreachable. Stiffness is now
+   derived from how far webbing actually gives at its rating (30 mm), and the rating from
+   what the load demands under the worst §11.3 event, giving 40 000 N/m and a rating of
+   1200 N. All four states now sit within 48 mm of each other.
+2. **The first ratchet click snapped every strap.** The default increment was 60 mm, which
+   against 40 000 N/m is 2400 N — above `failureNewtons`. `STRAP.ratchetStepM` is now 8 mm,
+   about 320 N per click.
+3. **The truck deck had a carpet's friction.** `addStaticFromColliders` hard-coded 0.8 for
+   every surface, so an unstrapped pack survived a hard brake with a **2 mm** shift and
+   straps had nothing to improve on. Surfaces now carry their own friction, and a deck is
+   0.32 — which is the actual reason real loads get strapped.
+
+**And one wrong definition.** "Secured" was measured as instantaneous strap tension, so a
+perfectly strapped pack sitting still read as **100% unsecured** and §10.4's warning fired on
+a good pack. A rope over a stationary load carries almost no force. It is now measured as
+SLACK, which is the property §10.3's own state name refers to.
+
+**§10.5's force proxies, used deliberately.** The truck does not move. §10.5 permits exactly
+this — "browser driving may use truck-local simulation or FORCE PROXIES if full moving-world
+physics is unstable" — and moving a kinematic box of sleeping rigid bodies at 13.5 m/s is
+that instability. Road events apply the pseudo-force cargo feels in the truck's frame, which
+is the same physics seen from the seat. §11.3's severity values are already written as
+impulse multipliers, so the GDD had made this call already.
+
+**Checked:** m0 118, m1 61, m2 66, m3 61, m4 59, m5 61, m6 66, m7 53 — 545 assertions.
+
 ## Phase 6 — tools — 2026-08-21
 
 **Gate (§25.2):** "Dolly, protection, ramp, disassembly" → **each solves a physical

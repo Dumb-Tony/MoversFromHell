@@ -36,6 +36,9 @@ import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
 import { overlappingZones } from './world/house.js';
 import { ToolSystem } from './tools/tools.js';
+import { StrapSystem } from './cargo/straps.js';
+import { CargoSystem } from './cargo/cargo.js';
+import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
@@ -106,6 +109,13 @@ async function boot() {
   const tools = new ToolSystem(physics, registry, world.scene, bus);
   for (const s of PHASE6_TOOL_SPAWNS) tools.spawn(s.def, s);
   physics.primeQueries();
+
+  /* ---- cargo (Phase 7) -------------------------------------------------------------------
+   * §10.1: the cargo box is a real collision-enabled space, built in scene.js from
+   * truck.js's records. Nothing here is an inventory: an object is loaded when it is
+   * physically inside the truck and has settled there. */
+  const straps = new StrapSystem(registry, bus);
+  const cargo = new CargoSystem(registry, straps, tools, bus);
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
@@ -238,10 +248,17 @@ async function boot() {
     restoreClearedObjects(registry, movers.map((m) => m.controller));
   });
 
+  // Straps accumulate force, so they run BEFORE the step and after clearForces, exactly as
+  // grips do (§10.3). A strap applied after the step would be a step behind the load.
+  game.addSystem('straps', (state, stepMs, ctx) => { straps.step(stepMs, ctx.simTimeMs); });
+
   game.addSystem('physics', () => { physics.step(); });
 
   // After the step, because it reads post-step velocities to decide "settled" (§12.3).
   game.addSystem('objects', (state, stepMs) => { registry.step(stepMs); });
+
+  // §10.2's "settling inside the closed volume" reads the flag registry.step just set.
+  game.addSystem('cargo', (state, stepMs, ctx) => { cargo.step(stepMs, ctx.simTimeMs); });
 
   /* §12.3 delivery bookkeeping. Runs after 'objects' because it consumes the settled flag
    * that step computes, and it only ever writes manifest rows — it observes entities and
@@ -325,7 +342,8 @@ async function boot() {
    * is being driven, so a suite that swaps movers does not silently keep poking mover 0. */
   const api = {
     game, input, rig, world, overlay, hud, renderer, camera, syncSize,
-    physics, registry, movers, tools,
+    physics, registry, movers, tools, straps, cargo,
+    truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
     get player() { return active().controller; },
     get grips() { return active().grips; },
     get activeMoverIndex() { return activeMover; },

@@ -240,3 +240,38 @@ the heavy tier, and whether the blanket is interesting or just admin. All three 
 **Would I tell a friend about it?** "I put the fridge on a dolly and then it got away from me
 down the ramp." That is a story again, and it is the first one since Phase 3.
 
+## Phase 7 — cargo — 2026-08-21
+
+**A truck you load by carrying things into it.** Author's note; still no external playtest.
+
+**The gate measurement is the most satisfying number in the project so far.** Same six items,
+same places, same hard brake: 1.645 m of shift unstrapped, 0.141 m strapped. Nothing in that
+comparison is scored or judged — the straps are ropes, the brake is a force, and the
+difference is what the solver did. §10.4 insists that outcomes "derive from physical contacts"
+and forbids secretly damaging items, and building it that way turns out to be *easier* than
+the alternative, not harder.
+
+**Three separate numbers each made a documented state unreachable.** A strap that needed
+1.31 m of stretch to feel stressed, a ratchet whose first click exceeded the strap's breaking
+force, and a truck deck with the friction of a lounge carpet. None of them would have thrown
+an error; all three would have shipped as "straps feel weak". The lesson from Phase 6 keeps
+repeating: the failures worth finding are the ones where the code runs perfectly and the
+number is wrong.
+
+**Actively worse: this phase is the least playable one yet.** You cannot attach a strap, you
+cannot see a strap, and the truck does not go anywhere. Everything asserted is real and none
+of it is reachable by a person holding a keyboard. Phases 6 and 7 have both banked physics
+and deferred interaction, and that debt is now large enough that I would not put this build in
+front of a playtester without spending a day on input and HUD first.
+
+**The best accident I have not seen yet.** An unstrapped fridge travelling 1.6 m up the deck
+during a brake is, in principle, extremely funny — it is the whole promise of the game. I have
+only seen it as a number in a test log. That is the gap between this project being correct and
+being fun, and it is not going to close by adding Phase 8.
+
+**Cannot be judged yet.** Whether packing is the "cooperative 3D Tetris" §10.1 promises.
+Loading is currently a solitary API call, which answers nothing.
+
+**Would I tell a friend about it?** Not from this build. "The truck is a real box and the
+straps really hold" is an engineering claim, not a story.
+

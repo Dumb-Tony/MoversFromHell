@@ -3,8 +3,8 @@
 ### ▶ Play it: **https://dumb-tony.github.io/MoversFromHell/**
 
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
-*is* the site. **Phase 6 of 13**: a three-room house, 23 things to move out of it, two
-movers, and four tools that change the physics rather than granting permission. WASD move,
+*is* the site. **Phase 7 of 13**: a three-room house, 23 things to move out of it, two movers,
+four tools, and a truck whose cargo box is a real space you carry things into. WASD move,
 Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
 mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
 unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
@@ -78,7 +78,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 6 complete
+## Current state — Phase 7 complete
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -91,9 +91,28 @@ GDD §25.2 defines a 13-phase roadmap.
 | 4. Cooperative seam | multiple grips combine predictably | done — 59 assertions |
 | 5. House puzzle | all objects recoverable and movable | done — 61 assertions |
 | 6. Tools | each solves a physical problem | done — 66 assertions |
-| 7. Cargo | secured pack remains stable | next |
+| 7. Cargo | secured pack remains stable | done — 53 assertions |
+| 8. Drive | poor pack shifts or damages visibly | next |
 
-**492 assertions across seven suites, all passing.**
+**545 assertions across eight suites, all passing.**
+
+![Phase 7](docs/phase7-cargo.png)
+
+The cargo box through its open rear door: deck, walls, headboard, roof and six anchors, with
+the load strapped down. §10.1 forbids the shortcut — "nothing teleports into storage" — so
+there is no inventory here. An object is in the truck when it is physically in the truck.
+
+### What Phase 7 added
+
+| Piece | Where | Notes |
+|---|---|---|
+| The cargo box | `src/world/truck.js` | A real collision space with an open rear door and six anchors, built from the same records as its mesh. |
+| Straps | `src/cargo/straps.js` | One-sided ropes with §10.3's four states. A rope pulls when taut and does nothing when slack — which is what makes "slack" a state rather than a small force. |
+| Loading by physics | `src/cargo/cargo.js` | §10.2: cross the threshold AND settle inside. No slots, no grid, no snapping. |
+| Per-surface friction | `src/physics/world.js` | A truck deck is 0.32, not a house floor's 0.8 — which is the actual reason real loads get strapped. |
+
+**Measured, one §11.3 hard brake over the same six-item pack:** unstrapped worst shift
+**1.645 m**; strapped **0.141 m**.
 
 ![Phase 6](docs/phase6-tools.png)
 

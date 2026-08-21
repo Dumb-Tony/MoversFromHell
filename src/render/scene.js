@@ -96,6 +96,7 @@ export const OBSTACLES = Object.freeze([
  */
 export { ROOM } from '../world/house.js';
 import { ROOM, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
+import { cargoColliders, cargoAnchors } from '../world/truck.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -130,11 +131,15 @@ export function buildScene() {
   scene.fog = new THREE.Fog(0x9fc4dd, 40, 160);
 
   const colliders = [];
-  const addCollider = (cx, cz, sx, sz, base, top, tag) => {
+  // `friction` is optional and is carried THROUGH to the physics collider. It was dropped
+  // here at first, so the truck deck's 0.32 never reached the solver and an unstrapped pack
+  // survived a hard brake with a 2 mm shift.
+  const addCollider = (cx, cz, sx, sz, base, top, tag, friction) => {
     colliders.push({
       minX: cx - sx / 2, maxX: cx + sx / 2,
       minZ: cz - sz / 2, maxZ: cz + sz / 2,
       base, top, tag,
+      ...(friction !== undefined ? { friction } : {}),
     });
   };
 
@@ -332,6 +337,35 @@ export function buildScene() {
         j.position.set(jx, dr.height / 2, jz);
         scene.add(j);
       }
+    }
+  }
+
+  /* ---- Phase 7: the truck's cargo box ---------------------------------------------------
+   * §10.1: "The cargo box is a real collision-enabled space with floor, walls, roof, ramp,
+   * door, and anchor points. Nothing teleports into storage."
+   *
+   * Built from truck.js's records, so the mesh and the collider come from one place like
+   * everything else (§8.1). The rear (-Z) face is deliberately absent: that is the door, and
+   * the whole phase depends on being able to walk a couch in through it. */
+  {
+    const cargoMat = mat(0xb0b4bb);
+    for (const c of cargoColliders()) {
+      const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
+      if (sx <= 0 || sy <= 0 || sz <= 0) continue;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz),
+        c.tag === 'truckDeck' ? mat(0x6b6f78) : cargoMat);
+      m.position.set((c.minX + c.maxX) / 2, c.base + sy / 2, (c.minZ + c.maxZ) / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+      addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag, c.friction);
+    }
+
+    // Anchor points, in the reference lime. §10.3 wants "anchor validity" legible, and the
+    // cheapest honest version of that is being able to see where they are.
+    for (const a of cargoAnchors()) {
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.16), mat(PALETTE.reference));
+      knob.position.set(a.x, a.y, a.z);
+      scene.add(knob);
     }
   }
 
