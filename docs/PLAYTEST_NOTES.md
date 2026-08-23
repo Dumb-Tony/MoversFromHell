@@ -396,3 +396,54 @@ revised, not expanded."
 **Would I tell a friend about it?** Yes, and for the first time I would show them the invoice
 rather than the game: "we moved a whole house, and lost six hundred quid because I dropped
 the telly." That is the sentence this project has been trying to produce since Phase 0.
+
+---
+
+## Phase 11 — the playable layer — 2026-08-23
+
+**What became more fun:** all of phases 6–10 at once, because none of it could be reached
+before. That is a real observation and not a joke about the previous eleven entries — the
+build has had a working strap system since Phase 7 and this is the first session in which
+anyone could put a strap on anything. The thing that actually changed is the distance
+between deciding to do something and doing it, and it went from "edit a test file" to
+"press E".
+
+**§27.3 — what did the game allow that was unexpected?** Straps go on things that are not in
+the truck. Nothing checks that the cargo end of a strap is inside the cargo box, so you can
+anchor a strap to the truck and walk it out onto the driveway and attach it to a couch.
+Physically this is nonsense — the strap then drags the couch toward the truck at up to
+1200 N — and it is also the funniest thing in the build, and §3's "consequential chaos"
+pillar argues for keeping it. Filed as a decision to make, not a bug to fix: it is either a
+winch, or it is a validation check. It should not stay ambiguous.
+
+**§27.3 — did preparation feel like a choice or a chore?** Closer to a choice than it was,
+for a reason that has nothing to do with the tools themselves: the prompt names the cost
+before you commit. "put couch 3seat on the dolly" tells you the dolly is the answer to this
+couch, so the decision is whether to walk back for it, not whether the tool exists. Before
+this phase the tools were invisible in the strict sense — you had to know they were there.
+
+**§27.3 — could you predict cargo shift and damage?** Only for straps, and only because they
+are now drawn. Watching a strap sag and then snap taut over a bump is the first time the
+packing state has been legible in motion rather than as a number in a panel. The
+`unsecuredFraction` readout in the cargo panel was in the build for four phases and never
+once changed a decision; the sagging line changed one within a minute. §26.5's "readable
+without a UI layer" is doing real work here and should be applied to more than straps.
+
+**What became less fun, or at least less clear:** the reticle is crowded. With a tool in
+hand and something grabbable ahead, the grip hint and the interaction prompt overlap
+(KNOWN_ISSUES). Two systems each politely telling you what a different button does, in the
+same 200 px. §21.1 protects the screen edges and leaves the middle unowned.
+
+**Which moment would you tell a friend about?** Pressing Q while holding a screwdriver in
+front of a couch with a leg off, and having it put the leg back on. It is the smallest
+possible feature and it is the one that makes the verb feel like it understands the
+situation rather than the keypress. Worth noting that this is exactly the case that was
+BROKEN until the suite caught it — Q dropped the screwdriver instead, which made reassembly
+unreachable. The difference between the best moment in the phase and a dead end was the
+ordering of two conditions.
+
+**Still unanswered:** every §27.3 question about the TEAM. There is one keyboard and Tab
+swaps between movers, so nothing here has been tested with two people, and the questions
+that matter most to the north star — what did the team try, when did they coordinate,
+would they tell a friend — cannot be asked yet. The build is now playable enough that this
+is the only thing standing between it and a real playtest.

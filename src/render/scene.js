@@ -96,7 +96,7 @@ export const OBSTACLES = Object.freeze([
  */
 export { ROOM } from '../world/house.js';
 import { ROOM, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
-import { cargoColliders, cargoAnchors } from '../world/truck.js';
+import { cargoColliders, cargoAnchors, cabColliders } from '../world/truck.js';
 import {
   DEST_SHELL, DEST_ZONES, DEST_PARTITIONS, DEST_DOORS, destColliders,
 } from '../world/destination.js';
@@ -361,6 +361,17 @@ export function buildScene() {
       m.castShadow = true; m.receiveShadow = true;
       scene.add(m);
       addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag, c.friction);
+    }
+
+    // The cab. §11.2's "cab seats are safe" — and §3.4's TRANSIT has to begin somewhere
+    // you can walk up to. Not part of cargoColliders(): the cab is not cargo volume.
+    for (const c of cabColliders()) {
+      const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat(0x8d939c));
+      m.position.set((c.minX + c.maxX) / 2, c.base + sy / 2, (c.minZ + c.maxZ) / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+      addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag);
     }
 
     // Anchor points, in the reference lime. §10.3 wants "anchor validity" legible, and the

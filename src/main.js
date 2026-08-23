@@ -47,6 +47,9 @@ import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
+import { InvoiceScreen } from './ui/invoiceScreen.js';
+import { InteractionSystem } from './player/interact.js';
+import { StrapLines } from './render/strapLines.js';
 import { BUILD, MOVERS } from './config.js';
 
 const canvas = document.getElementById('stage');
@@ -77,6 +80,12 @@ async function boot() {
   // of the session would find nothing without this. MEASURED — see world.js.
   physics.primeQueries();
 
+  /** Messages the HUD should show, queued from SYSTEMS (which run on the fixed step) and
+   *  drained on the render frame. A system must never touch the DOM (§22.2), and a notice
+   *  raised between two frames must not be lost, so it goes through a queue. */
+  const pendingNotices = [];
+  let strapsPlacedTotal = 0;
+
   const bus = new EventBus();
   const input = new Input(window, canvas).attach();
   const game = new Game({ contractId: 'suburban_starter', input, bus });
@@ -100,9 +109,13 @@ async function boot() {
 
   const registry = new ObjectRegistry(physics, world.scene);
   game.state.manifest = buildManifest(PHASE5_SPAWNS);
+  /** Manifest row index -> entity id. Kept OUTSIDE game.state because a reset replaces the
+   *  state wholesale, and a replay has to re-attach the manifest to the same bodies. */
+  const contractEntityIds = [];
   PHASE5_SPAWNS.forEach((s, i) => {
     const e = registry.spawn(s.def, s);
     game.state.manifest[i].entityId = e.id;
+    contractEntityIds[i] = e.id;
   });
 
   /* ---- tools (Phase 6) -------------------------------------------------------------------
@@ -129,6 +142,15 @@ async function boot() {
    * to those bodies. There is no path from a pack-quality score to an object's condition. */
   const damage = new DamageSystem(physics, registry, bus, game.state);
   const route = new RouteDriver(cargo, bus);
+
+  /* ---- the playable layer (Phase 11) -----------------------------------------------------
+   * Everything above was reachable only by calling its API. §9.2 asks for one common
+   * interaction verb, and this is the thing that reads it: what E means comes from what is
+   * under the reticle, and §4.4 requires the HUD to say which meaning applies BEFORE the key
+   * is pressed. See interact.js. */
+  const interact = new InteractionSystem({
+    physics, registry, tools, straps, cargo, route, rig, camera, bus,
+  });
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
@@ -228,6 +250,21 @@ async function boot() {
         // Only the driven mover's hands follow the camera. The others keep the aim frame
         // they last held, so turning the view does not drag their arms around with it.
         m.grips.syncAim();
+
+        /* §9.2's ONE COMMON VERB, read as an edge so holding it does not repeat.
+         *
+         * Both are deliberately no-ops when there is nothing sensible to do — the prompt
+         * under the reticle has already said so, and §2.1 forbids telling a player "no"
+         * after they have committed to a press. */
+        if (inp.wasPressed('interact')) {
+          const msg = interact.act(m, ctx.simTimeMs);
+          if (msg) pendingNotices.push({ text: msg, kind: 'info' });
+        }
+        if (inp.wasPressed('context')) {
+          const msg = interact.secondary(m);
+          if (msg) pendingNotices.push({ text: msg, kind: 'info' });
+        }
+
         for (const hand of HANDS) {
           const action = hand === 'left' ? 'gripLeft' : 'gripRight';
           const want = inp.isDown(action);
@@ -259,6 +296,9 @@ async function boot() {
 
     // Clearance depends on EVERY mover — a box put down beside one may be inside the other.
     restoreClearedObjects(registry, movers.map((m) => m.controller));
+
+    // Carried tools travel with their mover. Kinematic, so before the step (see interact.js).
+    interact.step(movers, stepMs);
   });
 
   // Straps accumulate force, so they run BEFORE the step and after clearForces, exactly as
@@ -298,10 +338,28 @@ async function boot() {
     stepManifest(state.manifest, registry, stepMs);
   });
 
+  /* §3.4's contract phase machine, driven by what actually happens rather than by a menu.
+   *
+   * PICKUP  -> TRANSIT     the player presses E at the cab (interact.js `_useCab`)
+   * TRANSIT -> DELIVERY    the route reaches its end
+   * DELIVERY-> SETTLEMENT  the player presses E at the cab again
+   *
+   * §3.4's Secure exit is "warnings ACKNOWLEDGED", not resolved, so nothing here blocks a
+   * departure — `canDepart()` advises and the prompt carries the warning. Refusing would
+   * delete Phase 8's gate, which requires that a badly packed truck can be driven. */
+  game.addSystem('phase', (state) => {
+    if (state.phase === PHASES.TRANSIT && route.state === 'arrived') {
+      game.setPhase(PHASES.DELIVERY);
+      pendingNotices.push({ text: 'arrived — unload through the back', kind: 'good' });
+    }
+  });
+
   game.setPhase(PHASES.PICKUP);
 
   const overlay = new DebugOverlay(ui, game);
   const hud = new Hud(ui);
+  const invoiceScreen = new InvoiceScreen(ui);
+  const strapLines = new StrapLines(world.scene, straps, registry);
 
   const stamp = document.createElement('div');
   stamp.id = 'build-stamp';
@@ -310,10 +368,161 @@ async function boot() {
 
   const help = document.createElement('div');
   help.id = 'help';
-  help.innerHTML = '<b>Click to look around.</b> &nbsp; WASD move · Shift sprint/brace · ' +
-                   'Space jump/mantle · <b>LMB/RMB grab</b> · <b>Tab swap mover</b> · ' +
-                   'R recover · Esc pause · F3 stats';
+  help.innerHTML = '<b>Click to look around.</b> &nbsp; WASD · Shift sprint/brace · ' +
+                   'Space jump · <b>LMB/RMB grab</b> · <b>E use</b> · <b>Q undo</b> · ' +
+                   'Tab swap mover · R recover · Esc pause · F3';
   ui.appendChild(help);
+
+  /* ---- events the player should SEE (§8.4, §10.3) ---------------------------------------
+   * §8.4: "At impact: material sound, visual mark, optional haptic pulse, and ONE SMALL COST
+   * NOTICE." The cost notice is the only one of those four this build can do, so it does it.
+   * Subscribed here rather than polled, so a notice can never be missed between frames. */
+  bus.on(EVENTS.DAMAGE_APPLIED, (e) => {
+    const name = String(e.defId || '').replace(/_\d+$/, '').replace(/_/g, ' ');
+    pendingNotices.push({
+      text: `${name} — ${e.band} · ${e.cost.toFixed(2)}`,
+      kind: 'damage',
+    });
+  });
+  bus.on(EVENTS.STRAP_CHANGED, (e) => {
+    // Only the states worth interrupting for. A strap going tensioned is not news.
+    if (e.state === 'failed') pendingNotices.push({ text: 'a strap gave way', kind: 'damage' });
+    else if (e.state === 'overstressed') pendingNotices.push({ text: 'strap overstressed', kind: 'warn' });
+  });
+  bus.on(EVENTS.ROAD_FORCE, (e) => {
+    pendingNotices.push({ text: e.label, kind: 'warn' });
+  });
+  bus.on(EVENTS.STRAP_CHANGED, (e) => { if (e.state === 'slack' && e.strapId) strapsPlacedTotal++; });
+  bus.on(EVENTS.RECOVERY, () => {
+    pendingNotices.push({ text: 'recovery callout — a fee at settlement', kind: 'warn' });
+  });
+
+  /* SETTLEMENT. §15.2: the grade "never hides" the invoice, and "negative profit still
+   * completes the job", so this screen is the same screen either way. */
+  function settle() {
+    damage.flush();
+    const summary = manifestSummary(game.state.manifest);
+    const opts = {
+      recoveries: recoveryCount(),
+      collisions: 0,
+      moverCount: movers.length,
+    };
+    const invoice = buildInvoice(game.state, summary, opts);
+    const review = reviewFor(invoice, game.state, summary, opts);
+    const stats = contributionStats(game.state, {
+      strapsPlaced: strapsPlacedTotal,
+      recoveries: opts.recoveries,
+      heaviestMoved: heaviestMoved(),
+    });
+    game.setPhase(PHASES.SETTLEMENT);
+    invoiceScreen.show(invoice, review, summary, stats);
+    game.setPaused(true);
+    input.releasePointerLock && input.releasePointerLock();
+  }
+  bus.on(EVENTS.CONTRACT_PHASE, (e) => { if (e.to === 'settlement') settle(); });
+
+  /**
+   * §26.6: "reset removes transient straps, grips, damage records, fragments and route
+   * state." Everything transient, and nothing else.
+   *
+   * TWO THINGS game.reset() DOES THAT HAVE TO BE UNDONE HERE. It replaces `state` wholesale
+   * with a fresh createInitialState(), which is right for the clock, the seed and the ledger
+   * — and which also throws away the manifest (rebuilt below, with the same entities) and
+   * every player record except p0 (mover p1 would then have no state row, and the movers
+   * system would crash on the first frame). Both are consequences of the state being plain
+   * serializable data with no back-references, which is the property §22.4 wants; the price
+   * is that whatever was attached to it has to be re-attached.
+   */
+  function resetContract() {
+    straps.releaseAll();
+    damage.reset();
+    route.reset();
+    for (const m of movers) m.grips.releaseAll('contract reset');
+    for (const s of interact.state.values()) { s.carriedTool = null; s.pendingAnchor = null; }
+    strapsPlacedTotal = 0;
+
+    game.reset();
+
+    // Re-attach what the fresh state does not know about.
+    game.state.manifest = buildManifest(PHASE5_SPAWNS);
+    contractEntityIds.forEach((id, i) => { game.state.manifest[i].entityId = id; });
+    for (const m of movers) {
+      if (!game.state.players[m.id]) {
+        game.state.players[m.id] = {
+          id: m.id, position: { x: 0, y: 0, z: 0 }, yaw: 0,
+          locomotion: 'grounded', grips: { left: null, right: null }, exertion: 0,
+        };
+      }
+    }
+    game.state.localPlayerId = active().id;
+
+    respawnContract();
+    for (const [i, m] of movers.entries()) {
+      const off = MOVERS.spawnOffsets[i] || { x: 0, z: 0 };
+      m.controller.hardSetPosition({
+        x: world.spawn.x + off.x, y: world.spawn.y + 0.1, z: world.spawn.z + off.z,
+      });
+    }
+    for (const t of tools.tools.values()) {
+      t.state.deployed = false;
+      t.state.attachedTo = null;
+      t.state.carriedBy = null;
+    }
+    PHASE6_TOOL_SPAWNS.forEach((s, i) => {
+      const t = [...tools.tools.values()][i];
+      if (!t) return;
+      t.body.setBodyType(physics.R.RigidBodyType.Dynamic, true);
+      t.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
+      t.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+      t.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      t.body.wakeUp();
+    });
+    physics.primeQueries();
+    game.setPhase(PHASES.PICKUP);
+  }
+
+  invoiceScreen.onReplay = () => {
+    invoiceScreen.hide();
+    resetContract();
+    game.setPaused(false);
+    hud.notice('new contract', 'good');
+  };
+
+  function recoveryCount() {
+    let n = 0;
+    for (const e of registry.entities.values()) n += e.state.recoveries || 0;
+    for (const m of movers) n += m.controller.recoveries || 0;
+    return n;
+  }
+  function heaviestMoved() {
+    let m = 0;
+    for (const e of registry.entities.values()) {
+      if ((e.state.recoveries || 0) > 0 || e.state.loaded || e.state.everHeld) {
+        m = Math.max(m, e.def.mass);
+      }
+    }
+    return m;
+  }
+  /** Put the contract's objects back where they started, for a replay. */
+  function respawnContract() {
+    PHASE5_SPAWNS.forEach((s, i) => {
+      const row = game.state.manifest[i];
+      const e = row && registry.get(row.entityId);
+      if (!e) return;
+      e.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
+      const yaw = s.yaw || 0;
+      e.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+      e.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      e.state.condition = 100;
+      e.state.recoveries = 0;
+      e.state.loaded = false;
+      e.state.cargoDwellMs = 0;
+      e.state.removedParts = [];
+      e.body.wakeUp();
+    });
+    physics.primeQueries();
+  }
 
   // ---- shell wiring ---------------------------------------------------------------------
   input.onBlur = () => game.setPaused(true);           // §21.4 solo pause
@@ -347,7 +556,42 @@ async function boot() {
     rig.update(p.position, dt);   // the rig follows whoever you are driving
     registry.syncMeshes();
     tools.syncMeshes();
+    strapLines.update(dt);
     hud.update(active().grips.status());
+
+    /* ---- the HUD's feed. Presentation only: it READS state and never writes it (§22.2). */
+    const me = active();
+    const described = interact.describe(me);
+    hud.setPrompt(described);
+
+    // §9.2's "readable preview and valid/invalid affordance" while a strap is half-placed.
+    const istate = interact._for(me.id);
+    if (istate.pendingAnchor) {
+      const anchor = interact.anchors.find((a) => a.id === istate.pendingAnchor);
+      const t = described.target;
+      strapLines.showGuide(anchor, t && t.point, t && t.kind === 'object');
+    } else {
+      strapLines.hideGuide();
+    }
+
+    const summary = manifestSummary(game.state.manifest);
+    hud.setContract({
+      phase: game.state.phase,
+      delivered: summary.delivered,
+      total: summary.total,
+      loaded: cargo.loadedEntities().length,
+      roomCorrect: summary.roomCorrect,
+      elapsedMin: game.state.elapsedWorkMs / 60000,
+      estimateMin: game.state.estimateMs / 60000,
+    });
+    hud.setCargo(cargo.packQuality());
+    hud.setRoute(route.status());
+
+    while (pendingNotices.length) {
+      const n = pendingNotices.shift();
+      hud.notice(n.text, n.kind);
+    }
+    hud.tickNotices();
 
     renderer.render(world.scene, camera);
     overlay.update(frameMs, {
@@ -376,7 +620,7 @@ async function boot() {
     physics, registry, movers, tools, straps, cargo,
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
     destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
-    damage, route,
+    damage, route, interact, strapLines, invoiceScreen, settle,
     buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },

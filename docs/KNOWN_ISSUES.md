@@ -366,11 +366,11 @@ went into the kitchen — which is the most legible form of §15.1's room-accura
 
 ## Phase 10 open items
 
-**There is no invoice screen.** §21.2's contract UX is Phase 11 work and the build has none
-of it. The Phase 10 screenshot draws its own panel — every NUMBER in it comes from
-`buildInvoice()` running on the real ledger, so the content is the shipping build's and only
-the rendering belongs to the screenshot. Same arrangement as the Phase 7 strap lines, and
-called out here for the same reason.
+**~~There is no invoice screen.~~ CLOSED in Phase 11.** §21.2's contract UX now exists in
+`src/ui/invoiceScreen.js`, and `docs/phase11-playable.png` is the shipping build's own HUD
+rather than a panel drawn by the screenshot script. Kept here because the arrangement it
+describes — screenshot-rendered content standing in for a missing UI — was also used for the
+Phase 7 strap lines, and the Phase 7 note is still open.
 
 **Property damage is priced and unbuilt.** `DAMAGE.property` exists, keyed on impulse
 because what a wall suffers really does scale with the mass that hit it, and §15.1 lists it
@@ -401,3 +401,42 @@ available, which makes it free rather than earned.
 and reputation stub". The invoice is computed and discarded, so replaying a contract cannot
 yet be compared to the last attempt — which is most of what makes §19.1's replay sources
 work.
+
+---
+
+## Phase 11 open items
+
+**One mover plays; the other is driven by Tab.** §6.4's two-mover cooperation is real in the
+physics — two grips combine on one couch, and the suites assert it — but there is one
+keyboard, so cooperation means swapping between them rather than acting at once. Everything
+under it is multiplayer-shaped already (§22.4: stable string ids, serializable state,
+systems observe rather than own), so this is an input limitation, not a model one. It is the
+single biggest gap between what the build simulates and what the GDD describes.
+
+**The grip hint and the interaction prompt can overlap.** Both render near the reticle: the
+grip hint from §5.1's carry state, the prompt from §9.2's verb. When you are carrying a tool
+*and* looking at something grabbable, the two lines collide — visible in
+`docs/phase11-playable.png`, where "hold LMB / RMB to grab" sits over the carry line. §21.1
+only constrains persistent panels to screen edges and says nothing about the centre. Needs a
+layout rule, not a code fix.
+
+**`game.reset()` replaces `game.state` wholesale.** So the contract's entity list lives
+outside it, and the manifest and the local player record are re-attached explicitly after
+every reset. This works and is asserted (m11 G-section), but it means there are two places
+that must agree about what a contract *is*. Worth collapsing into one before the Unity port,
+while the seam is still small.
+
+**The interaction probe is a single ray.** §4.1 asks for "generous aim assistance for hand
+targeting". Small tools get a size-scaled tolerance (`_toolNearRay`) because a 50 mm
+screwdriver is genuinely unpointable, but everything else is hit-or-miss on one ray. A cone
+or a small sphere cast would be truer to the GDD; the tolerance hack was the cheap version
+and should be replaced rather than extended.
+
+**No rebinding, and the keys are hard-coded.** E, Q, Tab, R and F3 are literals in
+`main.js`'s key handler rather than a binding table. Fine for a prototype with one tester,
+wrong the moment anyone else plays it, and an accessibility problem regardless (§26.5 cares
+about readability but the GDD has no input-remapping requirement — it should).
+
+**The settlement screen is the only place the invoice appears.** There is no way to look at
+the ledger mid-contract, so the §8.4 cost notices are the only in-flight feedback about what
+damage is costing. That is probably correct for tension and definitely untested.

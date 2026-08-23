@@ -19,9 +19,9 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 10,
-  label: 'phase-10',
-  date: '2026-08-21',
+  phase: 11,
+  label: 'phase-11',
+  date: '2026-08-23',
 });
 
 /** Simulation cadence. Validated by Phase 0. */
@@ -374,6 +374,20 @@ export const TOOLS = Object.freeze({
    *  "through the common interaction system", and two different ranges would make the same
    *  gesture work at different distances depending on what you were pointing at. */
   interactRange: 2.1,
+  /** How far off the aim line an anchor may sit and still be selectable, m.
+   *
+   *  Anchors are 100 mm knobs and are POINTS rather than colliders — six small obstacles
+   *  inside the cargo box would be six things for the load to snag on. Selecting them by
+   *  proximity to the aim line instead needs a tolerance, and 0.28 m is about a thumb at
+   *  arm's length: forgiving enough to be usable, tight enough that two adjacent anchors
+   *  are still distinguishable (they are 1.47 m apart). */
+  anchorAimRadius: 0.28,
+  /** Aim assist for SMALL tools, m·m. Divided by the tool's largest dimension to get its
+   *  selection tolerance, so a 0.26 m screwdriver gets 0.46 m of slack and the 2.70 m ramp
+   *  gets the 0.28 m floor. A 50 mm target at arm's length is a mouse-precision test, and
+   *  §9.2 asks for tools to be deployed through the common interaction system rather than
+   *  through marksmanship. */
+  smallToolAssistM: 0.12,
 
   dolly: {
     mass: 14,

@@ -204,6 +204,12 @@ export class Input {
     this._bound.length = 0;
   }
 
+  /** Hand the cursor back. The §15.2 settlement screen has a button on it, and a locked
+   *  pointer cannot press one. */
+  releasePointerLock() {
+    if (document.exitPointerLock && document.pointerLockElement) document.exitPointerLock();
+  }
+
   requestPointerLock() {
     if (this.surface && this.surface.requestPointerLock) this.surface.requestPointerLock();
   }

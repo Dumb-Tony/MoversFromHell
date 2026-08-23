@@ -5,23 +5,28 @@
 Always live, always the current `main`. Every push redeploys it — no build step, the repo
 *is* the site. **Phase 10 of 13**: a house to empty, two movers, four tools, a truck with a
 real cargo box, a drive that finds out how well you packed it, a second house to fill, and an
-invoice that prices every mistake you made getting there. WASD move,
-Shift sprint/brace, Space jump/mantle, **LMB/RMB to grab with each hand**, **Tab to swap
-mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you down,
-unbalance you, and eventually put you on the floor. That is the design, not a bug. Then grab
-one end, Tab to the other mover, grab the other end, and watch it come off the ground.
+invoice that prices every mistake you made getting there. WASD move, Shift sprint/brace,
+Space jump/mantle, **LMB/RMB to grab with each hand**, **E to use and Q to undo**, **Tab to
+swap mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you
+down, unbalance you, and eventually put you on the floor. That is the design, not a bug.
+Then grab one end, Tab to the other mover, grab the other end, and watch it come off the
+ground. Or find the dolly, press E, and let it do the work.
 
 ---
 
 > ### ⚠ What you can actually reach right now
 >
-> Phases 0–5 are playable with a keyboard: walk, grab, carry, drag, swap movers, wreck your
-> back on a couch. **Phases 6–10 are not.** The tools, straps, cargo loading, the drive and
-> the invoice are all real, all measured and all asserted by 669 tests — and none of them has
-> an input binding or a HUD, so a player cannot touch any of it. Each phase was gated on
-> physics and each deferred its interface; the compound effect is a build that is much more
-> correct than it is playable. It is the first thing that should be fixed and it is at the top
-> of [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+> **All of it.** Phases 6–10 were built physics-first and each deferred its interface, so for
+> a while the tools, straps, cargo loading, the drive and the invoice were real, measured and
+> asserted — and unreachable, because none of them had an input binding. That gap is closed:
+> **E does the obvious thing and Q undoes it** (§9.2), the HUD tells you which before you
+> press it (§4.4), straps are drawn (§10.3), and the contract ends on a settlement screen you
+> can replay from (§15.2).
+>
+> What is *not* here: one keyboard, so two-mover cooperation means Tab-swapping rather than
+> two people playing at once. Everything under it is already multiplayer-shaped (§22.4) and
+> nothing has been tested with an actual team — which is now the only thing standing between
+> this build and GDD §25.2's Phase 11. See [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 A 1–4 player physics-driven moving-company co-op game. You and your friends carry
 furniture down stairs, through doorways it does not fit through, into a truck that is a
@@ -89,7 +94,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 10 complete
+## Current state — Phase 10 complete, and playable
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -108,7 +113,20 @@ GDD §25.2 defines a 13-phase roadmap.
 | 10. Economy | ledger matches events | done — 45 assertions |
 | 11. Playtest | external groups complete and replay | next — and it is the only one that matters |
 
-**669 assertions across eleven suites, all passing.**
+Plus one increment that is not on the roadmap: **the playable layer**, which gave phases
+6–10 the input bindings and HUD each of them had deferred. It is what the `phase-11` build
+stamp refers to, and it is not §25.2's Phase 11 — that one is the playtest, and it is next.
+
+**737 assertions across twelve suites, all passing.**
+
+![The playable layer](docs/phase11-playable.png)
+
+§9.2's one interaction verb, showing its work: a mover carrying the flat dolly, looking at
+the couch, with the HUD naming both halves of the decision before either key is pressed —
+`E put couch 3seat on the dolly`, `Q put down the flat dolly`. Behind them the truck is
+part-loaded and two straps are drawn from their anchors over the cargo (§10.3), the contract
+panel is nine minutes into an eighteen-minute estimate, and the cargo panel is calling the
+pack **45% unstrapped** in red. Every panel in that frame is the shipping build's own.
 
 ![Phase 10](docs/phase10-invoice.png)
 

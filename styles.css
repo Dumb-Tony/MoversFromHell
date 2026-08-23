@@ -147,3 +147,219 @@ html, body {
 }
 #grip-label.holding  { color: var(--lime); }
 #grip-label.slipping { color: var(--coral); font-weight: 700; opacity: 1; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Phase 11 — the playable layer.
+
+   §21.1's rule still governs: "no persistent panel should cover the object-doorway
+   relationship." Everything below lives at an EDGE. The middle of the screen — where a
+   player judges whether a couch clears a door frame — stays empty except for the reticle
+   and one line of prompt directly beneath it.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* The interaction prompt. §4.4: "one input should not change meaning invisibly", and E
+   means eleven different things — so what it is about to do is written here, under the
+   reticle, where the player is already looking, before they press it. */
+#prompt {
+  position: absolute;
+  left: 50%; top: calc(50% + 46px);
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  font: 12px/1.5 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+}
+#prompt:empty { display: none; }
+#prompt .key {
+  display: inline-block;
+  min-width: 17px; padding: 1px 5px;
+  background: var(--lime); color: #14180a;
+  border-radius: 3px;
+  font: 700 11px/1.4 ui-monospace, Consolas, monospace;
+  text-align: center;
+}
+#prompt .key.alt { background: var(--violet); color: #100e1c; }
+#prompt .sep   { opacity: .35; }
+#prompt .hint  { opacity: .6; }
+#prompt .carry { color: var(--amber); }
+
+/* Contract status — top-left, under the debug overlay when that is open. */
+#contract {
+  position: absolute;
+  left: 10px; top: 10px;
+  min-width: 178px;
+  padding: 8px 10px;
+  background: rgba(23,21,34,.78);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11px/1.55 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  user-select: none;
+}
+#contract:empty { display: none; }
+#contract .phase {
+  color: var(--lime); letter-spacing: .1em; text-transform: uppercase;
+  font-size: 10px; margin-bottom: 4px;
+}
+#contract .row { display: flex; justify-content: space-between; gap: 14px; }
+#contract .row span { opacity: .65; }
+#contract .row b { font-variant-numeric: tabular-nums; }
+#contract .row.over span, #contract .row.over b { color: var(--coral); }
+
+/* §11.2's "coarse cargo-status indicator" — top-right, three lines, no precision. */
+#cargo-status {
+  position: absolute;
+  right: 10px; top: 10px;
+  min-width: 190px;
+  padding: 8px 10px;
+  background: rgba(23,21,34,.78);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11px/1.55 Quicksand, system-ui, sans-serif;
+  user-select: none;
+}
+#cargo-status:empty { display: none; }
+#cargo-status .row { display: flex; justify-content: space-between; gap: 14px; }
+#cargo-status .row span { opacity: .65; }
+#cargo-status .row b { font-variant-numeric: tabular-nums; }
+#cargo-status .row.ok   span, #cargo-status .row.ok   b { color: var(--lime); opacity: 1; }
+#cargo-status .row.warn span, #cargo-status .row.warn b { color: var(--amber); opacity: 1; }
+#cargo-status .row.bad  span, #cargo-status .row.bad  b { color: var(--coral); opacity: 1; font-weight: 700; }
+
+/* Route progress, only while driving. Bottom edge, clear of the help line. */
+#route-bar {
+  position: absolute;
+  left: 50%; bottom: 42px;
+  transform: translateX(-50%);
+  width: 320px; height: 6px;
+  background: rgba(23,21,34,.8);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: none;
+}
+#route-bar.on { display: block; }
+#route-bar .fill {
+  height: 100%; width: 0;
+  background: var(--lime);
+  border-radius: 3px;
+  transition: width .1s linear;
+}
+#route-bar .label {
+  position: absolute; left: 50%; top: -19px;
+  transform: translateX(-50%);
+  font: 11px/1.4 Quicksand, system-ui, sans-serif;
+  color: var(--paper); opacity: .7; white-space: nowrap;
+}
+#route-bar .label.event { color: var(--amber); opacity: 1; font-weight: 700; }
+
+/* §8.4's "one small cost notice" at impact. Transient, stacked, bottom-right. */
+#notices {
+  position: absolute;
+  right: 10px; bottom: 34px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+}
+#notices .notice {
+  padding: 4px 9px;
+  background: rgba(23,21,34,.88);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 4px;
+  font: 11px/1.45 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  animation: noticeIn .18s ease-out;
+}
+#notices .notice.info   { border-left-color: var(--violet); }
+#notices .notice.good   { border-left-color: var(--lime); }
+#notices .notice.damage { border-left-color: var(--coral); color: #ffd9d9; }
+#notices .notice.warn   { border-left-color: var(--amber); }
+@keyframes noticeIn { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; } }
+
+/* ── the settlement screen (§15.1, §15.2) ─────────────────────────────────────
+   The one panel allowed to cover the working area, because by the time it appears the job
+   is over and there is no doorway left to judge. */
+#settlement {
+  position: absolute; inset: 0;
+  background: rgba(8,7,13,.78);
+  display: flex; align-items: center; justify-content: center;
+  overflow: auto;
+}
+#settlement[hidden] { display: none; }
+#settlement .sheet {
+  width: 540px; max-height: 92vh; overflow: auto;
+  padding: 22px 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.6);
+  font: 13px/1.6 Quicksand, system-ui, sans-serif;
+}
+#settlement .head { margin-bottom: 14px; }
+#settlement .title { color: var(--lime); letter-spacing: .14em; font-size: 15px; font-weight: 700; }
+#settlement .sub { opacity: .55; font-size: 11px; }
+
+#settlement .line {
+  display: flex; justify-content: space-between; gap: 18px;
+  padding: 3px 0;
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+}
+#settlement .line .detail { display: block; opacity: .45; font-size: 10px; }
+#settlement .line .amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+#settlement .line.in  .amt { color: var(--lime); }
+#settlement .line.out .amt { color: #e8a0a0; }
+
+#settlement .total {
+  display: flex; justify-content: space-between;
+  margin-top: 12px; padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font-size: 17px; font-weight: 700;
+}
+#settlement .total .amt { font-variant-numeric: tabular-nums; }
+#settlement .total.gain .amt { color: var(--lime); }
+#settlement .total.loss .amt { color: var(--coral); }
+
+#settlement .grade { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+#settlement .grade .letter {
+  width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font: 700 22px/1 'Baloo 2', Quicksand, system-ui, sans-serif;
+  background: var(--line); color: var(--paper);
+}
+#settlement .grade .g-A { background: var(--lime);  color: #14180a; }
+#settlement .grade .g-B { background: #7fc24a;      color: #14180a; }
+#settlement .grade .g-C { background: var(--amber); color: #1c1405; }
+#settlement .grade .g-D { background: #d97a3a;      color: #1c1405; }
+#settlement .grade .g-F { background: var(--coral); color: #200a0a; }
+#settlement .grade .score { opacity: .6; font-size: 11px; }
+
+#settlement .review {
+  margin-top: 14px; padding: 11px 13px;
+  background: rgba(255,255,255,.03);
+  border-left: 3px solid var(--violet);
+  border-radius: 4px;
+}
+#settlement .review .quote { font-style: italic; }
+#settlement .review .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+#settlement .review .tags span {
+  padding: 1px 7px; border: 1px solid var(--line); border-radius: 10px;
+  font: 10px/1.6 ui-monospace, Consolas, monospace; opacity: .65;
+}
+
+#settlement .stats {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px;
+}
+#settlement .stat { display: flex; justify-content: space-between; font-size: 11px; }
+#settlement .stat span { opacity: .55; }
+#settlement .stat b { font-variant-numeric: tabular-nums; }
+
+#settlement .replay {
+  margin-top: 16px; width: 100%;
+  padding: 9px 0;
+  background: var(--lime); color: #14180a;
+  border: 0; border-radius: 6px;
+  font: 700 13px Quicksand, system-ui, sans-serif;
+  cursor: pointer;
+}
+#settlement .replay:hover { filter: brightness(1.08); }
+#settlement .foot { margin-top: 9px; text-align: center; font-size: 10px; opacity: .4; }

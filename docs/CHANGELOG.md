@@ -3,6 +3,82 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 11 — the playable layer — 2026-08-23
+
+**Gate:** not a §25.2 roadmap phase. This closes the interface gap that phases 6–10 each
+deferred: everything they built was real, measured and asserted, and none of it had an
+input binding, so a player could not touch any of it.
+**PASSED** — 68 assertions (737 across twelve suites).
+
+**Hypothesis:** the gap was never missing features, it was that §9.2's "one common
+interaction verb" had never been written. Phases 6–10 each ended with a working system and
+a note that its interface was deferred; six deferrals compounded into a build that was much
+more correct than it was playable. If the verb is right, nothing else needs adding — the
+tools, straps, ramp, cab and invoice are already there and only need a way in.
+
+**§9.2, implemented as written: E does the obvious thing, Q undoes it.** What "obvious"
+means is decided by what you are looking at and what you are holding, and there is exactly
+one binding for each:
+
+| looking at | holding | E | Q |
+|---|---|---|---|
+| a tool | nothing | pick it up | — |
+| an anchor | nothing | start a strap | — |
+| an object | a dolly | put it on the dolly | put the dolly down |
+| strapped cargo | nothing | tighten the straps | release them |
+| an object with a part off | a screwdriver | — | put the part back on |
+| the cab | nothing | drive | — |
+| mid-strap | anything | finish the strap on this cargo | cancel the strap |
+
+**§4.4's "one input should not change meaning invisibly" is the reason `describe()` exists.**
+It returns the same decision `act()` will take, so the HUD renders the promise *before* the
+key is pressed. The invariant the suite is built around: **7 promises made, 7 honoured** —
+for every situation the prompt offers something, pressing the key does that exact thing.
+`tools/m11-tests.js` drives `interact` the way a player would (stand somewhere, look at
+something, press a key); it never calls `ToolSystem` or `StrapSystem` directly, because a
+test that reaches past the binding cannot detect a missing one.
+
+**Three bugs the suite caught, all of them in the verb rather than the systems underneath:**
+
+- **What you carry blocks what you point at.** The interaction probe is a ray from the eye,
+  and a carried blanket is a large collider directly in front of it — so picking up a
+  blanket silently disabled E. The dolly hid this: it is thin enough to miss the ray. Fixed
+  by excluding the mover's own collider and filtering carried tools out of the cast
+  (`GROUP_PRESETS.player`, and a `toolCarried` group with filter 0). Note for the Unity
+  port: `castRayAndGetNormal`'s 8th-argument predicate is **not honoured** — the 6-argument
+  form is the one that works, which is why `grip.js` uses it too.
+- **Q put the tool down before undoing.** Reassembly was unreachable: to put a leg back on
+  you must be holding the screwdriver, but Q saw a held tool and dropped it. Undo now beats
+  put-down whenever the thing in front of you has something to undo.
+- **A 26 mm screwdriver is not pointable.** The screwdriver is 50 × 50 × 260 mm and a ray
+  through its centre misses at any realistic standing distance. `_toolNearRay` adds a
+  size-scaled tolerance, so small tools get aim assist and large ones do not need it.
+
+**§10.3's strap rendering, which the phase also required:** a strap you cannot see is a
+strap you cannot judge. `strapLines.js` renders the line, its anchor, its tension and its
+overload risk. Slack renders as visible **sag in the geometry**, not as a colour change —
+§26.5 asks for readability without a UI layer, and a colour-only cue fails for a player who
+cannot distinguish it. Overstressed straps pulse orange to red at a rate set by how close
+to failing they are.
+
+**§15.2's two rules for the settlement screen**, both asserted: the grade never hides the
+invoice (both are on screen together), and negative profit still *completes* the job — a
+loss renders identically, in red, with the same replay button. There is no failure screen.
+
+**Touched:** `src/player/interact.js` (new), `src/render/strapLines.js` (new),
+`src/ui/invoiceScreen.js` (new), `src/ui/hud.js` (rewritten — prompt, contract, cargo,
+route and notices, all at screen EDGES per §21.1, so no panel covers the object-doorway
+relationship), `src/main.js`, `src/world/truck.js` (cab volume), `src/physics/world.js`
+(`toolCarried` group), `tools/m11-tests.js` (new).
+
+**Checked:** 68 new assertions; 737 across all twelve suites, 0 failing. The screenshot in
+`docs/phase11-playable.png` is the shipping build's own HUD — unlike the Phase 10 shot,
+where the invoice had to be drawn by the screenshot script because no UI existed.
+
+**Limitation:** `game.state` is replaced wholesale by `game.reset()`, so the contract's
+entity list is held outside it and the manifest and player record are re-attached
+explicitly. That is a seam worth closing before Unity, not a bug — see KNOWN_ISSUES.
+
 ## Phase 10 — the economy — 2026-08-21
 
 **Gate (§25.2):** "Time, damage, bonuses, invoice, review" → **ledger matches events**.

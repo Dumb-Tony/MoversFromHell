@@ -91,6 +91,35 @@ export function cargoColliders(pose = TRUCK_POSE, box = CARGO_BOX) {
   ];
 }
 
+/* ── The cab ─────────────────────────────────────────────────────────────────────────
+ *
+ * Added in Phase 11, when the drive needed somewhere to START. Until then the route was an
+ * API call and there was nothing in the world to walk up to.
+ *
+ * §11.2 says "cab seats are safe" and §3.4's TRANSIT phase has to begin somewhere; a box at
+ * the front of the truck you can stand at and press E is the smallest honest version of
+ * that. It is deliberately NOT in cargoColliders() — the cab is not cargo space (§10.2's
+ * volume accounting would be wrong) and m7 counts that list.
+ */
+export const CAB = Object.freeze({ length: 1.9, height: 2.3 });
+
+export function cabColliders(pose = TRUCK_POSE, box = CARGO_BOX, cab = CAB) {
+  const i = cargoInterior(pose, box);
+  const t = box.wallT;
+  // In front of the cargo box, at the +Z end, sitting on the same deck line.
+  const z0 = i.maxZ + t, z1 = z0 + cab.length;
+  return [{
+    minX: i.minX - t, maxX: i.maxX + t, minZ: z0, maxZ: z1,
+    base: 0, top: cab.height, tag: 'truckCab',
+  }];
+}
+
+/** Where a mover stands to drive. §3.4's TRANSIT begins here. */
+export function cabPoint(pose = TRUCK_POSE, box = CARGO_BOX, cab = CAB) {
+  const i = cargoInterior(pose, box);
+  return { x: pose.x, y: 1.0, z: i.maxZ + box.wallT + cab.length + 0.5 };
+}
+
 /* ── Anchor points (§10.3, §13.1's "4-8 anchors") ────────────────────────────────────
  *
  * Three per side at deck level, which is where a real E-track rail runs. Positions are the

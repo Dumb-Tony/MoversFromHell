@@ -49,6 +49,14 @@ export const GROUP_PRESETS = Object.freeze({
   object:     interactionGroups(GROUPS.OBJECT, GROUPS.WORLD | GROUPS.PLAYER | GROUPS.OBJECT),
   /** Held: everything except the player carrying it. */
   objectHeld: interactionGroups(GROUPS.OBJECT, GROUPS.WORLD | GROUPS.OBJECT),
+  /** A TOOL in a mover's hands, which collides with nothing at all.
+   *
+   *  Deliberately different from objectHeld. A held OBJECT is dragged by a spring and must
+   *  still hit walls, or §25.2's Phase 2 gate ("no wall ghosting") stops being true. A
+   *  carried tool is KINEMATIC and pinned to the mover's chest, so anything it touches it
+   *  shoves: a 1.80 x 1.40 m moving blanket carried through the living room is a snowplough
+   *  that rearranges the furniture on its way past. */
+  toolCarried: interactionGroups(GROUPS.OBJECT, 0),
 });
 
 let RAPIER = null;
