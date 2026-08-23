@@ -61,6 +61,15 @@ Chrome in `--dump-dom` mode delivers 1–3 rAF callbacks in total, then stops (m
 
 Assert measured values, not vibes. Report failures plainly, with the number.
 
+**A suite reporting 0 assertions and NO `FAIL` lines is a harness artifact, not a
+regression.** The scratch copy is per-port (`_smoketest-<port>.html`) and is deleted on the
+way out; if a previous run's server or Chrome still holds it, the next run reads a stale or
+missing page and the result block never appears. Seen on 2026-08-23 running all twelve
+suites back to back: m2 and m8 reported 0, both passed immediately when rerun alone on a
+fresh port (66 and 38), and `_smoketest-8402.html` was left on disk as the tell. **Rerun a
+zero-assertion suite by itself before believing it** — and never record a phase as failing
+on that evidence.
+
 ## Multiplayer seams (§22.4) — keep these open even while single-player
 
 - Players keyed by **stable string id**, never array position.
