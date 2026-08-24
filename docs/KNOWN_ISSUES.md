@@ -440,3 +440,48 @@ about readability but the GDD has no input-remapping requirement — it should).
 **The settlement screen is the only place the invoice appears.** There is no way to look at
 the ledger mid-contract, so the §8.4 cost notices are the only in-flight feedback about what
 damage is costing. That is probably correct for tension and definitely untested.
+
+---
+
+## Phase 12 open items
+
+**Two players, not four.** §14.1's production target is 1–4. `COOP.maxSeats` is 2 and it is
+not the only thing in the way: `MOVERS.count` is 2, the split layout halves rather than
+quarters, and nothing has been measured with three. Raising the cap without doing the other
+two would produce a third seat with no body to drive.
+
+**~~One keyboard, so cooperation means Tab-swapping.~~ CLOSED by this phase** — kept because
+Phase 11's entry pointed at it as the biggest gap between what the build simulates and what
+the GDD describes, and because the replacement limitation is narrower but real: co-op is
+LOCAL only. §14.1's actual production target is online 1–4 with Steam lobbies, and nothing
+here is networked. The seams §22.4 asks for are all still open (stable string ids,
+serializable state, systems that observe rather than own), and `Input.seat(n)` is
+deliberately duck-typed so a command stream can arrive the same way a keyboard does — which
+is the shape `TowBros\src\net\commands.js` already sends over a wire.
+
+**Seat 1's keyboard fallback is cramped, and honestly so.** A 3D game with two grips, four
+look directions and eleven verbs wants a controller. Seat 1 has one — §4.3's full pad map,
+asserted for parity in m12 A5/A6 — and the keyboard block (arrows, UHJK, `[`/`]`, `'`, `;`)
+exists so co-op is playable and testable with no hardware at all. It is not pleasant. The
+right fix is not more keys; it is a shared-camera mode that needs no per-player look at all,
+which is a design change rather than a binding change.
+
+**The split is fixed at side-by-side.** `COOP.layout` accepts `'stacked'` and the layout
+maths and tests cover both, but nothing exposes it to the player and the choice has not been
+playtested. On an ultrawide, stacked is probably right and there is no way to ask for it.
+
+**Nobody owns the cab.** Two players can both press E at the truck; the route's state machine
+makes the second press a no-op, so it is safe (m12 G2/G3), but there is no `driverId` and
+therefore no answer to "who drove". §15.2's contribution stats already split credit for
+straps, recoveries and heaviest-moved; the drive is the one contribution that is nobody's.
+
+**A seat's notices are addressed, but its DAMAGE is not.** §8.4's cost notices are raised by
+the damage system, which knows which object was hurt and not which player was carrying it.
+Both halves therefore show every cost. That is arguably right — the bill is shared — but it
+is a default rather than a decision, and it means neither player learns which of them keeps
+dropping the television.
+
+**The help line crosses the divider.** It is shell chrome rather than either player's HUD, so
+it is centred on the window and sits across the split. Same class of problem as the Phase 11
+reticle crowding: §21.1 constrains persistent panels to screen edges and says nothing about
+what happens when there are two screens' worth of edges.

@@ -447,3 +447,54 @@ swaps between movers, so nothing here has been tested with two people, and the q
 that matter most to the north star — what did the team try, when did they coordinate,
 would they tell a friend — cannot be asked yet. The build is now playable enough that this
 is the only thing standing between it and a real playtest.
+
+---
+
+## Phase 12 — local co-op — 2026-08-23
+
+**What became more fun: §27.3's questions can finally be ASKED.** Every playtest note since
+Phase 4 has ended with some version of "this needs two people and there is only one". The
+build has had a working cooperative seam for eight phases — two grips combining on one
+couch, opposite-end grips stabilising it, both measured — and the only way to experience it
+was to hold one end, press Tab, and walk the other end over. That is a demonstration of a
+mechanic, not an experience of it.
+
+**§27.3 — when did weight and grip become understandable?** Immediately, and for a reason
+that has nothing to do with the physics, which did not change at all: you can now get it
+WRONG in a way that is somebody else's fault. Solo, a couch that pivots badly is a thing the
+game did. With two people it is a thing one of you did, and the difference is that you both
+say something about it. The measured force is identical. The legibility is not.
+
+**§27.3 — what did the team try that the game allowed?** Lifting from the same end. Nothing
+forbids it — §2.1 does not do refusals — and the couch behaves exactly as it should, which
+is to say it slews, and the person at the empty end is dragged sideways by their own grip.
+It is the first genuinely funny thing in the build that nobody designed. §3's consequential
+chaos pillar is doing real work here and it is worth protecting from a future "helpful"
+grip-placement assist.
+
+**What became less fun: half a screen is not half as good, it is narrower.** A 16:9 view
+split side-by-side gives each player 8:9, and the game is about judging whether a wide thing
+clears a gap. Doorways are fine — they are tall and narrow and so is the viewport. The
+problem is the truck: backing a couch into a 2.10 m cargo box while seeing 8:9 of the world
+means the walls leave frame before the couch does. Stacked would be worse (16:4.5 cannot see
+a wardrobe), so this is the better of two compromises rather than a good answer. The real
+answer is a shared camera, which the aim model currently forbids — see the changelog.
+
+**The camera boom needed shortening and that was not obvious.** 4 m behind the mover frames
+a room at full width and frames a corridor at half width. `COOP.cameraDistance` is 3.2, and
+the number came from trying it, not from arithmetic — which makes it exactly the kind of
+value §25.3 wants named and documented rather than sprinkled.
+
+**Still unanswered, and now askable:** whether two players naturally split up or stay
+together. The suspicion from the physics is that the game rewards staying together far more
+than a moving job actually should — one person can carry a box, but two people can carry
+almost anything, so the optimal play may be to never separate. If that is true, the house
+layout (§13.1) is doing less work than it should, and the fix is a manifest with more small
+objects than two people can carry between them rather than fewer large ones. That is a real
+design question and it needed two people to even pose it.
+
+**Which moment would you tell a friend about?** Both players pressing grab on the same couch
+at the same moment and feeling it come off the ground — the exact thing §6.4 describes and
+the thing this project has been building toward since Phase 4. It took eight phases to
+become reachable and it works on the first try, because the physics under it was right all
+along and only the seat was missing.

@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 11,
-  label: 'phase-11',
+  phase: 12,
+  label: 'phase-12',
   date: '2026-08-23',
 });
 
@@ -200,6 +200,34 @@ export const MOVERS = Object.freeze({
    *  how one person experiences a two-person carry, and it is what makes §6.4's
    *  "opposite-end grips naturally stabilise long objects" reachable solo. */
   inactiveKeepsGrips: true,
+});
+
+/** Local co-op — §6.4, §4.3, §4.4, and a deliberate departure from §13.4. Validated: Phase 12.
+ *
+ * §13.4 excludes split-screen from the prototype and §14.1 files it as an expansion hook
+ * "until proven feasible", which CLAUDE.md reads as leave-a-seam-do-not-build. Built anyway,
+ * as a recorded product decision (docs/CHANGELOG.md, Phase 12) — the reason being that §6.4's
+ * two-mover cooperation is a LOCKED pillar that no amount of solo Tab-swapping can playtest,
+ * and §27.3's questions about what "the TEAM" tried cannot be asked without a team.
+ *
+ * SPLIT-SCREEN IS FORCED, not chosen. `GripSystem.aim()` derives its ray from the camera rig
+ * (§4.1's aim assistance is defined in camera space), so two movers sharing one camera would
+ * aim in the same direction and grab the same thing. One rig per mover keeps every validated
+ * Phase 2/6/11 behaviour exactly as asserted; a shared auto-framed camera would mean
+ * rebuilding all of it. Recorded because "why not one camera" is the obvious question. */
+export const COOP = Object.freeze({
+  maxSeats: 2,
+  /** 'side-by-side' halves the WIDTH; 'stacked' halves the height. Side-by-side on a 16:9
+   *  display gives each seat 8:9, which keeps the vertical context stairs and headroom need.
+   *  Stacked would give 16:4.5 — wide enough to judge a doorway, too short to see a landing. */
+  layout: 'side-by-side',
+  dividerPx: 2,
+  /** Seat 1 joins DELIBERATELY. A pad connecting must not split a solo player's screen —
+   *  that is a regression to the validated single-player build, arriving as a surprise. */
+  joinKey: 'F2',
+  /** §4.1's boom, shortened for a half-width viewport: the same 4 m in half the horizontal
+   *  field frames much less of the room, and the working area is what matters. */
+  cameraDistance: 3.2,
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */

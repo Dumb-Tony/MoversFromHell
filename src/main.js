@@ -50,7 +50,8 @@ import { Hud } from './ui/hud.js';
 import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
-import { BUILD, MOVERS } from './config.js';
+import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
+import { BUILD, MOVERS, COOP, RENDER } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -65,7 +66,6 @@ window.__MFH_READY = boot().catch((e) => {
 async function boot() {
   const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
   const world = buildScene();
-  const rig = new ThirdPersonCamera(camera, world.colliders);
 
   // ---- physics ------------------------------------------------------------------------
   const R = await initPhysics();
@@ -143,22 +143,21 @@ async function boot() {
   const damage = new DamageSystem(physics, registry, bus, game.state);
   const route = new RouteDriver(cargo, bus);
 
-  /* ---- the playable layer (Phase 11) -----------------------------------------------------
-   * Everything above was reachable only by calling its API. §9.2 asks for one common
-   * interaction verb, and this is the thing that reads it: what E means comes from what is
-   * under the reticle, and §4.4 requires the HUD to say which meaning applies BEFORE the key
-   * is pressed. See interact.js. */
-  const interact = new InteractionSystem({
-    physics, registry, tools, straps, cargo, route, rig, camera, bus,
-  });
-
   /* ---- movers (Phase 4) -----------------------------------------------------------------
    * §25.2's Phase 4 is the cooperative seam, gated on "multiple grips combine predictably".
-   * There are now N real movers, each with their own capsule, hands and grips. They share
-   * one camera rig — you drive one at a time and Tab swaps — because this build is not
-   * networked and §13.4 says not to let production networking delay feel tests.
+   * There are now N real movers, each with their own capsule, hands, grips AND CAMERA RIG.
    *
-   * The inactive mover KEEPS HOLDING. That is the entire point: it is how one person gets
+   * ONE RIG PER MOVER, added in Phase 12, and it is not a rendering decision — it is an AIM
+   * decision. `GripSystem.aim()` derives its ray from `rig.yaw`/`rig.pitch` (§4.1 defines aim
+   * assistance in camera space), so two movers sharing one rig aim in the same direction and
+   * reach for the same thing. Every validated Phase 2/6/11 behaviour depends on that ray, so
+   * the rig became per-mover rather than the aim becoming body-relative.
+   *
+   * Solo is unchanged by this: one seat drives one mover at a time and Tab swaps, and the
+   * swap COPIES yaw and pitch to the arriving rig so the view still does not spin (see the
+   * movers system).
+   *
+   * The undriven mover KEEPS HOLDING. That is the entire point: it is how one person gets
    * to feel §6.4's "opposite-end grips naturally stabilise long objects", and it exercises
    * the seam honestly, because two independent movers really are both applying force to one
    * body with neither owning it (§14.2, §22.4). */
@@ -171,10 +170,16 @@ async function boot() {
     });
     const bodyMesh = makeBlockout(MOVERS.colours[i]);
     world.scene.add(bodyMesh.group);
+    // Mover 0 reuses the renderer's camera, so `syncSize`'s aspect handling still describes
+    // the solo build exactly. Later movers get their own.
+    const cam = i === 0
+      ? camera
+      : new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);
+    const moverRig = new ThirdPersonCamera(cam, world.colliders);
     // Each mover has its OWN grip system. attachTo wires the forced-release hook, so being
     // knocked down drops what that mover was holding — and only what THAT mover was holding.
-    const gripSys = new GripSystem(physics, registry, rig, camera, bus, controller).attachTo(controller);
-    movers.push({ id, controller, grips: gripSys, body: bodyMesh, yaw: 0 });
+    const gripSys = new GripSystem(physics, registry, moverRig, cam, bus, controller).attachTo(controller);
+    movers.push({ id, controller, grips: gripSys, body: bodyMesh, yaw: 0, rig: moverRig, camera: cam });
     if (!game.state.players[id]) {
       game.state.players[id] = {
         id, position: { x: 0, y: 0, z: 0 }, yaw: 0,
@@ -182,17 +187,84 @@ async function boot() {
       };
     }
   }
+  /* ---- seats (Phase 12) -------------------------------------------------------------------
+   * A SEAT is a person: an input, a viewport, a camera and a HUD. A MOVER is a body in the
+   * world. They are deliberately not the same thing, and keeping them separate is what lets
+   * the validated solo build survive co-op:
+   *
+   *   solo   1 seat, pointing at whichever mover Tab last chose
+   *   co-op  2 seats, pinned one-to-one, and Tab does nothing
+   *
+   * §13.4 excludes split-screen from the prototype; this is a recorded departure, see COOP in
+   * config.js and Phase 12 in the changelog. */
   let activeMover = 0;
+  let seatCount = 1;
   const active = () => movers[activeMover];
   game.state.localPlayerId = movers[0].id;
+
+  const seatInputs = [];
+  for (let s = 0; s < COOP.maxSeats; s++) seatInputs.push(input.seat(s));
+
+  /** Which seat drives mover `i`, or -1 for nobody. */
+  const seatOfMover = (i) => (seatCount > 1 ? (i < seatCount ? i : -1) : (i === activeMover ? 0 : -1));
+  /** Which mover seat `s` drives. */
+  const moverOfSeat = (s) => (seatCount > 1 ? movers[s] : active());
+
+  /**
+   * Join or drop the second player.
+   *
+   * §4.1's boom is shortened for a half-width viewport: the same 4 m through half the
+   * horizontal field frames much less of the room, and the working area is what matters.
+   */
+  function setSeats(n) {
+    const want = Math.max(1, Math.min(n | 0, Math.min(COOP.maxSeats, movers.length)));
+    if (want === seatCount) return seatCount;
+    seatCount = want;
+    input.setSeatCount(seatCount);
+    document.body.classList.toggle('coop', seatCount > 1);
+    for (const m of movers) m.rig.setDistance(seatCount > 1 ? COOP.cameraDistance : RENDER.camera.distance);
+    /* Seat 0 always drives mover 0 in co-op. If the solo player had Tab'd onto mover 1, the
+     * joining player would otherwise be handed the mover already carrying something — and
+     * the two halves would both show the same body until somebody moved. */
+    if (seatCount > 1) activeMover = 0;
+    game.state.localPlayerId = movers[activeMover].id;
+    /* Visibility is a consequence of SEATING, not of rendering. It lived in the render loop
+     * first, which meant a seat existed for one frame before its HUD appeared and — worse —
+     * that `setSeats` was only half-done until something drew. */
+    for (let s = 0; s < huds.length; s++) huds[s].el.hidden = s >= seatCount;
+    // The control line describes the seating, so it belongs to setSeats and not to the key
+    // handler — otherwise seating a player through the API leaves the screen telling the
+    // truth about a build that no longer exists.
+    refreshHelp();
+    return seatCount;
+  }
 
   // New colliders are invisible to raycasts until the next step (MEASURED — world.js), and
   // the very first grab probe happens before any step has run.
   physics.primeQueries();
 
+  /* ---- the playable layer (Phase 11) -----------------------------------------------------
+   * Everything above was reachable only by calling its API. §9.2 asks for one common
+   * interaction verb, and this is the thing that reads it: what E means comes from what is
+   * under the reticle, and §4.4 requires the HUD to say which meaning applies BEFORE the key
+   * is pressed. See interact.js.
+   *
+   * Constructed AFTER the movers, because it needs one to hand out as the default rig. It
+   * never actually probes through that rig — `probe(mover)` takes its ray from
+   * `mover.grips.aim()`, which is why co-op needed no change here at all. */
+  const interact = new InteractionSystem({
+    physics, registry, tools, straps, cargo, route,
+    rig: movers[0].rig, camera: movers[0].camera, bus,
+  });
+
   // ---- systems, in §22.3 order ----------------------------------------------------------
   game.addSystem('look', (state, stepMs, ctx) => {
-    rig.applyLook(ctx.input.consumeLook());
+    // Each seat steers its OWN rig. consumeLook is per seat and consuming, so seat 1's right
+    // stick cannot turn seat 0's camera and neither can read the other's half of a frame.
+    for (let s = 0; s < seatCount; s++) {
+      const m = moverOfSeat(s);
+      if (m) m.rig.applyLook(ctx.input.consumeLook(s));
+    }
   });
 
   /* CLEAR FORCES ONCE, before anybody applies one.
@@ -208,18 +280,29 @@ async function boot() {
   game.addSystem('movers', (state, stepMs, ctx) => {
     const inp = ctx.input;
 
-    // Tab swaps which mover you drive. Read as an edge so holding it does not strobe.
-    if (inp.wasPressed('swapMover') && movers.length > 1) {
+    /* Tab swaps which mover you drive — a SOLO affordance only. With two people seated, the
+     * movers are already both being driven and a swap would take one out from under the
+     * other player mid-carry, which §6.4 spends a page arguing against. Seat 1 has no
+     * swapMover binding either, so this is belt and braces. */
+    if (seatCount === 1 && inp.wasPressed('swapMover', 0) && movers.length > 1) {
+      const from = active().rig;
       activeMover = (activeMover + 1) % movers.length;
+      const to = active().rig;
+      /* CARRY THE VIEW ACROSS. Before Phase 12 there was one rig, so a swap re-targeted it
+       * and the view held still by construction. With a rig each, arriving at the other
+       * mover's rig means arriving at wherever they were last looking — a spin the player
+       * did not ask for. Copying yaw and pitch reproduces the old behaviour exactly. */
+      to.yaw = from.yaw; to.pitch = from.pitch;
       state.localPlayerId = active().id;
-      // The camera keeps its yaw and simply re-targets, so swapping does not spin the view.
       ctx.bus.emit(EVENTS.INPUT_CONTEXT, { context: 'mover:' + active().id }, ctx.simTimeMs);
     }
 
     for (let i = 0; i < movers.length; i++) {
       const m = movers[i];
       const p = state.players[m.id];
-      const isActive = i === activeMover;
+      const seat = seatOfMover(i);
+      const isActive = seat >= 0;
+      const si = isActive ? seatInputs[seat] : null;
 
       /* THE INACTIVE MOVER STILL SIMULATES, and still holds. §6.4: "when one player
        * releases, forces update immediately; no canned synchronized carry animation takes
@@ -227,14 +310,14 @@ async function boot() {
        * — its grips keep pulling, which is exactly what makes it a second pair of hands. */
       const intent = isActive
         ? {
-            move: inp.moveAxis(),
-            forward: rig.forwardFlat(),
-            right: rig.rightFlat(),
+            move: si.moveAxis(),
+            forward: m.rig.forwardFlat(),
+            right: m.rig.rightFlat(),
             // §4.2: Shift is sprint when free, brace when gripping.
-            run: inp.isDown('brace') && !hasAnyGrip(p),
-            brace: inp.isDown('brace') && hasAnyGrip(p),
-            jump: inp.wasPressed('jump'),
-            recover: inp.wasPressed('recover'),
+            run: si.isDown('brace') && !hasAnyGrip(p),
+            brace: si.isDown('brace') && hasAnyGrip(p),
+            jump: si.wasPressed('jump'),
+            recover: si.wasPressed('recover'),
           }
         : {
             move: { x: 0, y: 0 },
@@ -256,18 +339,20 @@ async function boot() {
          * Both are deliberately no-ops when there is nothing sensible to do — the prompt
          * under the reticle has already said so, and §2.1 forbids telling a player "no"
          * after they have committed to a press. */
-        if (inp.wasPressed('interact')) {
+        if (si.wasPressed('interact')) {
           const msg = interact.act(m, ctx.simTimeMs);
-          if (msg) pendingNotices.push({ text: msg, kind: 'info' });
+          // Addressed to the seat that pressed the key. A notice about what YOUR hands just
+          // did, shown on the other player's half, is worse than no notice at all.
+          if (msg) pendingNotices.push({ text: msg, kind: 'info', seat });
         }
-        if (inp.wasPressed('context')) {
+        if (si.wasPressed('context')) {
           const msg = interact.secondary(m);
-          if (msg) pendingNotices.push({ text: msg, kind: 'info' });
+          if (msg) pendingNotices.push({ text: msg, kind: 'info', seat });
         }
 
         for (const hand of HANDS) {
           const action = hand === 'left' ? 'gripLeft' : 'gripRight';
-          const want = inp.isDown(action);
+          const want = si.isDown(action);
           const have = !!m.grips.grips[hand];
           if (want && !have) m.grips.tryGrab(hand, m.id, ctx.simTimeMs);
           else if (!want && have) m.grips.release(hand, 'released', ctx.simTimeMs);
@@ -357,7 +442,22 @@ async function boot() {
   game.setPhase(PHASES.PICKUP);
 
   const overlay = new DebugOverlay(ui, game);
-  const hud = new Hud(ui);
+  /* One HUD per SEAT, built up front rather than on join: creating DOM at the moment a
+   * player presses F2 means the first co-op frame is the one that also does a layout, and
+   * §26.6's frame budget is not the place to discover that. Seat 1's is simply empty and
+   * unpositioned until it is used. */
+  const huds = [];
+  for (let s = 0; s < COOP.maxSeats; s++) {
+    const h = new Hud(ui, s);
+    /* HIDDEN AT BIRTH, not at the first frame. The empty panels collapse on their own
+     * (`:empty { display: none }`), but the RETICLE does not — it is three divs that are
+     * always drawn — so an unhidden seat-1 HUD puts a second crosshair in the middle of a
+     * solo player's screen until the render loop gets round to hiding it. */
+    h.el.hidden = s > 0;
+    huds.push(h);
+  }
+  const hud = huds[0];                       // the solo alias, kept honest: the same object
+  const divider = new SplitDivider(ui);
   const invoiceScreen = new InvoiceScreen(ui);
   const strapLines = new StrapLines(world.scene, straps, registry);
 
@@ -368,10 +468,17 @@ async function boot() {
 
   const help = document.createElement('div');
   help.id = 'help';
-  help.innerHTML = '<b>Click to look around.</b> &nbsp; WASD · Shift sprint/brace · ' +
-                   'Space jump · <b>LMB/RMB grab</b> · <b>E use</b> · <b>Q undo</b> · ' +
-                   'Tab swap mover · R recover · Esc pause · F3';
   ui.appendChild(help);
+  function refreshHelp() {
+    help.innerHTML = seatCount > 1
+      ? '<b>P1</b> WASD + mouse · LMB/RMB grab · E use · Q undo &nbsp;|&nbsp; ' +
+        '<b>P2</b> arrows + UHJK look · [ ] grab · \' use · ; undo &nbsp;|&nbsp; ' +
+        '<b>F2</b> one player · Esc pause · F3'
+      : '<b>Click to look around.</b> &nbsp; WASD · Shift sprint/brace · ' +
+        'Space jump · <b>LMB/RMB grab</b> · <b>E use</b> · <b>Q undo</b> · ' +
+        'Tab swap mover · R recover · <b>F2 two players</b> · Esc pause · F3';
+  }
+  refreshHelp();
 
   /* ---- events the player should SEE (§8.4, §10.3) ---------------------------------------
    * §8.4: "At impact: material sound, visual mark, optional haptic pulse, and ONE SMALL COST
@@ -534,6 +641,15 @@ async function boot() {
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') game.togglePause();
     if (e.code === 'F3') { e.preventDefault(); overlay.toggle(); }
+    /* §6.4's second pair of hands, on a key rather than on a controller connecting.
+     * A pad being plugged in must NOT split a solo player's screen — that is a regression to
+     * the validated single-player build arriving as a surprise, and the player who plugged it
+     * in may only have wanted a controller. Joining is deliberate; leaving is the same key. */
+    if (e.code === COOP.joinKey) {
+      e.preventDefault();
+      const n = setSeats(seatCount > 1 ? 1 : 2);
+      hud.notice(n > 1 ? 'two players — P2 on the arrow keys or a pad' : 'one player', 'good');
+    }
   });
 
   // ---- main loop ------------------------------------------------------------------------
@@ -552,30 +668,16 @@ async function boot() {
       const mp = game.state.players[m.id];
       m.body.update(mp.position, mp.yaw, m.controller.horizontalSpeed, dt);
     }
-    const p = game.state.players[game.state.localPlayerId];
-    rig.update(p.position, dt);   // the rig follows whoever you are driving
     registry.syncMeshes();
     tools.syncMeshes();
     strapLines.update(dt);
-    hud.update(active().grips.status());
 
-    /* ---- the HUD's feed. Presentation only: it READS state and never writes it (§22.2). */
-    const me = active();
-    const described = interact.describe(me);
-    hud.setPrompt(described);
-
-    // §9.2's "readable preview and valid/invalid affordance" while a strap is half-placed.
-    const istate = interact._for(me.id);
-    if (istate.pendingAnchor) {
-      const anchor = interact.anchors.find((a) => a.id === istate.pendingAnchor);
-      const t = described.target;
-      strapLines.showGuide(anchor, t && t.point, t && t.kind === 'object');
-    } else {
-      strapLines.hideGuide();
-    }
-
+    /* ---- per-seat presentation. READS state and never writes it (§22.2). ---------------- */
+    const rects = layoutFor(seatCount, canvas.clientWidth || 0, canvas.clientHeight || 0);
     const summary = manifestSummary(game.state.manifest);
-    hud.setContract({
+    const packQuality = cargo.packQuality();
+    const routeStatus = route.status();
+    const contractPanel = {
       phase: game.state.phase,
       delivered: summary.delivered,
       total: summary.total,
@@ -583,27 +685,68 @@ async function boot() {
       roomCorrect: summary.roomCorrect,
       elapsedMin: game.state.elapsedWorkMs / 60000,
       estimateMin: game.state.estimateMs / 60000,
-    });
-    hud.setCargo(cargo.packQuality());
-    hud.setRoute(route.status());
+    };
+
+    for (let s = 0; s < seatCount; s++) {
+      const me = moverOfSeat(s);
+      const h = huds[s];
+      const rect = rects[s];
+
+      me.rig.update(game.state.players[me.id].position, dt);
+      applyAspect(me.camera, rect);
+
+      if (seatCount > 1) h.setRect(rect); else h.clearRect();
+      h.setSeatTag(seatCount > 1 ? `P${s + 1} · ${me.id}` : '');
+
+      h.update(me.grips.status());
+      const described = interact.describe(me);
+      h.setPrompt(described);
+
+      // §9.2's "readable preview and valid/invalid affordance" while a strap is half-placed.
+      const istate = interact._for(me.id);
+      if (istate.pendingAnchor) {
+        const anchor = interact.anchors.find((a) => a.id === istate.pendingAnchor);
+        const t = described.target;
+        strapLines.showGuide(anchor, t && t.point, t && t.kind === 'object', s);
+      } else {
+        strapLines.hideGuide(s);
+      }
+
+      /* The contract, the cargo and the route are ONE CONTRACT'S facts, so both halves show
+       * the same numbers. §11.2's "coarse cargo-status indicator" is a property of the truck,
+       * not of the player looking at it — giving each seat a private version would invent a
+       * disagreement the simulation does not have. */
+      h.setContract(contractPanel);
+      h.setCargo(packQuality);
+      h.setRoute(routeStatus);
+    }
+    divider.update(rects);
 
     while (pendingNotices.length) {
       const n = pendingNotices.shift();
-      hud.notice(n.text, n.kind);
+      // A notice with no seat belongs to the contract, not to a person, so everyone sees it.
+      if (n.seat === undefined || n.seat === null) {
+        for (let s = 0; s < seatCount; s++) huds[s].notice(n.text, n.kind);
+      } else if (n.seat < seatCount) {
+        huds[n.seat].notice(n.text, n.kind);
+      }
     }
-    hud.tickNotices();
+    for (let s = 0; s < seatCount; s++) huds[s].tickNotices();
 
-    renderer.render(world.scene, camera);
+    renderSeats(renderer, world.scene,
+                Array.from({ length: seatCount }, (_, s) => moverOfSeat(s)), rects);
     overlay.update(frameMs, {
       bodies: physics.stats.bodies,
       constraints: physics.stats.constraints,
       contacts: physics.stats.contacts,
       // §5.1/§5.2 made visible: what you are holding, how close to falling over, how tired.
       // Both movers, so you can see what the one you are NOT driving is doing (§6.4).
-      carry: movers.map((m, i) =>
-        `${i === activeMover ? '>' : ' '}${m.id} ${m.controller.carriedMass.toFixed(0)}kg ` +
-        `x${m.controller.loadSpeedMult.toFixed(2)} bal ${m.controller.imbalance.toFixed(2)}`
-      ).join('  ·  '),
+      carry: movers.map((m, i) => {
+        const s = seatOfMover(i);
+        return `${s >= 0 ? (seatCount > 1 ? 'P' + (s + 1) : '>') : ' '}${m.id} ` +
+          `${m.controller.carriedMass.toFixed(0)}kg ` +
+          `x${m.controller.loadSpeedMult.toFixed(2)} bal ${m.controller.imbalance.toFixed(2)}`;
+      }).join('  ·  '),
     });
 
     requestAnimationFrame(loop);
@@ -616,17 +759,31 @@ async function boot() {
   /* Test seam. `player` and `grips` are GETTERS, not snapshots: they follow whichever mover
    * is being driven, so a suite that swaps movers does not silently keep poking mover 0. */
   const api = {
-    game, input, rig, world, overlay, hud, renderer, camera, syncSize,
+    game, input, world, overlay, hud, huds, renderer, syncSize,
     physics, registry, movers, tools, straps, cargo,
+    /* Seat controls, so a suite can seat a second player without a keyboard. */
+    setSeats, layoutFor, divider,
+    get seatCount() { return seatCount; },
+    seatInput: (s) => seatInputs[s],
+    moverOfSeat, seatOfMover,
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
     destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
     damage, route, interact, strapLines, invoiceScreen, settle,
     buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },
+    /* The rig and the camera became PER MOVER in Phase 12, so these follow the driven mover
+     * for the same reason `player` and `grips` do — a suite that swaps movers must not
+     * silently keep steering mover 0's camera while poking mover 1's hands. */
+    get rig() { return active().rig; },
+    get camera() { return active().camera; },
     get activeMoverIndex() { return activeMover; },
     swapMover() {
+      const from = active().rig;
       activeMover = (activeMover + 1) % movers.length;
+      const to = active().rig;
+      // Same reason as the keyboard path — see the movers system.
+      to.yaw = from.yaw; to.pitch = from.pitch;
       game.state.localPlayerId = active().id;
       return active();
     },

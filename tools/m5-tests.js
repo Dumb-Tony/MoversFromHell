@@ -106,14 +106,17 @@ function parkAt(entity, x, y, z) {
   physics.primeQueries();
 }
 
+/** Aim a mover's OWN rig and grab. See the longer note on the identical helper in
+ *  m4-tests.js: rigs became per-mover in Phase 12, and aiming the wrong one reads as
+ *  "this 110 kg object cannot be moved by two people" rather than as a fixture error. */
 function grabWith(m, hand, target) {
   const p = m.controller.position;
-  rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
-  rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
-  for (let k = 0; k < 20; k++) rig.update(p, 1 / 60);
-  const c = camera.position;
-  rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
-  rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
+  m.rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
+  m.rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
+  for (let k = 0; k < 20; k++) m.rig.update(p, 1 / 60);
+  const c = m.camera.position;
+  m.rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
+  m.rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
   return m.grips.tryGrab(hand, m.id, game.clock.simTimeMs);
 }
 

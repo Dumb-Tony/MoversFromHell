@@ -7,10 +7,10 @@ Always live, always the current `main`. Every push redeploys it — no build ste
 real cargo box, a drive that finds out how well you packed it, a second house to fill, and an
 invoice that prices every mistake you made getting there. WASD move, Shift sprint/brace,
 Space jump/mantle, **LMB/RMB to grab with each hand**, **E to use and Q to undo**, **Tab to
-swap mover**, R recover, F3 stats. Try carrying the couch on your own — it will slow you
-down, unbalance you, and eventually put you on the floor. That is the design, not a bug.
-Then grab one end, Tab to the other mover, grab the other end, and watch it come off the
-ground. Or find the dolly, press E, and let it do the work.
+swap mover**, **F2 for two-player split-screen**, R recover, F3 stats. Try carrying the couch
+on your own — it will slow you down, unbalance you, and eventually put you on the floor. That
+is the design, not a bug. Then grab one end, Tab to the other mover, grab the other end, and
+watch it come off the ground — or press F2 and have someone else grab it.
 
 ---
 
@@ -23,10 +23,14 @@ ground. Or find the dolly, press E, and let it do the work.
 > press it (§4.4), straps are drawn (§10.3), and the contract ends on a settlement screen you
 > can replay from (§15.2).
 >
-> What is *not* here: one keyboard, so two-mover cooperation means Tab-swapping rather than
-> two people playing at once. Everything under it is already multiplayer-shaped (§22.4) and
-> nothing has been tested with an actual team — which is now the only thing standing between
-> this build and GDD §25.2's Phase 11. See [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+> **And two people can play it.** Press **F2** for split-screen local co-op: P1 on WASD and
+> the mouse, P2 on the arrow keys or the first controller plugged in. §6.4's two-mover
+> carrying has been real and measured since Phase 4 and this is the first build in which two
+> people can actually do it.
+>
+> What is *not* here: online play. §14.1's production target is 1–4 over Steam and nothing
+> here is networked — the seams are open (§22.4) but unused. See
+> [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 A 1–4 player physics-driven moving-company co-op game. You and your friends carry
 furniture down stairs, through doorways it does not fit through, into a truck that is a
@@ -82,9 +86,15 @@ developer overlay.
 powershell -ExecutionPolicy Bypass -File tools\smoketest.ps1
 ```
 
-There is no Node.js on this machine, so **the harness is a browser**: it injects the suite
-into a scratch copy of `index.html`, serves it, drives it in headless Chrome, and greps the
-dumped DOM. Exit code 0 means all assertions passed.
+**The harness is a browser**, because the thing under test is: Rapier is WASM, Three needs a
+GL context, and the HUD is DOM. The suite is injected into a scratch copy of `index.html`,
+served, driven in headless Chrome, and the dumped DOM is grepped for the result block. Exit
+code 0 means all assertions passed.
+
+Node **is** installed, contrary to what this file said for eleven phases, and it is worth
+one line before every browser run — `node --check <file>` is a ~40 ms syntax gate, against
+roughly 90 seconds to discover the same typo as a blank page and an error banner. It cannot
+run the suites: there is no DOM, no WebGL and no `window.THREE`.
 
 Screenshots for docs and layout checks:
 
@@ -94,7 +104,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 10 complete, and playable
+## Current state — Phase 10 complete, playable, and two-player
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -113,11 +123,25 @@ GDD §25.2 defines a 13-phase roadmap.
 | 10. Economy | ledger matches events | done — 45 assertions |
 | 11. Playtest | external groups complete and replay | next — and it is the only one that matters |
 
-Plus one increment that is not on the roadmap: **the playable layer**, which gave phases
-6–10 the input bindings and HUD each of them had deferred. It is what the `phase-11` build
-stamp refers to, and it is not §25.2's Phase 11 — that one is the playtest, and it is next.
+Plus two increments that are not on the roadmap. **The playable layer** gave phases 6–10 the
+input bindings and HUD each of them had deferred. **Local co-op** gave §6.4's second pair of
+hands to a second person. Neither is §25.2's Phase 11 — that one is the playtest, and it is
+next, and co-op is what makes it possible to run.
 
-**737 assertions across twelve suites, all passing.**
+**822 assertions across thirteen suites, all passing.**
+
+![Local co-op](docs/phase12-coop.png)
+
+§6.4's worked example, with a player at each end for the first time: *"opposite-end grips
+naturally stabilise long objects"*. Both halves are the shipping build's — its cameras, its
+split layout, its HUDs — and both reticles read **two hands** because both movers really are
+gripping the one couch. The physics under this has been right and asserted since Phase 4;
+what was missing for eight phases was a second seat.
+
+Split-screen is a **deliberate departure from §13.4**, which excludes it from the prototype.
+It is recorded as a product decision in the changelog, and it is forced rather than chosen:
+`GripSystem.aim()` derives its ray from the camera rig, so two movers sharing one camera aim
+in the same direction and reach for the same thing.
 
 ![The playable layer](docs/phase11-playable.png)
 

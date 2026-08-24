@@ -102,16 +102,24 @@ function parkAt(entity, x, y, z) {
   physics.primeQueries();
 }
 
-/** Aim a specific mover's rig at a point and grab. The rig is shared, so this sets it for
- *  the duration of the call only — which is exactly how the real game works when you Tab. */
+/** Aim a specific mover's OWN rig at a point and grab.
+ *
+ * Until Phase 12 every mover shared one rig, so this aimed the global `rig` and worked by
+ * accident for whichever mover it was called with. Co-op gave each mover its own rig —
+ * `GripSystem.aim()` reads `rig.yaw`/`rig.pitch`, so two people sharing one would reach for
+ * the same thing — and this fixture kept aiming mover 0's while grabbing with mover 1, which
+ * reported as "no grip" on every second-mover assertion in sections B through F.
+ *
+ * That is the whole §6.4 gate failing on a fixture. Aim the rig belonging to the hands that
+ * are about to close, which is also what a second player with a second mouse does. */
 function grabWith(m, hand, target) {
   const p = m.controller.position;
-  rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
-  rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
-  for (let k = 0; k < 20; k++) rig.update(p, 1 / 60);
-  const c = camera.position;
-  rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
-  rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
+  m.rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
+  m.rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
+  for (let k = 0; k < 20; k++) m.rig.update(p, 1 / 60);
+  const c = m.camera.position;
+  m.rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
+  m.rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
   return m.grips.tryGrab(hand, m.id, game.clock.simTimeMs);
 }
 

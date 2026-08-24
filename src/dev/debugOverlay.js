@@ -55,7 +55,10 @@ export class DebugOverlay {
       ['clamped', `${c.clampedFrames} frame(s) discarded`],
       ['bodies', `${extra.bodies || 0} rigid · ${extra.constraints || 0} constraints · ${extra.contacts || 0} contacts`],
       ['phase', `${s.phase} · work ${fmt(s.elapsedWorkMs)} / est ${fmt(s.estimateMs)}`],
-      ['input', `${s.inputContext} · ${g.input ? g.input.activeDevice : '—'}${g.input && g.input.pointerLocked ? ' · locked' : ''}`],
+      // activeDevice is PER SEAT since Phase 12 — an array, so it is joined rather than
+      // interpolated. Interpolating it renders as "kbm,pad", which is not wrong so much as
+      // unreadable, and hides which of the two is which.
+      ['input', `${s.inputContext} · ${g.input ? devices(g.input) : '—'}${g.input && g.input.pointerLocked ? ' · locked' : ''}`],
       ['carry', extra.carry || '—'],
       ['session', `${Object.keys(s.players).length} player(s) · seed ${s.seed} · ${s.paused ? 'PAUSED' : 'running'}`],
       ['build', `${BUILD.label} · ${BUILD.date}`],
@@ -77,4 +80,12 @@ export class DebugOverlay {
 function fmt(ms) {
   const t = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** Which device each seated player is actually using (§26.5 — the HUD draws a glyph set per
+ *  seat, and this is where you look when the wrong one appears). */
+function devices(input) {
+  const list = Array.isArray(input.activeDevice) ? input.activeDevice : [input.activeDevice];
+  const n = input.seatCount || 1;
+  return list.slice(0, n).map((d, i) => (n > 1 ? `P${i + 1}:${d}` : d)).join(' ');
 }

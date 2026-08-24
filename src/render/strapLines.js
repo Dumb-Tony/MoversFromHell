@@ -37,7 +37,7 @@ export class StrapLines {
     this.straps = straps;
     this.registry = registry;
     this.pool = new Map();          // strapId -> {mesh, material}
-    this.guide = null;              // the dashed line while a strap is being placed
+    this.guides = new Map();        // seat -> the dashed line while that player places a strap
     this._t = 0;
   }
 
@@ -135,27 +135,40 @@ export class StrapLines {
    * The dashed guide from a chosen anchor to wherever the player is aiming, while a strap is
    * half-placed. §9.2: "placement provides a readable preview and valid/invalid affordance."
    */
-  showGuide(anchor, point, valid) {
+  showGuide(anchor, point, valid, key = 0) {
     const THREE = window.THREE;
-    if (!this.guide) {
+    if (!this.guides) this.guides = new Map();
+    let guide = this.guides.get(key);
+    if (!guide) {
       const m = new THREE.MeshBasicMaterial({ color: 0xa8d93a, transparent: true, opacity: 0.55 });
-      this.guide = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), m);
-      this.guide.frustumCulled = false;
-      this.scene.add(this.guide);
+      guide = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), m);
+      guide.frustumCulled = false;
+      this.scene.add(guide);
+      this.guides.set(key, guide);
     }
-    if (!anchor || !point) { this.guide.visible = false; return; }
+    if (!anchor || !point) { guide.visible = false; return; }
     const a = new THREE.Vector3(anchor.x, anchor.y, anchor.z);
     const b = new THREE.Vector3(point.x, point.y, point.z);
     const len = Math.max(0.02, a.distanceTo(b));
-    this.guide.visible = true;
-    this.guide.scale.set(0.012, 0.012, len);
-    this.guide.position.copy(a).add(b).multiplyScalar(0.5);
-    this.guide.lookAt(b);
+    guide.visible = true;
+    guide.scale.set(0.012, 0.012, len);
+    guide.position.copy(a).add(b).multiplyScalar(0.5);
+    guide.lookAt(b);
     // §9.2's valid/invalid affordance: lime when it will attach, coral when it will not.
-    this.guide.material.color.setHex(valid ? 0xa8d93a : 0xff5a5a);
+    guide.material.color.setHex(valid ? 0xa8d93a : 0xff5a5a);
   }
 
-  hideGuide() { if (this.guide) this.guide.visible = false; }
+  /* KEYED BY SEAT (Phase 12). Two players can each be half-way through placing a strap, and
+   * a single shared guide meant the second one to aim erased the first one's preview — a
+   * §9.2 affordance silently disappearing because somebody else looked at something. Both
+   * guides render in both viewports, which is correct: a strap being run out is a real thing
+   * in the world, not a private overlay. */
+  hideGuide(key) {
+    if (!this.guides) return;
+    if (key === undefined) { for (const g of this.guides.values()) g.visible = false; return; }
+    const g = this.guides.get(key);
+    if (g) g.visible = false;
+  }
 }
 
 /* Duplicated from straps.js for the same reason it is duplicated there: four lines, and

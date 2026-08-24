@@ -3,6 +3,97 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 12 — local co-op — 2026-08-23
+
+**Gate:** not a §25.2 roadmap phase, and **a deliberate departure from §13.4**, which lists
+split-screen among the prototype's exclusions. §14.1 files local split-screen as an
+"expansion hook until proven feasible", and CLAUDE.md reads an expansion hook as *leave a
+seam, do not build it*. Built anyway, as a recorded product decision.
+**PASSED** — 85 assertions (822 across thirteen suites).
+
+**Why the departure was worth making.** §6.4's two-mover cooperation is a LOCKED pillar and
+the single largest gap between what this build simulates and what the GDD describes. The
+physics has been right since Phase 4 — two grips combine on one couch, opposite-end grips
+stabilise it, and the suites measure all of it — but there was never a second person, only
+one player Tab-swapping between two bodies. §27.3's questions are mostly about the TEAM:
+what did they try, when did they coordinate, which moment would they tell a friend about.
+None of them can be asked without a team. Phase 11's playtest note said this was the only
+thing standing between the build and a real playtest; this is that thing.
+
+**Split-screen was forced, not chosen.** `GripSystem.aim()` derives its ray from the camera
+rig, because §4.1 defines aim assistance in camera space. Two movers sharing one camera
+therefore aim in the same direction and reach for the same object. A single shared
+auto-framed camera — the Moving Out shape, and the one §13.4 would have preferred — means
+rebuilding aim as body-relative and re-validating every Phase 2, 6 and 11 assertion that
+depends on the ray. One rig per mover changes nothing that was already measured. That
+tradeoff is recorded in `COOP` in config.js, because "why not one camera?" is the obvious
+question and the answer is not obvious.
+
+**Copied rather than invented** (Dev\INDEX.md → "Local co-op on one keyboard", and the
+lesson from Phase 11's lineage miss):
+
+- **One binding map per SEAT, sharing no key**, from `TowBros\src\core\input.js`
+  `CREW_BINDINGS` — including its warning, which turned out to be exactly the bug here:
+  *seat 0 has to LOSE the arrow keys it used to also own*. `moveForward` had been
+  `['KeyW', 'ArrowUp']` for five phases, because one seat may own as many alternates as it
+  likes. `bindingConflicts()` makes that a check rather than a hope, and §21.4 makes
+  remapping a data edit, so the check ships in the build rather than only in the suite.
+- **The single-player alias kept honest**, from `SmallTownEmergencyServices\src\game.js`:
+  every query takes a trailing `seat` defaulting to 0, and `input.look` **is**
+  `input.looks[0]` — the same object, not a copy, so a hundred call sites cannot drift.
+- **Contention as a property, not a rule**, from the same file and from `TowBros`'
+  `authority.js`: nothing asks "can two people pick this up?" because `carriedBy` is a
+  single mover id and a second claim has nowhere to be written.
+- **The scissored second viewport** and both of its GL traps, from
+  `ContainmentDetailWeb\src\render\renderer.js`.
+
+**Three bugs, each of a different kind:**
+
+- **Pad tokens were not seat-qualified.** Two controllers both report button 6, so an
+  unqualified `Pad6` was seat 1's trigger arriving as seat 0's grip as well. Tokens are now
+  `P<seat>B<index>`.
+- **A context switch cleared ALL held input.** Right with one seat; a §6.4 bug with two — it
+  dropped the other player's held grip the instant their partner climbed into the cab, and
+  would have read as "the game dropped my couch". Now `_clearSeat`.
+- **Moving the HUD from ids to classes broke the grip label, and only CSS reported it.**
+  `update()` wrote `label.className = cls`, which was safe for five phases because an id
+  survives a className write. As a class it did not: the label lost `grip-label`, fell out of
+  `position: absolute`, and rendered as a static block across the top of the viewport through
+  the contract panel. Found in a screenshot, not in a test; now asserted (m12 H4a–H4c).
+
+**Two test-fixture errors, both the same shape as every previous one** — a number too
+plausible to be tuning. m4 and m5 aimed the global rig and grabbed with mover 1, which had
+worked by accident while the rig was shared. The symptom was `couch_3seat_01 0.000m` against
+the §25.2 Phase 5 gate: it read as "two people cannot move a 110 kg object", which is the
+whole game failing, and was a fixture pointing one camera while closing a different pair of
+hands.
+
+**Measured:**
+
+| claim | evidence |
+|---|---|
+| a seat's keys move only its own mover | seat 1 walks 0.3 m+, seat 0 moves < 0.05 m, and the mirror |
+| both walk at once | both > 0.3 m in the same 40 frames |
+| aim is independent | turning seat 0's camera moves seat 1's hands by 0 rad |
+| the split tiles the canvas exactly | 799 + 799 + 2 = 1600 CSS px, no overlap |
+| §6.4 still holds | m4/m5 unchanged and green — two grips still combine on one couch |
+
+**Touched:** `src/core/input.js` (seats, per-seat look/context/pads, `bindingConflicts`),
+`src/render/coopView.js` (new), `src/ui/hud.js` (per seat, classes not ids, `setRect`),
+`src/main.js` (seats, per-mover rigs, per-seat render pass), `src/render/strapLines.js`
+(guides keyed by seat), `src/dev/debugOverlay.js`, `src/config.js` (`COOP`), `styles.css`,
+`tools/m12-tests.js` (new), `tools/m4-tests.js` + `tools/m5-tests.js` (fixtures).
+
+**Checked:** 85 new assertions; 822 across thirteen suites, 0 failing. Solo is unchanged and
+still asserted: one seat, full screen, Tab still swaps, and the view still does not spin when
+it does — that last one needed new code, because a swap used to hold still by construction
+when there was one rig.
+
+**Limitation:** two people, not four. §14.1's production target is 1–4 and `COOP.maxSeats`
+is the only thing standing in the way at this end — but `MOVERS.count` is 2, the split
+layout halves rather than quarters, and nothing has been measured with three. See
+KNOWN_ISSUES.
+
 ## Phase 11 — the playable layer — 2026-08-23
 
 **Gate:** not a §25.2 roadmap phase. This closes the interface gap that phases 6–10 each

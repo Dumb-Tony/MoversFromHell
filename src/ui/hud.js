@@ -21,38 +21,82 @@
  */
 
 export class Hud {
-  constructor(root) {
+  /* CLASSES, NOT IDS. There is one HUD per SEAT in co-op (§6.4), and two elements sharing an
+   * id is invalid HTML whose symptom is subtle rather than loud: `document.querySelector`
+   * silently returns the first, so seat 1's panels would be read and written as seat 0's by
+   * anything that did not scope its lookup. Every selector below is scoped to `this.el`. */
+  constructor(root, seat = 0) {
+    this.seat = seat;
     this.el = document.createElement('div');
-    this.el.id = 'hud';
+    this.el.className = 'hud';
+    this.el.dataset.seat = String(seat);
     this.el.innerHTML = `
-      <div id="reticle">
+      <div class="reticle">
         <div class="hand left"></div>
         <div class="dot"></div>
         <div class="hand right"></div>
       </div>
-      <div id="grip-label"></div>
-      <div id="prompt"></div>
-      <div id="contract"></div>
-      <div id="cargo-status"></div>
-      <div id="route-bar"><div class="fill"></div><span class="label"></span></div>
-      <div id="notices"></div>`;
+      <div class="grip-label"></div>
+      <div class="prompt"></div>
+      <div class="contract"></div>
+      <div class="cargo-status"></div>
+      <div class="route-bar"><div class="fill"></div><span class="label"></span></div>
+      <div class="notices"></div>
+      <div class="seat-tag"></div>`;
     root.appendChild(this.el);
 
-    this.reticle = this.el.querySelector('#reticle');
+    this.reticle = this.el.querySelector('.reticle');
     this.left = this.el.querySelector('.hand.left');
     this.right = this.el.querySelector('.hand.right');
-    this.label = this.el.querySelector('#grip-label');
-    this.prompt = this.el.querySelector('#prompt');
-    this.contract = this.el.querySelector('#contract');
-    this.cargoStatus = this.el.querySelector('#cargo-status');
-    this.routeBar = this.el.querySelector('#route-bar');
+    this.label = this.el.querySelector('.grip-label');
+    this.prompt = this.el.querySelector('.prompt');
+    this.contract = this.el.querySelector('.contract');
+    this.cargoStatus = this.el.querySelector('.cargo-status');
+    this.routeBar = this.el.querySelector('.route-bar');
     this.routeFill = this.routeBar.querySelector('.fill');
     this.routeLabel = this.routeBar.querySelector('.label');
-    this.notices = this.el.querySelector('#notices');
+    this.notices = this.el.querySelector('.notices');
+    this.seatTag = this.el.querySelector('.seat-tag');
 
     this._keys = {};
     this._notices = [];
+    this._rect = null;
   }
+
+  /**
+   * Pin this HUD over its seat's viewport.
+   *
+   * `inset: auto` first, because `.hud` carries `inset: 0` for the solo case and `inset` is
+   * shorthand for all four edges — setting only left/top/width would leave `right: 0` and
+   * `bottom: 0` fighting the width and height, which stretches seat 0's panels across the
+   * divider and puts them over seat 1's view.
+   */
+  setRect(rect) {
+    const same = this._rect && this._rect.cssLeft === rect.cssLeft && this._rect.cssTop === rect.cssTop &&
+                 this._rect.cssW === rect.cssW && this._rect.cssH === rect.cssH;
+    if (same) return;
+    this._rect = { cssLeft: rect.cssLeft, cssTop: rect.cssTop, cssW: rect.cssW, cssH: rect.cssH };
+    const s = this.el.style;
+    s.inset = 'auto';
+    s.left = rect.cssLeft + 'px';
+    s.top = rect.cssTop + 'px';
+    s.width = rect.cssW + 'px';
+    s.height = rect.cssH + 'px';
+    this.el.classList.add('split');
+  }
+
+  /** Full-screen again, for the solo build. */
+  clearRect() {
+    if (!this._rect) return;
+    this._rect = null;
+    const s = this.el.style;
+    s.inset = ''; s.left = ''; s.top = ''; s.width = ''; s.height = '';
+    this.el.classList.remove('split');
+  }
+
+  /** §4.4 and §26.5: which mover this half belongs to, and which device drives it, in words
+   *  rather than by the body colour alone — the two movers differ by hue and nothing else. */
+  setSeatTag(text) { this._set(this.seatTag, 'seatTag', text ? esc(text) : ''); }
 
   /** Only rewrite a section when its content actually changed. */
   _set(node, key, html) {
@@ -78,7 +122,14 @@ export class Hud {
     else if (held.length) { text = 'holding'; cls = 'holding'; }
     else if (status.hovered) { text = 'hold LMB / RMB to grab'; cls = 'ready'; }
     if (this.label.textContent !== text) this.label.textContent = text;
-    if (this.label.className !== cls) this.label.className = cls;
+    /* THE STRUCTURAL CLASS HAS TO SURVIVE THE STATE CLASS. This line read
+     * `this.label.className = cls`, which was safe for five phases because the element was
+     * `id="grip-label"` and an id cannot be clobbered by writing className. Moving the HUD
+     * to classes for co-op turned it into a bug that CSS reports rather than JS: the label
+     * lost `grip-label`, fell out of `position: absolute`, and rendered as a static block at
+     * the top of the viewport, straight through the contract panel. */
+    const full = cls ? `grip-label ${cls}` : 'grip-label';
+    if (this.label.className !== full) this.label.className = full;
   }
 
   /**
