@@ -144,7 +144,7 @@ hands to a second person. **The art pass** dressed a build that §20.4 had delib
 diagnostic for twelve phases. None of them is §25.2's Phase 11 — that one is the playtest,
 it is next, and the last two are what make it possible to run with strangers.
 
-**846 assertions across fourteen suites, all passing.**
+**855 assertions across fourteen suites, all passing.**
 
 ![The art pass](docs/phase13-look.png)
 
@@ -159,6 +159,15 @@ invisible to every test that came before it — so `m13` measures the boundary b
 see and what the physics does. **16 of 16 prefabs fit inside their own colliders to the
 millimetre; zero meshes intrude on any of the three doorways; the roof, trees, hedge, street
 and kerbs add zero colliders.**
+
+![Inside the house](docs/phase13-interior.png)
+
+The interior, which was the weakest part of the art pass until the cause turned out not to be
+the lighting at all. **`MeshLambertMaterial` shades per vertex** — a wall is two triangles, so
+its lighting was computed at four corners and interpolated across ten metres, and hanging
+lamps in the rooms would have changed almost nothing. Surfaces are per-fragment now, each room
+has a warm shadow-casting spot, and the skirting board and contact darkening are baked into
+the plaster because a real-time rig with no AO pass has none of its own.
 
 ![The title card](docs/phase13-title.png)
 

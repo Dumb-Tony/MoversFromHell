@@ -82,12 +82,30 @@ export function tiled(t, rx, ry) {
  * Centralised here rather than fixed at each of the thirteen material sites, because
  * "convert every colour except the ones somebody forgot" is worse than not converting.
  */
-export function lambert(colour, opts = {}) {
+export function matte(colour, opts = {}) {
   const THREE = window.THREE;
-  const m = new THREE.MeshLambertMaterial({ color: colour, ...opts });
+  /* ⚠ PHONG, NOT LAMBERT, AND THE SPECULAR IS KILLED — so this is per-FRAGMENT Lambert.
+   *
+   * `MeshLambertMaterial` shades per VERTEX; the vendored r128 build assembles
+   * `lights_lambert_vertex` for it and `lights_phong_fragment` for this one. A wall is two
+   * triangles, so a Lambert wall's lighting is computed at four corners and interpolated
+   * across ten metres — which is why every interior surface was one flat value and why
+   * adding lamps to the rooms would have changed almost nothing. See lighting.js.
+   *
+   * `shininess: 0` with a black specular gives Phong's diffuse term and nothing else, which
+   * is the shading model this game already had, evaluated where it can actually be seen. */
+  const m = new THREE.MeshPhongMaterial({
+    color: colour,
+    specular: 0x000000,
+    shininess: 0,
+    ...opts,
+  });
   if (m.color && m.color.convertSRGBToLinear) m.color.convertSRGBToLinear();
   return m;
 }
+
+/** @deprecated Kept so nothing breaks mid-refactor; `matte` says what it now builds. */
+export const lambert = matte;
 
 /** As `lambert`, unlit. */
 export function basic(colour, opts = {}) {
@@ -201,14 +219,39 @@ export function texBrick(hue = 14) {
   });
 }
 
-/** Interior wall: painted plaster with a skirting band baked into the bottom. */
+/**
+ * Interior wall: painted plaster, with a skirting board and CONTACT DARKENING baked in.
+ *
+ * The baked gradient is doing work no light can do here. Ambient occlusion is the darkening
+ * where surfaces meet, and a real-time rig with no AO pass has none — so a wall meets a floor
+ * at a hairline and the room reads as a set of separate planes. Painting the bottom of the
+ * wall darker is the cheapest honest version, and it is the same idea as the dash pattern on
+ * a casualty ring (DevINDEX.md): carry the information in something other than the light.
+ *
+ * ⚠ It only lands correctly at a VERTICAL REPEAT OF 1. A wall's UV runs 0..1 over its own
+ * height, so ry=1.4 tiles the gradient one and a half times and paints a dark band across
+ * the middle of the room.
+ */
 export function texPlaster(hue = 40, light = 0.86) {
-  return canvasTex(128, 128, 'plaster|' + hue + '|' + light, (x, W, H) => {
+  return canvasTex(128, 256, 'plasterV2|' + hue + '|' + light, (x, W, H) => {
     x.fillStyle = hslCss(hue, 0.16, light); x.fillRect(0, 0, W, H);
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 1400; i++) {
       x.fillStyle = rnd(i) < 0.5 ? 'rgba(0,0,0,.028)' : 'rgba(255,255,255,.035)';
       x.fillRect(rnd(i + 3) * W, rnd(i + 33) * H, 2, 2);
     }
+    // Contact darkening at the floor, and a lighter touch where the ceiling meets.
+    const lo = x.createLinearGradient(0, H * 0.72, 0, H);
+    lo.addColorStop(0, 'rgba(24,20,16,0)'); lo.addColorStop(1, 'rgba(24,20,16,.30)');
+    x.fillStyle = lo; x.fillRect(0, H * 0.72, W, H * 0.28);
+    const hi = x.createLinearGradient(0, 0, 0, H * 0.14);
+    hi.addColorStop(0, 'rgba(24,20,16,.20)'); hi.addColorStop(1, 'rgba(24,20,16,0)');
+    x.fillStyle = hi; x.fillRect(0, 0, W, H * 0.14);
+    // Skirting: a painted board with a shadow line above it.
+    const sk = H * 0.055;
+    x.fillStyle = hslCss(hue, 0.10, Math.min(0.97, light + 0.07));
+    x.fillRect(0, H - sk, W, sk);
+    x.fillStyle = 'rgba(20,16,12,.34)'; x.fillRect(0, H - sk - 2, W, 3);
+    x.fillStyle = 'rgba(255,255,255,.16)'; x.fillRect(0, H - sk + 1, W, 2);
   });
 }
 

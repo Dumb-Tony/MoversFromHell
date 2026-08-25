@@ -22,7 +22,7 @@
  */
 
 import {
-  texCardboard, texFabric, texWood, texSteel, texScreen, texMirror, texPaint, tiled, lambert,
+  texCardboard, texFabric, texWood, texSteel, texScreen, texMirror, texPaint, tiled, matte,
 } from './textures.js';
 
 /* ⚠ A TEXTURED PART TAKES NO TINT. `map` is MULTIPLIED by `color`, so passing def.colour
@@ -31,10 +31,10 @@ import {
  * fallback for prefabs with no texture of their own, which is what it was always for. */
 /** Lambert throughout, to match the rest of the scene and stay inside §26.6's frame budget. */
 function m(map, colour = 0xffffff, opts = {}) {
-  return lambert(colour, { map: map || null, ...opts });
+  return matte(colour, { map: map || null, ...opts });
 }
 function flat(colour, opts = {}) {
-  return lambert(colour, opts);
+  return matte(colour, opts);
 }
 
 /** One box, positioned in the object's local frame (origin = collider centre). */
@@ -186,7 +186,7 @@ const BUILD = {
     const shadeR = Math.min(d.x, d.z) / 2;
     const shade = new THREE.Mesh(
       new THREE.CylinderGeometry(shadeR * 0.72, shadeR, d.y * 0.20, 16, 1, true),
-      new THREE.MeshLambertMaterial({ color: 0xf0e6cc, side: THREE.DoubleSide }));
+      matte(0xf0e6cc, { side: THREE.DoubleSide }));
     shade.position.set(0, d.y / 2 - d.y * 0.12, 0);
     shade.castShadow = true;
     g.add(shade);

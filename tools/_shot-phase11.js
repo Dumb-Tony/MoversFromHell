@@ -157,6 +157,8 @@ M.hud.setCargo(cargo.packQuality());
 M.hud.notice('dresser loaded', 'good');
 M.hud.notice('strap tensioned', 'info');
 M.overlay.el.hidden = true;
+// The title card is up on a fresh boot; dismiss it as a player would.
+if (M.title) { M.title.start(); M.title.el.hidden = true; }
 
 M.syncSize();
 M.renderer.render(M.world.scene, M.camera);

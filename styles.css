@@ -432,6 +432,10 @@ body.coop #build-stamp { opacity: .45; }
   transition: opacity .38s ease;
 }
 #title-screen.gone { opacity: 0; pointer-events: none; }
+/* [hidden] is a UA rule (`display: none`) and loses to the explicit `display: flex` above,
+   so setting el.hidden alone leaves the card on screen. The fade path works because .gone
+   zeroes the opacity — but anything that reaches for .hidden deserves to be obeyed. */
+#title-screen[hidden] { display: none; }
 
 #title-screen .card {
   width: min(760px, 96vw);

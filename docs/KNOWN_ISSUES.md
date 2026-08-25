@@ -490,16 +490,30 @@ what happens when there are two screens' worth of edges.
 
 ## Phase 13 open items
 
-**Lambert everywhere.** No normal maps, no ambient occlusion, no specular. Outdoors this is
-fine — the sun does the work and the shadows carry the depth — but INTERIORS are noticeably
-flatter than exteriors, because a room lit by a hemisphere light and one directional has
-almost no directional information in it. A player judging whether a wardrobe clears a ceiling
-gets less help indoors than out, which is backwards: indoors is where the clearances are.
+**~~Lambert everywhere.~~ CLOSED the same day** — and the diagnosis in this entry was wrong,
+which is why it is kept. It blamed the light count; the cause was that `MeshLambertMaterial`
+shades PER VERTEX, so a two-triangle wall's lighting was computed at four corners and
+interpolated. Adding the lamps this note implied would have changed almost nothing. See the
+changelog.
 
-**One shadow cascade, 2048, over a 52 m box.** That is roughly 40 mm per texel, so contact
-shadows under a box are soft and slightly detached. §20.4 asks for "contact shadows"
-specifically, and these are the weakest part of the art pass. A second tight cascade around
-the player is the fix.
+**Still no ambient occlusion, and the stand-in is fragile.** The contact darkening at the
+floor and ceiling is BAKED INTO THE PLASTER TEXTURE, which only works because every wall in
+the house is exactly `ROOM.wallH` tall and the material maps the gradient once over that
+height. A room with a different ceiling height puts the dark band across the middle of the
+wall. It is a correct-looking cheat with a tripwire in it; a real AO pass removes both.
+
+**One shadow cascade for the sun, 2048 over a 40 m box** — about 20 mm per texel, tightened
+from 25 mm in this pass. Contact shadows under a box are still soft. A second tight cascade
+around the player is the fix, and it costs a shadow pass, which the measurements in the
+changelog say is the expensive kind of thing.
+
+**The quality tier is a cliff, not a slope.** `detectRenderTier()` returns 'gpu' or
+'software' and nothing between, so a weak-but-real GPU gets the full four shadow maps and
+ten lights. §26.6's 45 FPS floor is not actually measured anywhere — the headless harness
+runs under `--virtual-time-budget`, where `performance.now()` does not advance during
+synchronous work, so FRAME TIME IS UNMEASURABLE THERE even with `gl.finish()`. Every
+performance claim in this project is a structural proxy (draw calls, triangles, light and
+shadow counts) or a wall-clock suite runtime. A real frame-rate number needs a real browser.
 
 **The interior is unfurnished beyond the manifest.** The rooms have plaster, floorboards and
 the 23 objects that are being moved, and nothing else — no light fittings, no skirting, no

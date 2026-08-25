@@ -52,6 +52,7 @@ import { TitleScreen } from './ui/titleScreen.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
+import { detectRenderTier } from './render/lighting.js';
 import { BUILD, MOVERS, COOP, RENDER } from './config.js';
 
 const canvas = document.getElementById('stage');
@@ -66,7 +67,10 @@ window.__MFH_READY = boot().catch((e) => {
 
 async function boot() {
   const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
-  const world = buildScene();
+  /* Quality tier before the scene, because it decides how many shadow maps get built. See
+   * detectRenderTier — shadow passes are ~100x more expensive in software than lights are. */
+  const renderTier = detectRenderTier(renderer);
+  const world = buildScene(renderTier);
 
   // ---- physics ------------------------------------------------------------------------
   const R = await initPhysics();

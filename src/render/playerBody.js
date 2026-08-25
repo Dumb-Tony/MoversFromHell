@@ -18,7 +18,7 @@
  */
 
 import { PLAYER } from '../config.js';
-import { texHiVis, texDenim, lambert } from './textures.js';
+import { texHiVis, texDenim, matte } from './textures.js';
 
 export function makeBlockout(clothColour) {
   const THREE = window.THREE;
@@ -28,9 +28,9 @@ export function makeBlockout(clothColour) {
   // Phase 4 gives each mover its own colour, so which one you are driving is readable at a
   // glance rather than from the HUD.
   const skin = '#cfa98c', cloth = clothColour || '#5f6b8a', dark = '#2f3444', hi = '#a8d93a';
-  const mat = (c) => lambert(c);
-  const denimMat = new THREE.MeshLambertMaterial({ map: texDenim(220, 0.26) });
-  const visMat = new THREE.MeshLambertMaterial({ map: texHiVis(66) });
+  const mat = (c) => matte(c);
+  const denimMat = matte(0xffffff, { map: texDenim(220, 0.26) });
+  const visMat = matte(0xffffff, { map: texHiVis(66) });
 
   const legH = H * 0.50, torsoH = H * 0.33, headR = H * 0.076;
 

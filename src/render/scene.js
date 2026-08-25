@@ -95,15 +95,16 @@ export const OBSTACLES = Object.freeze([
  * against Phases 0-4, including m1's room assertions. One record, one direction of import.
  */
 export { ROOM } from '../world/house.js';
-import { ROOM, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
+import { ROOM, ZONES, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
 import { cargoColliders, cargoAnchors, cabColliders } from '../world/truck.js';
 import {
   DEST_SHELL, DEST_ZONES, DEST_PARTITIONS, DEST_DOORS, destColliders,
 } from '../world/destination.js';
 import {
   tiled, texGrass, texAsphalt, texConcrete, texSky, texSiding, texShingle, texPlaster,
-  texBoards, texBrick, texTruckSide, texTruckWall, texTruckDeck, texSteel, lambert,
+  texBoards, texBrick, texTruckSide, texTruckWall, texTruckDeck, texSteel, matte,
 } from './textures.js';
+import { buildLighting, detectRenderTier } from './lighting.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -132,7 +133,7 @@ const PALETTE = {
  *   colliders: {minX,maxX,minZ,maxZ,base,top,tag}[] — shared with camera + physics
  *   spawn: where the player starts (Phase 1)
  */
-export function buildScene() {
+export function buildScene(renderTier = 'gpu') {
   const THREE = window.THREE;
   const scene = new THREE.Scene();
   // fog is set with the sky, below, so the two cannot disagree about the horizon colour
@@ -150,41 +151,44 @@ export function buildScene() {
     });
   };
 
-  /* ---- lighting: a time of day, rather than an even fill --------------------------------
-   * §20.1 still governs — silhouettes and clearances must read — but "bright and even" was
-   * doing that by removing all directional information, which is most of why the build
-   * photographed like a CAD viewport. A low afternoon sun gives every object a long shadow
-   * that says where it is on the ground, which is exactly the depth cue you need when
-   * judging whether a couch is going to clear a door frame. */
-  const hemi = new THREE.HemisphereLight(0xbcd8ee, 0x6b6350, 0.62);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe9c4, 1.32);
-  sun.position.set(16, 17, 11);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  const d = 26;
-  sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
-  sun.shadow.camera.top = d;   sun.shadow.camera.bottom = -d;
-  sun.shadow.camera.near = 1;  sun.shadow.camera.far = 80;
-  sun.shadow.bias = -0.0007;
-  sun.shadow.normalBias = 0.02;
-  scene.add(sun);
-  scene.add(sun.target);
-  // A cool bounce from the opposite side, so shadowed faces are readable rather than black.
-  const fill = new THREE.DirectionalLight(0x9fc0e0, 0.30);
-  fill.position.set(-12, 9, -14);
-  scene.add(fill);
+  /* ---- lighting ---------------------------------------------------------------------
+   * §20.1 still governs — silhouettes and clearances must read. Outdoors a low afternoon
+   * sun gives every object a long shadow that says where it is on the ground, which is the
+   * depth cue you need to judge whether a couch will clear a door frame.
+   *
+   * INDOORS that cue was missing entirely: the room shells have ceilings, so the sun is
+   * blocked by construction, and a hemisphere light does not occlude — it lights every
+   * surface equally whatever is above it. Each room now carries its own shadow-casting
+   * spot. The whole rig lives in lighting.js, including the reason the material model had
+   * to change before any of it could be seen. */
+  /* INDOOR rooms only, and shadows only in the pickup house.
+   *
+   * A zone is indoors when its ceiling is the shell's wall height; the kerbside aprons are
+   * zones too, and `maxY > 1` let them through — which put a shadow-casting spotlight in the
+   * middle of the front garden and took the scene to THIRTEEN lights and TEN shadow maps.
+   *
+   * The destination's rooms get light but no shadow map. The pickup house is where the
+   * carrying puzzles are and where a player spends the long half of a contract; delivery is
+   * a shorter, simpler visit, and four shadow passes is a budget rather than an accident.
+   * §26.6's 45 FPS floor could not be measured here — see the note in tools/_perf.js — so
+   * this is a deliberately conservative count rather than a tuned one. */
+  const indoor = (z) => z.maxY !== undefined && Math.abs(z.maxY - ROOM.wallH) < 1e-6;
+  const rooms = [
+    ...ZONES.filter(indoor).map((z) => ({ ...z, castShadow: true })),
+    ...DEST_ZONES.filter(indoor).map((z) => ({ ...z, castShadow: false })),
+  ];
+  const { sun, fill, hemi, ambient, roomLights, tier } = buildLighting(scene, rooms, renderTier);
 
-  const mat = (color, opts = {}) => lambert(color, opts);
+  const mat = (color, opts = {}) => matte(color, opts);
   /** A textured surface. `rx`/`ry` are repeats, normally metres × a density. */
   const surf = (tex, rx, ry, opts = {}) =>
-    new THREE.MeshLambertMaterial({ map: tiled(tex, Math.max(0.25, rx), Math.max(0.25, ry)), ...opts });
+    matte(0xffffff, { map: tiled(tex, Math.max(0.25, rx), Math.max(0.25, ry)), ...opts });
 
   /* The house's outward skin. BoxGeometry indexes materials [+X, -X, +Y, -Y, +Z, -Z], and
    * the aperture wall's DRIVEWAY side is +Z — so siding goes at index 4 and plaster at 5.
    * Getting it the wrong way round clads the living room and plasters the front elevation. */
   const extSiding = surf(texSiding(34, 0.62), 5, 1.6);
-  const intPlaster = surf(texPlaster(38, 0.84), 3, 1.4);
+  const intPlaster = surf(texPlaster(38, 0.84), 3, 1);   // ry=1: see texPlaster
   const frontWallMats = [intPlaster, intPlaster, intPlaster, intPlaster, extSiding, intPlaster];
   const gardenBrick = surf(texBrick(18), 2, 1);
 
@@ -324,7 +328,7 @@ export function buildScene() {
   scene.add(roomFloor);
 
   // One plaster material for every interior wall, so the whole house reads as one build.
-  const wallMat = surf(texPlaster(38, 0.84), 3, 1.4);
+  const wallMat = surf(texPlaster(38, 0.84), 3, 1);      // ry=1: see texPlaster
 
   const addWall = (cx, cz, sx, sz, tag) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, R.wallH, sz), wallMat);
@@ -422,7 +426,7 @@ export function buildScene() {
      * company's livery, the deck is scuffed ply instead of grey, and the thing has wheels. */
     const insideMat = surf(texTruckWall(), 2, 1);
     const deckMat = surf(texTruckDeck(), 3, 2);
-    const sideMat = new THREE.MeshLambertMaterial({ map: texTruckSide() });
+    const sideMat = matte(0xffffff, { map: texTruckSide() });
     const roofMat = mat(0xd8d5cd);
 
     /* BoxGeometry's material array is indexed [+X, -X, +Y, -Y, +Z, -Z]. The livery belongs
@@ -803,7 +807,7 @@ export function buildScene() {
   }
 
   return {
-    scene, colliders, props, sun, grid, apertures: APERTURES,
+    scene, colliders, props, sun, fill, hemi, ambient, roomLights, tier, grid, apertures: APERTURES,
     obstacles, ramp: RAMP, platform: PLATFORM, room: ROOM,
     spawn: { x: 0, y: 0, z: 5.0 },
     dispose() {

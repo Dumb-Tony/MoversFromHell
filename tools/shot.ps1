@@ -35,6 +35,11 @@ $server = Start-Process powershell `
   -WindowStyle Hidden -PassThru
 
 $url = "http://localhost:$Port/$scratchName"
+# ?tier=gpu — a screenshot should show what a player with a graphics card sees, and headless
+# Chrome IS the software tier, which drops the room lights (see lighting.js). The QUERY GOES
+# ONLY TO CHROME: tools/serve.ps1 serves paths, not query strings, so probing the readiness
+# of "...html?tier=gpu" never returns 200 and the shot reports "server never came up".
+$shotUrl = "$url" + "?tier=gpu"
 $tries = 0; $up = $false
 while ($tries -lt 40 -and -not $up) {
   try { if ((Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $up = $true } }
@@ -55,7 +60,7 @@ Start-Process $chrome -ArgumentList `
   "--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check",
   "--user-data-dir=$profileDir","--window-size=$Width,$Height",
   "--hide-scrollbars","--virtual-time-budget=8000",
-  "--screenshot=$outPath",$url -NoNewWindow -Wait
+  "--screenshot=$outPath",$shotUrl -NoNewWindow -Wait
 
 if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
 try { Remove-Item -Recurse -Force $profileDir -ErrorAction Stop } catch {}

@@ -3,7 +3,7 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
-## Phase 13 — the art pass — 2026-08-23
+## Phase 13 — the art pass, and the interior lighting — 2026-08-23
 
 **Gate:** not a §25.2 roadmap phase. §20.4 told the prototype to look diagnostic — "simple
 meshes, colour separation, contact shadows, faithful collision" — and for twelve phases it
@@ -90,9 +90,65 @@ headquarters" — one card, one button, and the only honest place to tell anyone
 
 **Checked:** 24 new assertions; 846 across fourteen suites, 0 failing. No collider moved.
 
-**Limitation:** Lambert everywhere, no normal maps, no ambient occlusion, and the shadows are
-a single 2048 cascade — so interiors are flatter than exteriors and a room reads worse than a
-driveway. That is the next thing an art pass would fix, and it is a bigger one.
+### The interior lighting, fixed the same day
+
+The limitation above said "interiors are flatter than exteriors" and guessed the cause was
+the light count. It was not.
+
+**`MeshLambertMaterial` SHADES PER VERTEX.** The vendored r128 build settles it: the shader
+assembles `lights_lambert_vertex` for Lambert and `lights_phong_fragment` for Phong. A wall
+is two triangles, so a Lambert wall's lighting is computed at four corners and interpolated
+across ten metres. Every interior surface was one flat value with adjacent faces at 90°
+separated by a hairline — and **hanging lamps in those rooms would have changed almost
+nothing**, because a point light 2 m from a 10 m wall moves four corner values and the middle
+is a blend of them. `matte()` now builds a MeshPhongMaterial with the specular killed, which
+is per-fragment Lambert in all but name; m13 F1–F3 pin it, including "no per-vertex material
+survives anywhere in the scene", because if one comes back nothing else in the project would
+notice.
+
+**The second half was that nothing indoors cast a shadow at all.** The room shells have
+ceilings, so the sun is blocked by construction, and a HemisphereLight does not occlude — it
+lights every surface equally whatever is above it, which indoors is a constant. Each room now
+has its own warm spot from the ceiling with a real shadow map, so objects sit on the floor
+instead of hovering. Plus baked contact darkening and a skirting board in the plaster
+texture, which is the cheapest honest stand-in for the ambient occlusion a real-time rig with
+no AO pass does not have.
+
+**⚠ A ZONE FILTER OF `maxY > 1` PUT A SPOTLIGHT IN THE FRONT GARDEN.** The kerbside aprons
+are zones too. The scene reached 13 lights and 10 shadow maps before anyone looked at a
+number. Indoor rooms are those whose ceiling is the shell's wall height; m13 F5 asserts no
+room light is hung outdoors.
+
+**⚠ AND THEN THE TEST HARNESS TOOK TEN MINUTES A SUITE.** Measured, headless Chrome
+(SwiftShader), bisected rather than guessed:
+
+| configuration | m7 | m0 |
+|---|---|---|
+| no room lights | 4 s | 22 s |
+| 6 room spots, no shadows | 6 s | 149 s |
+| 6 room spots, 3 casting | >600 s | — |
+
+Two different costs, and which dominates depends on how many FRAMES a suite renders. m7
+renders few, so shadow maps are everything and six extra lights cost two seconds. m0 renders
+many, so the per-fragment light loop is everything and the same six lights cost 127 seconds.
+
+The wrong response is to cut the shipping build's quality so a headless test runs fast — on
+any real GPU this is nothing. The right one is a **quality tier**, which is a feature rather
+than a workaround: §26.6 promises a 45 FPS floor to the PLAYER, and someone whose machine has
+fallen back to software rendering should get a playable game instead of a slideshow.
+`detectRenderTier()` reads `WEBGL_debug_renderer_info` — headless Chrome reports "Microsoft
+Basic Render Driver" — and the software tier drops the room lights and halves the sun's map.
+The harness got its speed back as a side effect of doing the honest thing. `?tier=gpu`
+forces it, which is how the screenshots show what a player with a graphics card sees, and is
+the seam a §21.4 settings panel would use.
+
+**Measured after:** 340 draw calls and 7 488 triangles, unchanged from before the whole art
+pass. 10 lights and 4 shadow maps on a GPU; 4 lights and 1 on software.
+
+**Limitation:** no normal maps, no ambient occlusion pass, and one shadow cascade. The baked
+skirting and contact gradient are standing in for AO and only work because every wall in the
+house is the same height — the moment a room has a different ceiling, the gradient lands in
+the wrong place.
 
 ## Phase 12 — local co-op — 2026-08-23
 

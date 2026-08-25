@@ -127,6 +127,8 @@ M.hud.setContract({
 M.hud.setCargo(cargo.packQuality());
 M.hud.notice('two hands on the couch', 'good');
 M.overlay.el.hidden = true;
+// The title card is up on a fresh boot; dismiss it as a player would.
+if (M.title) { M.title.start(); M.title.el.hidden = true; }
 
 M.syncSize();
 M.renderer.render(M.world.scene, me.camera);

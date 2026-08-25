@@ -27,8 +27,12 @@
 
 import { OBJECT_DEFS } from '../src/objects/definitions.js';
 import { buildPrefab, prefabBounds, PREFABS } from '../src/render/prefabs.js';
-import { canvasTex, lambert, texGrass, texCardboard } from '../src/render/textures.js';
+import { canvasTex, matte, texGrass, texCardboard } from '../src/render/textures.js';
 import { APERTURES, REFERENCE_DIMS } from '../src/render/scene.js';
+import { ZONES, ROOM as HOUSE_ROOM } from '../src/world/house.js';
+import { DEST_ZONES } from '../src/world/destination.js';
+
+const ROOM_WALL_H = HOUSE_ROOM.wallH;
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -192,10 +196,10 @@ lines.push('--- D. textures are cached, tagged and deterministic ---');
    * sRGB has to be converted or every flat colour in the build arrives pale. Mid-grey
    * 0x808080 is 0.5020 in sRGB and 0.2159 in linear — a difference far too large to be a
    * rounding artefact, and exactly the shift that made tree trunks look like pale tan. */
-  const m = lambert(0x808080);
+  const m = matte(0x808080);
   ok('D5 a flat colour is converted from sRGB to linear',
      Math.abs(m.color.r - 0.2159) < 0.005, `r=${m.color.r.toFixed(4)}, want ~0.2159`);
-  const white = lambert(0xffffff);
+  const white = matte(0xffffff);
   ok('D6 …and white stays white', Math.abs(white.color.r - 1) < 1e-6, `r=${white.color.r}`);
 }
 
@@ -222,6 +226,70 @@ lines.push('--- E. the dressed scene is affordable (§26.6) ---');
   const banner = document.getElementById('err-banner');
   ok('E4 no error banner appeared during the suite', !banner || !banner.textContent.trim(),
      banner ? banner.textContent.slice(0, 120) : '');
+}
+
+/* ── F. the lighting rig ──────────────────────────────────────────────────────── */
+lines.push('--- F. interiors are lit, and the shadow budget is bounded ---');
+{
+  /* THE ROOT CAUSE, PINNED. `MeshLambertMaterial` shades per VERTEX — the vendored r128
+   * build assembles `lights_lambert_vertex` for it — so a wall's lighting was computed at
+   * four corners and interpolated across ten metres. Every interior surface was one flat
+   * value, and adding lamps to the rooms would have changed almost nothing. If anything
+   * reintroduces a Lambert material the interior silently goes flat again, and no other
+   * assertion in this project would notice. */
+  const mm = matte(0x808080);
+  eq('F1 surfaces are shaded per FRAGMENT, not per vertex', mm.type, 'MeshPhongMaterial');
+  eq('F2 …with the specular killed, so it stays diffuse-only', mm.shininess, 0);
+
+  const lamberts = [];
+  world.scene.traverse((o) => {
+    for (const mat of (Array.isArray(o.material) ? o.material : [o.material])) {
+      if (mat && mat.type === 'MeshLambertMaterial') lamberts.push(mat.type);
+    }
+  });
+  ok('F3 no per-vertex material survives anywhere in the scene',
+     lamberts.length === 0, `${lamberts.length} found`);
+
+  const lit = new Set((world.roomLights || []).map((s) => s.userData.roomId));
+  const isIndoor = (z) => z.maxY !== undefined && Math.abs(z.maxY - ROOM_WALL_H) < 1e-6;
+  const allZones = [...ZONES, ...DEST_ZONES];
+  const unlit = allZones.filter(isIndoor).map((z) => z.id).filter((id) => !lit.has(id));
+  if (world.tier === 'software') {
+    // Measured: six room spots cost 127 s of m0's runtime under SwiftShader. The tier drops
+    // them, so the claim here is that it dropped ALL of them rather than some.
+    eq('F4 the software tier carries no room lights at all', (world.roomLights || []).length, 0);
+  } else {
+    ok('F4 every indoor room has its own light', unlit.length === 0, unlit.join(', '));
+  }
+
+  /* THE BUG THIS CATCHES: the first filter was `maxY > 1`, and the kerbside aprons are zones
+   * too — so a shadow-casting spotlight went up in the middle of the front garden and took
+   * the scene to 13 lights and 10 shadow maps. */
+  const litOutdoors = allZones.filter((z) => !isIndoor(z)).map((z) => z.id).filter((id) => lit.has(id));
+  ok('F5 no room light was hung outdoors', litOutdoors.length === 0, litOutdoors.join(', '));
+
+  /* THE BUDGET, and it is measured rather than preferred. On m7 in headless Chrome:
+   * no room lights 4 s; six room spots without shadows 6 s; six with three casting >600 s,
+   * which timed the harness out. The light COUNT is free. The shadow PASSES are not,
+   * because every rendered frame re-renders every map. */
+  let casting = 0, lights = 0;
+  world.scene.traverse((o) => { if (o.isLight) { lights++; if (o.castShadow) casting++; } });
+  ok('F6 the light count is bounded', lights <= 12, `${lights} lights`);
+  ok('F7 the shadow-map count is bounded', casting <= 5, `${casting} casting`);
+  lines.push(`      (lights: ${lights}, shadow casters: ${casting}, tier: ${world.tier})`);
+
+  /* A software rasteriser drops the room shadows rather than the frame rate — §26.6's floor
+   * is a promise to the player, not to the machine. This suite runs on SwiftShader, so the
+   * branch below is live rather than hypothetical. */
+  if (world.tier === 'software') {
+    const roomCasting = (world.roomLights || []).filter((s) => s.castShadow).length;
+    eq('F8 in software, room lights light but do not cast', roomCasting, 0);
+    ok('F9 …and the sun keeps a smaller map', world.sun.shadow.mapSize.width <= 1024,
+       String(world.sun.shadow.mapSize.width));
+  } else {
+    ok('F8 on a GPU, the pickup house casts', (world.roomLights || []).some((s) => s.castShadow));
+    ok('F9 …at the full sun map', world.sun.shadow.mapSize.width >= 2048);
+  }
 }
 
 emit();

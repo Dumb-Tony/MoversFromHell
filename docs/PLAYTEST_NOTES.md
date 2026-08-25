@@ -517,11 +517,20 @@ only way to know a box was fragile was to break it. Now the box says so, in the 
 already looking — which is §26.5's "readable without a UI layer" applied to the one property
 that costs the most money.
 
-**What became less fun: the interior.** The outside of the house is a place; the inside is a
-lit box with furniture in it. The lighting model is the cause — one sun and a hemisphere fill
-give a room almost no directional information — and it lands badly because indoors is where
-the hard spatial problems are. The build is now noticeably better to look at in the half of
-the game with fewer decisions in it.
+**What became less fun, and then did not: the interior.** The first version of this note said
+the inside of the house was a lit box with furniture in it, and blamed the lighting model.
+The real cause was that Lambert shades per vertex, so a wall was lit at four corners and
+interpolated — the rooms could not have been fixed by adding lamps to them.
+
+With that changed, the thing that made the biggest difference indoors was not a light at all:
+it was the **skirting board**. A baked shadow line where the wall meets the floor gives the
+eye an edge to sit on, and a room stops being a set of separate planes. The shadows under the
+furniture are what stop objects hovering; the skirting is what makes the room a room.
+
+**§27.3 — did the interior get easier to judge?** Yes, and specifically for HEIGHT. A shadow
+on the floor tells you where an object is; a shadow on the WALL behind it tells you how far
+from the wall it is. Backing a wardrobe into a corner used to be guesswork and now is not,
+which matters because §13.1's doorway turn is the hardest spatial problem in the build.
 
 **The metre grid coming off was the single biggest change**, and it cost nothing. Twelve
 phases of screenshots had a dev grid painted across the lawn. Moving it onto F3 took one line

@@ -164,5 +164,7 @@ M.huds[0].notice('two hands on the couch', 'good');
 M.huds[1].notice('braced', 'info');
 M.divider.update(rects);
 M.overlay.el.hidden = true;
+// The title card is up on a fresh boot; dismiss it as a player would.
+if (M.title) { M.title.start(); M.title.el.hidden = true; }
 
 renderSeats(M.renderer, M.world.scene, [M.moverOfSeat(0), M.moverOfSeat(1)], rects);
