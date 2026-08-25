@@ -18,6 +18,7 @@
  */
 
 import { PLAYER } from '../config.js';
+import { texHiVis, texDenim, lambert } from './textures.js';
 
 export function makeBlockout(clothColour) {
   const THREE = window.THREE;
@@ -26,14 +27,31 @@ export function makeBlockout(clothColour) {
 
   // Phase 4 gives each mover its own colour, so which one you are driving is readable at a
   // glance rather than from the HUD.
-  const skin = '#cfc6b8', cloth = clothColour || '#5f6b8a', dark = '#3d4358', hi = '#a8d93a';
-  const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+  const skin = '#cfa98c', cloth = clothColour || '#5f6b8a', dark = '#2f3444', hi = '#a8d93a';
+  const mat = (c) => lambert(c);
+  const denimMat = new THREE.MeshLambertMaterial({ map: texDenim(220, 0.26) });
+  const visMat = new THREE.MeshLambertMaterial({ map: texHiVis(66) });
 
   const legH = H * 0.50, torsoH = H * 0.33, headR = H * 0.076;
 
+  /* THE CREW ACTUALLY LOOK LIKE A CREW NOW — hi-vis, caps, work boots, gloves.
+   *
+   * §20.4's "prototype visuals are diagnostic" governed this file for twelve phases and it
+   * was right to: what mattered was that FACING and SCALE were unambiguous. Both survive
+   * here — the cap peak replaces the nose cone as the facing tell and points the same way,
+   * and the whole group is still normalised to exactly PLAYER.height at the bottom of this
+   * function, so the mesh cannot drift from the capsule every clearance number comes from.
+   *
+   * The gloves stay §6.1's reference lime rather than becoming realistic work gloves. That
+   * is not laziness: seeing where the hands are is a grip affordance the game depends on
+   * from Phase 2 onward, and hi-vis gloves are also just what movers wear. */
   const mkLeg = (sx) => {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, legH, 0.17), mat(dark));
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, legH, 0.17), denimMat);
     l.position.set(sx * 0.13, legH / 2, 0);
+    // Boot: wider, darker, at the ankle. Child of the leg, so it swings with the gait.
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.175, legH * 0.17, 0.235), mat('#241f1c'));
+    boot.position.set(0, -legH / 2 + legH * 0.085, 0.024);
+    l.add(boot);
     g.add(l);
     return l;
   };
@@ -41,21 +59,34 @@ export function makeBlockout(clothColour) {
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, torsoH, 0.25), mat(cloth));
   torso.position.y = legH + torsoH / 2;
+  // The vest, a hair proud of the shirt on all sides and stopping short at the shoulders,
+  // so the mover's own colour still reads at a glance (§6.4 — you must know which is yours).
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.485, torsoH * 0.76, 0.285), visMat);
+  vest.position.set(0, -torsoH * 0.08, 0);
+  torso.add(vest);
   g.add(torso);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), mat(skin));
   head.position.y = legH + torsoH + headR * 0.95;
   g.add(head);
 
-  // The facing tell. Points -Z, matching forwardFlat() at yaw 0.
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(headR * 0.28, headR * 0.7, 8), mat('#d98f6a'));
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.set(0, head.position.y, -headR * 0.95);
-  g.add(nose);
+  // A cap: crown plus peak. The PEAK is the facing tell — it points -Z, matching
+  // forwardFlat() at yaw 0, exactly as the nose cone it replaces did.
+  const crown = new THREE.Mesh(
+    new THREE.SphereGeometry(headR * 1.04, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.52), mat(cloth));
+  crown.position.set(0, headR * 0.12, 0);
+  head.add(crown);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(headR * 1.5, headR * 0.16, headR * 0.95), mat(cloth));
+  nose.position.set(0, headR * 0.16, -headR * 1.05);
+  head.add(nose);
 
   const mkArm = (sx) => {
     const a = new THREE.Mesh(new THREE.BoxGeometry(0.11, torsoH * 0.95, 0.13), mat(skin));
     a.position.set(sx * 0.29, legH + torsoH * 0.52, 0);
+    // Short sleeve over the top third.
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.125, torsoH * 0.34, 0.145), mat(cloth));
+    sleeve.position.set(0, torsoH * 0.30, 0);
+    a.add(sleeve);
     g.add(a);
     return a;
   };

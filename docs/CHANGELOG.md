@@ -3,6 +3,97 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 13 — the art pass — 2026-08-23
+
+**Gate:** not a §25.2 roadmap phase. §20.4 told the prototype to look diagnostic — "simple
+meshes, colour separation, contact shadows, faithful collision" — and for twelve phases it
+did exactly that, which is why a build with 822 passing assertions still photographed like a
+CAD viewport. Nothing here changes what the game DOES.
+**PASSED** — 24 assertions (846 across fourteen suites).
+
+**An art pass is the most dangerous change this project can make**, because its mistakes are
+invisible to every test that came before it. Nothing in m0–m12 looks at a mesh. A couch whose
+arms overhang its collider still weighs 90 kg, still drags at the right force, and still
+passes every assertion — while visibly sliding through a door frame it should have caught
+on, which is the one thing the whole game is about (§26.2). So m13 tests the boundary between
+what you SEE and what the physics DOES, and the two assertions that matter are:
+
+- **A1** — every prefab fits inside its own declared dimensions, to the millimetre, for all
+  16 object definitions. §13.4: "stylized primitive meshes are acceptable; COLLISION-FAITHFUL
+  PROPORTIONS ARE MANDATORY."
+- **B1** — nothing decorative has crept into a doorway. The three apertures are still
+  0.82 / 0.86 / 0.91 m of actual air, measured by sweeping every mesh in the scene against
+  the clear opening rather than by trusting that nobody hung a door in the door.
+
+Plus **C1**: the roof, siding, trees, hedge, kerb and street add **not one collider**. §8.1
+forbids decorative collision contradicting the visible surface, and a bush a mover cannot
+walk through is precisely that.
+
+**Copied rather than invented** (Dev\INDEX.md → "Procedural geometry & texture"):
+`canvasTex`, `hslCss`, `tiled`, `texGrass`, `texAsphalt`, `texSiding`, `texShingle`,
+`texConcrete`, `texBoards` and `texPaint` come from `SomethingsDifferent`, which runs the same
+vendored Three r128 build — they dropped in unported, which is the entire reason that rule
+exists. What is new is what a moving game needs and that one did not: cardboard with tape
+seams and a FRAGILE stencil, upholstery weave, wood with end grain, appliance steel, hi-vis,
+and the truck's livery.
+
+**Four bugs, and the first two were invisible in every previous screenshot:**
+
+- **⚠ `node --check foo.js` EXITS 0 ON BROKEN ES-MODULE SYNTAX.** It parses `.js` with the
+  CommonJS goal. An automated edit spliced one `import` into the middle of another in
+  `scene.js`; the gate this session has been leaning on passed it. Measured with Node
+  v24.18.1: the same file fails as `.mjs` with "Unexpected reserved word". Every file in
+  `src/` is a module, so the cheap gate was blind to exactly the code it guarded.
+  `tools/syntax-check.sh` now copies to `.mjs` first; `--input-type=module` does not help
+  (rejected for file input).
+- **Every flat colour in the build was washed out**, and it took a textured surface beside an
+  untextured one to see it. Three r128 has no colour management: `outputEncoding =
+  sRGBEncoding` converts LINEAR to sRGB on the way out, so a hex literal — authored in sRGB —
+  has to be converted first. A mid-brown tree trunk arrived as pale tan. Centralised in
+  `lambert()`/`basic()` rather than fixed at each of the thirteen material sites, because
+  "convert every colour except the ones somebody forgot" is worse than not converting.
+- **The sky dome was clipped by the far plane.** Radius 400 against `RENDER.far` 300, which
+  paints a hard diagonal edge of clear colour across the top of the frame and reads as a
+  rendering glitch rather than a missing sky.
+- **Removing an object threw**, because `registry.remove` disposed `mesh.geometry` and the
+  visual is a Group now. Caught by m2, and the fix walks the group — while deliberately NOT
+  disposing materials, which are shared across every object of the same prefab.
+
+**The metre grid is off by default.** It has been in the scene since Phase 0 and it earned
+its place — several tuning decisions were made by counting squares — but nothing that ships
+has a metre grid painted on the lawn. It now rides with the stats on F3, where it is a
+measuring instrument rather than scenery. Same treatment for the Phase 1 mantle blocks: the
+bodies are brickwork and the lime/coral legend survives as a painted coping, so the diagnostic
+is intact and a raised bed is a thing a garden has.
+
+**Also here:** a pitched roof, siding, brick skirt, windows and a front door on both houses;
+a street with a centre line and kerbs; trees, a hedge, a mailbox and a wheelie bin; the truck
+with wheels, a windscreen, a bumper and its own livery on both flanks; movers in hi-vis with
+caps, boots and gloves; and §13.4's "compact job-start screen rather than a full
+headquarters" — one card, one button, and the only honest place to tell anyone that F2 exists.
+
+**Measured:**
+
+| claim | evidence |
+|---|---|
+| every prefab is collision-faithful | 16/16 within declared dimensions, 1 mm tolerance |
+| the couch is still the couch | 2.1000 m across; 0.850 m narrowest presentation |
+| doorways are still air | 0 meshes intersect any of the three clear openings |
+| scenery is scenery | 0 colliders added by the dressing |
+| it is affordable | 380 meshes in the dressed scene, against a 2600 budget (§26.6) |
+
+**Touched:** `src/render/textures.js` (new), `src/render/prefabs.js` (new),
+`src/ui/titleScreen.js` (new), `src/render/scene.js`, `src/render/renderer.js`,
+`src/render/playerBody.js`, `src/render/strapLines.js`, `src/objects/registry.js`,
+`src/tools/tools.js`, `src/main.js`, `styles.css`, `tools/m13-tests.js` (new),
+`tools/syntax-check.sh` (new).
+
+**Checked:** 24 new assertions; 846 across fourteen suites, 0 failing. No collider moved.
+
+**Limitation:** Lambert everywhere, no normal maps, no ambient occlusion, and the shadows are
+a single 2048 cascade — so interiors are flatter than exteriors and a room reads worse than a
+driveway. That is the next thing an art pass would fix, and it is a bigger one.
+
 ## Phase 12 — local co-op — 2026-08-23
 
 **Gate:** not a §25.2 roadmap phase, and **a deliberate departure from §13.4**, which lists

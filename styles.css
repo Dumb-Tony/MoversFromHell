@@ -412,3 +412,123 @@ html, body {
    sit across the divider. Both are shell chrome rather than either player's HUD. */
 body.coop #help { left: 50%; transform: translateX(-50%); max-width: 96vw; font-size: 10px; }
 body.coop #build-stamp { opacity: .45; }
+
+/* ---- title card (Phase 13) ----------------------------------------------------------
+   §13.4: "a compact job-start screen rather than a full headquarters." One card, one
+   button. It sits OVER a live world — the simulation is never paused for it, so the
+   backdrop is the game rather than a picture of it. */
+
+#title-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: auto;
+  background: radial-gradient(120% 90% at 50% 40%, rgba(9,10,16,.58), rgba(9,10,16,.88));
+  backdrop-filter: blur(2px);
+  transition: opacity .38s ease;
+}
+#title-screen.gone { opacity: 0; pointer-events: none; }
+
+#title-screen .card {
+  width: min(760px, 96vw);
+  max-height: 94vh;
+  overflow: auto;
+  padding: 26px 30px 20px;
+  background: rgba(23,21,34,.93);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  text-align: center;
+}
+
+/* The name, set as the truck's own livery plate — same face, same stripe. */
+#title-screen .plate {
+  background: #e8e4dc;
+  border-radius: 6px;
+  padding: 16px 18px 12px;
+  margin: 0 0 16px;
+}
+#title-screen .name {
+  font: 700 clamp(30px, 6.4vw, 58px)/0.94 Impact, Haettenschweiler, 'Arial Black', sans-serif;
+  letter-spacing: .012em;
+  color: #171522;
+}
+#title-screen .name span { color: #b2202a; margin: 0 .28em; }
+#title-screen .tag {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 4px solid #b2202a;
+  font: 700 clamp(9px, 1.5vw, 12px)/1.3 Quicksand, system-ui, sans-serif;
+  letter-spacing: .13em;
+  color: #b2202a;
+}
+
+#title-screen .pitch {
+  margin: 0 auto 18px;
+  max-width: 56ch;
+  font: 13px/1.65 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  opacity: .82;
+}
+
+#title-screen .play {
+  display: inline-block;
+  padding: 12px 34px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--lime);
+  color: #101408;
+  font: 700 15px/1 Quicksand, system-ui, sans-serif;
+  letter-spacing: .09em;
+  cursor: pointer;
+  transition: transform .12s ease, filter .12s ease;
+}
+#title-screen .play:hover  { transform: translateY(-1px); filter: brightness(1.08); }
+#title-screen .play:active { transform: translateY(1px); }
+#title-screen .play:focus-visible { outline: 2px solid var(--paper); outline-offset: 3px; }
+
+#title-screen .cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px 26px;
+  margin: 20px 0 4px;
+  text-align: left;
+}
+#title-screen h4 {
+  margin: 0 0 6px;
+  font: 700 10px/1 Quicksand, system-ui, sans-serif;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+#title-screen .cols ul { margin: 0; padding-left: 15px; }
+#title-screen .cols li {
+  font: 11.5px/1.6 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  opacity: .74;
+}
+#title-screen .cols b { opacity: 1; color: var(--paper); }
+#title-screen .key {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--violet);
+  color: #100e1c;
+  font: 700 10px/1.5 Quicksand, system-ui, sans-serif;
+  letter-spacing: 0;
+}
+#title-screen .foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  font: 10px/1.4 Consolas, ui-monospace, monospace;
+  color: var(--paper);
+  opacity: .42;
+}

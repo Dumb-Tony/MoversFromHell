@@ -91,6 +91,8 @@ export class StrapLines {
       live.add(s.id + ':b');
       second.mesh.visible = true;
       this._segment(second.mesh, mid, b, s);
+      // Copies an ALREADY-converted colour, so no second conversion here — doing it
+      // twice darkens the second line and the pair stop matching.
       second.material.color.setHex(material.color.getHex());
       second.material.opacity = material.opacity;
       second.material.transparent = material.transparent;
@@ -125,7 +127,10 @@ export class StrapLines {
     mesh.scale.set(width, width, len);
     mesh.position.copy(from).add(to).multiplyScalar(0.5);
     mesh.lookAt(to);
+    // sRGB -> linear, as everywhere else: the renderer writes sRGB output, so a hex
+    // literal handed straight to a colour arrives washed out. See textures.js `lambert`.
     mesh.material.color.setHex(colour);
+    if (mesh.material.color.convertSRGBToLinear) mesh.material.color.convertSRGBToLinear();
     mesh.material.transparent = opacity < 1;
     mesh.material.opacity = opacity;
     void THREE;
@@ -156,6 +161,7 @@ export class StrapLines {
     guide.lookAt(b);
     // §9.2's valid/invalid affordance: lime when it will attach, coral when it will not.
     guide.material.color.setHex(valid ? 0xa8d93a : 0xff5a5a);
+    if (guide.material.color.convertSRGBToLinear) guide.material.color.convertSRGBToLinear();
   }
 
   /* KEYED BY SEAT (Phase 12). Two players can each be half-way through placing a strap, and

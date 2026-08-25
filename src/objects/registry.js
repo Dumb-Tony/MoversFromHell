@@ -19,6 +19,7 @@
 import { OBJECT_DEFS, validateDef } from './definitions.js';
 import { GROUP_PRESETS } from '../physics/world.js';
 import { RECOVERY, SIM } from '../config.js';
+import { buildPrefab } from '../render/prefabs.js';
 
 let _nextId = 0;
 
@@ -113,9 +114,12 @@ export class ObjectRegistry {
 
     const collider = this.physics.world.createCollider(colDesc, body);
 
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(d.x, d.y, d.z),
-      new THREE.MeshLambertMaterial({ color: def.colour }));
+    /* The visual is a GROUP of primitives, not the collider drawn as a box (§13.4:
+     * "stylized primitive meshes are acceptable; collision-faithful proportions are
+     * mandatory"). Every part of it lives inside `def.dimensions`, which m13 asserts for
+     * every object in the manifest — a couch whose arms overhang its collider would pass
+     * visibly through a door frame it should have caught on, and the doorway is the game. */
+    const mesh = buildPrefab(def);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.scene.add(mesh);
@@ -266,8 +270,17 @@ export class ObjectRegistry {
     if (!e) return false;
     this.byCollider.delete(e.collider.handle);
     this.scene.remove(e.mesh);
-    e.mesh.geometry.dispose();
-    e.mesh.material.dispose();
+    /* The visual is a GROUP of parts since the Phase 13 art pass, and a Group has neither
+     * geometry nor material — so this has to walk it. Rule 1 in this file's header is that
+     * an entity's body, collider, mesh and state are created and DISPOSED together; a
+     * two-line dispose that assumed a single Mesh silently became a leak the moment the
+     * mesh grew children, and threw outright on the first removal.
+     *
+     * Materials are NOT disposed here. They come from the memoised texture cache in
+     * textures.js and are shared across every object of the same prefab — disposing one
+     * box's material would blank every other box in the contract. `disposeTextures()`
+     * owns that lifetime, at scene teardown. */
+    e.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     this.physics.world.removeRigidBody(e.body);   // removes its colliders too
     this.entities.delete(id);
     return true;

@@ -32,6 +32,7 @@ import { TOOLS, DAMAGE } from '../config.js';
 import { TOOL_DEFS, validateToolDef } from './definitions.js';
 import { EVENTS } from '../core/eventBus.js';
 import { GROUP_PRESETS } from '../physics/world.js';
+import { lambert } from '../render/textures.js';
 
 let _nextToolId = 0;
 
@@ -86,7 +87,7 @@ export class ToolSystem {
 
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(d.x, d.y, d.z),
-      new THREE.MeshLambertMaterial({ color: def.colour }));
+      lambert(def.colour));
     mesh.castShadow = true; mesh.receiveShadow = true;
     this.scene.add(mesh);
 

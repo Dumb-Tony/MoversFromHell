@@ -485,3 +485,42 @@ dropping the television.
 it is centred on the window and sits across the split. Same class of problem as the Phase 11
 reticle crowding: §21.1 constrains persistent panels to screen edges and says nothing about
 what happens when there are two screens' worth of edges.
+
+---
+
+## Phase 13 open items
+
+**Lambert everywhere.** No normal maps, no ambient occlusion, no specular. Outdoors this is
+fine — the sun does the work and the shadows carry the depth — but INTERIORS are noticeably
+flatter than exteriors, because a room lit by a hemisphere light and one directional has
+almost no directional information in it. A player judging whether a wardrobe clears a ceiling
+gets less help indoors than out, which is backwards: indoors is where the clearances are.
+
+**One shadow cascade, 2048, over a 52 m box.** That is roughly 40 mm per texel, so contact
+shadows under a box are soft and slightly detached. §20.4 asks for "contact shadows"
+specifically, and these are the weakest part of the art pass. A second tight cascade around
+the player is the fix.
+
+**The interior is unfurnished beyond the manifest.** The rooms have plaster, floorboards and
+the 23 objects that are being moved, and nothing else — no light fittings, no skirting, no
+switches, no curtains. It reads as a house being emptied, which is lucky rather than
+designed, and it will read as a bare box the moment anything is delivered INTO it (§13.1's
+destination especially).
+
+**The truck is one livery.** §16.1's progression loop implies a fleet, and the texture is
+keyed by a single cache entry with the company name baked in. Fine now; a second vehicle
+means parameterising `texTruckSide`.
+
+**Nothing is animated except the walk cycle.** No doors swing, no wheels turn while the route
+runs, the trees do not move, and the mover's arms do not reach for what they are holding —
+§5.1 asks for "procedural hand IK" and the hands are still two lime cubes at the hips.
+Carrying looks like standing next to something.
+
+**The title card does not pause anything.** Deliberate — the suites drive `game.frame()`
+directly and a gated clock would hang all fourteen — but it means the contract clock is
+running while a player reads the controls. At 18 minutes of estimate that is negligible, and
+it will not be once there is a leaderboard.
+
+**No settings, so no accessibility surface.** `DEFAULT_SETTINGS` has mouse sensitivity, invert
+Y, deadzone and §21.4's toggle-grip mode, and none of them are reachable without editing a
+file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to copy.

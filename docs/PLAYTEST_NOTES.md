@@ -498,3 +498,44 @@ at the same moment and feeling it come off the ground — the exact thing §6.4 
 the thing this project has been building toward since Phase 4. It took eight phases to
 become reachable and it works on the first try, because the physics under it was right all
 along and only the seat was missing.
+
+---
+
+## Phase 13 — the art pass — 2026-08-23
+
+**What became more fun: judging a gap.** This is the one that surprised me, because an art
+pass is not supposed to change how anything plays. A flat-shaded box against a flat-shaded
+wall gives the eye almost nothing to measure with — you know the couch is 2.1 m because the
+metre grid says so, not because it looks it. Textured surfaces have SCALE in them: floorboards
+are a known width, brick courses are a known height, and the cardboard flutes on a box read as
+corrugation rather than as stripes. Standing a couch next to a door frame is legible now in a
+way it was not, and nothing about the geometry changed.
+
+**§27.3 — could players predict damage?** Better, for one specific reason: the FRAGILE
+stencil. §7.2's fragility band has been a number in a definition for eight phases and the
+only way to know a box was fragile was to break it. Now the box says so, in the place you are
+already looking — which is §26.5's "readable without a UI layer" applied to the one property
+that costs the most money.
+
+**What became less fun: the interior.** The outside of the house is a place; the inside is a
+lit box with furniture in it. The lighting model is the cause — one sun and a hemisphere fill
+give a room almost no directional information — and it lands badly because indoors is where
+the hard spatial problems are. The build is now noticeably better to look at in the half of
+the game with fewer decisions in it.
+
+**The metre grid coming off was the single biggest change**, and it cost nothing. Twelve
+phases of screenshots had a dev grid painted across the lawn. Moving it onto F3 took one line
+and it is the difference between "here is a physics test" and "here is a game", before a
+single texture is considered.
+
+**Which moment would you tell a friend about?** Reversing round the back of the truck and
+seeing MOVERS FROM HELL / WE MOVE IT · YOU WATCH · SOMETHING BREAKS on the side of it. The
+game has had that name since day one and this is the first time it is IN the game. It also
+does something no README can: it tells a player what tone to expect before they touch
+anything.
+
+**Still unanswered:** whether any of this survives contact with a player. Everything in this
+phase was judged by me, in screenshots, against my own taste — which is exactly the kind of
+evidence §25.3 warns about ("assert measured values, not vibes"). The measured claims here
+are all about faithfulness (nothing overhangs, nothing blocks a door, nothing added a
+collider); whether it LOOKS good is a claim I cannot test and have not.

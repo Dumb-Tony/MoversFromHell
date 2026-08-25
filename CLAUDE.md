@@ -61,6 +61,12 @@ Chrome in `--dump-dom` mode delivers 1–3 rAF callbacks in total, then stops (m
 
 Assert measured values, not vibes. Report failures plainly, with the number.
 
+**Syntax-gate before every browser run: `./tools/syntax-check.sh`.** ⚠ Do NOT use bare
+`node --check src/foo.js` — it parses `.js` with the CommonJS goal and exits **0** on broken
+ES-module syntax. Measured 2026-08-23, Node v24.18.1: an `import` spliced into the middle of
+another `import` passed as `.js`, failed as `.mjs`. Every file in `src/` is a module, so the
+bare form is blind to exactly the code it is guarding. The script copies to `.mjs` first.
+
 **A suite reporting 0 assertions and NO `FAIL` lines is a harness artifact, not a
 regression.** The scratch copy is per-port (`_smoketest-<port>.html`) and is deleted on the
 way out; if a previous run's server or Chrome still holds it, the next run reads a stale or

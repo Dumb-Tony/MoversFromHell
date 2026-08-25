@@ -22,7 +22,23 @@ export function createRenderer(canvas) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, RENDER.maxPixelRatio));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(0x9fc4dd);
+  renderer.setClearColor(0xdfe9ee);
+
+  /* COLOUR MANAGEMENT, added in the Phase 13 art pass and worth more than any single
+   * texture in it.
+   *
+   * Three r128 defaults to LinearEncoding output, which means every colour is written to
+   * the framebuffer without the sRGB transfer curve — midtones come out flat and washed,
+   * and the usual response is to fight it by saturating the palette, which makes it worse.
+   * Setting sRGB output plus a filmic tone map is what turns "flat coloured boxes under a
+   * light" into something that reads as a photographed scene, and it costs nothing.
+   *
+   * The canvas textures in textures.js are authored in sRGB, so they must be TAGGED as such
+   * or they get double-corrected and go pale — see `canvasTex`. */
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.physicallyCorrectLights = false;
 
   const camera = new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);
 

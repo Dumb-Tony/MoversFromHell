@@ -23,6 +23,10 @@ watch it come off the ground — or press F2 and have someone else grab it.
 > press it (§4.4), straps are drawn (§10.3), and the contract ends on a settlement screen you
 > can replay from (§15.2).
 >
+> **It also looks like a game now** — textured surfaces, a sky, a house with a roof, a truck
+> with its own livery, and a crew in hi-vis. The metre grid moved onto F3, where a measuring
+> instrument belongs.
+>
 > **And two people can play it.** Press **F2** for split-screen local co-op: P1 on WASD and
 > the mouse, P2 on the arrow keys or the first controller plugged in. §6.4's two-mover
 > carrying has been real and measured since Phase 4 and this is the first build in which two
@@ -91,10 +95,21 @@ GL context, and the HUD is DOM. The suite is injected into a scratch copy of `in
 served, driven in headless Chrome, and the dumped DOM is grepped for the result block. Exit
 code 0 means all assertions passed.
 
-Node **is** installed, contrary to what this file said for eleven phases, and it is worth
-one line before every browser run — `node --check <file>` is a ~40 ms syntax gate, against
-roughly 90 seconds to discover the same typo as a blank page and an error banner. It cannot
-run the suites: there is no DOM, no WebGL and no `window.THREE`.
+Node **is** installed, contrary to what this file said for eleven phases, and a syntax gate
+before every browser run is worth it — ~40 ms against roughly 90 seconds to discover the
+same typo as a blank page and an error banner:
+
+```bash
+./tools/syntax-check.sh
+```
+
+⚠ **Use the script, not `node --check src/foo.js`.** `--check` parses a `.js` file with the
+CommonJS goal, and rather than rejecting module syntax it exits **0**. Measured with Node
+v24.18.1: a file with one `import` spliced into the middle of another passed `--check` as
+`.js` and failed as `.mjs`. All of `src/` is ES modules, so the cheap gate had a blind spot
+shaped exactly like the code it was guarding. The script copies to `.mjs` first, which is
+what actually sets the parse goal. Neither form can run the suites — no DOM, no WebGL, no
+`window.THREE`.
 
 Screenshots for docs and layout checks:
 
@@ -104,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File tools\shot.ps1 -Setup tools\_shot-phase
 
 ---
 
-## Current state — Phase 10 complete, playable, and two-player
+## Current state — Phase 10 complete, playable, two-player, and dressed
 
 GDD §25.2 defines a 13-phase roadmap.
 
@@ -123,12 +138,33 @@ GDD §25.2 defines a 13-phase roadmap.
 | 10. Economy | ledger matches events | done — 45 assertions |
 | 11. Playtest | external groups complete and replay | next — and it is the only one that matters |
 
-Plus two increments that are not on the roadmap. **The playable layer** gave phases 6–10 the
+Plus three increments that are not on the roadmap. **The playable layer** gave phases 6–10 the
 input bindings and HUD each of them had deferred. **Local co-op** gave §6.4's second pair of
-hands to a second person. Neither is §25.2's Phase 11 — that one is the playtest, and it is
-next, and co-op is what makes it possible to run.
+hands to a second person. **The art pass** dressed a build that §20.4 had deliberately kept
+diagnostic for twelve phases. None of them is §25.2's Phase 11 — that one is the playtest,
+it is next, and the last two are what make it possible to run with strangers.
 
-**822 assertions across thirteen suites, all passing.**
+**846 assertions across fourteen suites, all passing.**
+
+![The art pass](docs/phase13-look.png)
+
+Two movers walking a couch down the drive to the truck. Nothing in this frame changed what
+the game *does* — the couch still weighs 90 kg, still needs two pairs of hands, still will not
+fit through the 32" door. What changed is that the surfaces have scale in them: floorboards
+are a known width, brick courses a known height, cardboard flutes read as corrugation. Judging
+whether a couch clears a door frame got easier and no geometry moved.
+
+An art pass is the most dangerous change this project can make, because its mistakes are
+invisible to every test that came before it — so `m13` measures the boundary between what you
+see and what the physics does. **16 of 16 prefabs fit inside their own colliders to the
+millimetre; zero meshes intrude on any of the three doorways; the roof, trees, hedge, street
+and kerbs add zero colliders.**
+
+![The title card](docs/phase13-title.png)
+
+§13.4's "compact job-start screen rather than a full headquarters" — one card, one button,
+and the only honest place to tell anyone that two people can play. The simulation is never
+paused for it: the world behind the blur is the game running.
 
 ![Local co-op](docs/phase12-coop.png)
 

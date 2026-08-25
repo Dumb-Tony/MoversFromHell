@@ -48,6 +48,7 @@ import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js'
 import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
 import { Hud } from './ui/hud.js';
 import { InvoiceScreen } from './ui/invoiceScreen.js';
+import { TitleScreen } from './ui/titleScreen.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -461,6 +462,14 @@ async function boot() {
   const invoiceScreen = new InvoiceScreen(ui);
   const strapLines = new StrapLines(world.scene, straps, registry);
 
+  /* §13.4's "compact job-start screen". It does NOT pause the clock — the world behind it
+   * keeps running, and the suites drive game.frame() directly and never click a button, so
+   * a title that gated the simulation would hang all fourteen of them. */
+  const title = new TitleScreen(ui);
+  title.onStart = () => {
+    if (!game.state.paused) input.requestPointerLock();
+  };
+
   const stamp = document.createElement('div');
   stamp.id = 'build-stamp';
   stamp.textContent = `Movers From Hell — ${BUILD.label} · ${BUILD.date} · F3 for stats`;
@@ -634,13 +643,22 @@ async function boot() {
   // ---- shell wiring ---------------------------------------------------------------------
   input.onBlur = () => game.setPaused(true);           // §21.4 solo pause
   canvas.addEventListener('click', () => {
+    // While the card is up it owns the clicks; grabbing the pointer behind it would leave
+    // the player unable to press the one button on screen.
+    if (title.visible) return;
     if (!input.pointerLocked && !game.state.paused) input.requestPointerLock();
   });
   // Pause and the debug key are read on the RENDER frame, not in a system: they must keep
   // working while the simulation is paused, and a paused clock runs no systems at all.
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') game.togglePause();
-    if (e.code === 'F3') { e.preventDefault(); overlay.toggle(); }
+    if (e.code === 'F3') {
+      e.preventDefault();
+      const on = overlay.toggle();
+      // The metre grid is a measuring instrument, not scenery — it rides with the stats
+      // rather than being painted on the lawn of a shipping build. See scene.js.
+      if (world.grid) world.grid.visible = on;
+    }
     /* §6.4's second pair of hands, on a key rather than on a controller connecting.
      * A pad being plugged in must NOT split a solo player's screen — that is a regression to
      * the validated single-player build arriving as a surprise, and the player who plugged it
@@ -759,7 +777,7 @@ async function boot() {
   /* Test seam. `player` and `grips` are GETTERS, not snapshots: they follow whichever mover
    * is being driven, so a suite that swaps movers does not silently keep poking mover 0. */
   const api = {
-    game, input, world, overlay, hud, huds, renderer, syncSize,
+    game, input, world, overlay, hud, huds, renderer, syncSize, title,
     physics, registry, movers, tools, straps, cargo,
     /* Seat controls, so a suite can seat a second player without a keyboard. */
     setSeats, layoutFor, divider,
