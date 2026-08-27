@@ -11,7 +11,8 @@ param(
   [string]$Out   = "docs\shot.png",
   [int]$Width    = 1600,
   [int]$Height   = 900,
-  [int]$Port     = 8388
+  [int]$Port     = 8388,
+  [string]$Query = ""     # extra query params for the page, e.g. "style=toy"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -40,6 +41,7 @@ $url = "http://localhost:$Port/$scratchName"
 # ONLY TO CHROME: tools/serve.ps1 serves paths, not query strings, so probing the readiness
 # of "...html?tier=gpu" never returns 200 and the shot reports "server never came up".
 $shotUrl = "$url" + "?tier=gpu"
+if ($Query) { $shotUrl = "$shotUrl&$Query" }
 $tries = 0; $up = $false
 while ($tries -lt 40 -and -not $up) {
   try { if ((Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $up = $true } }

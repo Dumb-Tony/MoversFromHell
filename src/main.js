@@ -53,6 +53,7 @@ import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
 import { detectRenderTier } from './render/lighting.js';
+import { styleFromLocation, applyStyle } from './render/styles.js';
 import { BUILD, MOVERS, COOP, RENDER } from './config.js';
 
 const canvas = document.getElementById('stage');
@@ -71,6 +72,7 @@ async function boot() {
    * detectRenderTier — shadow passes are ~100x more expensive in software than lights are. */
   const renderTier = detectRenderTier(renderer);
   const world = buildScene(renderTier);
+
 
   // ---- physics ------------------------------------------------------------------------
   const R = await initPhysics();
@@ -446,6 +448,15 @@ async function boot() {
 
   game.setPhase(PHASES.PICKUP);
 
+  /* Art-direction rig (?style=toy|cel|film) — three photographable proposals over one
+   * build; no flag, no change. Applied HERE, after the furniture, tools and movers exist:
+   * the first version ran at buildScene time and restyled only the architecture, which
+   * made all three options photograph identically on the objects a player actually looks
+   * at. Strap lines and guides are deliberately excluded — they are §10.3 state signals,
+   * and a style that recolours a signal is a style breaking the game. */
+  const styleMode = styleFromLocation();
+  const styled = styleMode ? applyStyle(styleMode, world, renderer) : { postRender: null };
+
   const overlay = new DebugOverlay(ui, game);
   /* One HUD per SEAT, built up front rather than on join: creating DOM at the moment a
    * player presses F2 means the first co-op frame is the one that also does a layout, and
@@ -755,8 +766,14 @@ async function boot() {
     }
     for (let s = 0; s < seatCount; s++) huds[s].tickNotices();
 
-    renderSeats(renderer, world.scene,
-                Array.from({ length: seatCount }, (_, s) => moverOfSeat(s)), rects);
+    if (styled.postRender && seatCount === 1) {
+      // The film grade is single-viewport for the mock; split-screen grading is part of
+      // the real build if this direction wins.
+      styled.postRender(renderer, world.scene, moverOfSeat(0).camera);
+    } else {
+      renderSeats(renderer, world.scene,
+                  Array.from({ length: seatCount }, (_, s) => moverOfSeat(s)), rects);
+    }
     overlay.update(frameMs, {
       bodies: physics.stats.bodies,
       constraints: physics.stats.constraints,
@@ -781,7 +798,7 @@ async function boot() {
   /* Test seam. `player` and `grips` are GETTERS, not snapshots: they follow whichever mover
    * is being driven, so a suite that swaps movers does not silently keep poking mover 0. */
   const api = {
-    game, input, world, overlay, hud, huds, renderer, syncSize, title,
+    game, input, world, overlay, hud, huds, renderer, syncSize, title, styled, styleMode,
     physics, registry, movers, tools, straps, cargo,
     /* Seat controls, so a suite can seat a second player without a keyboard. */
     setSeats, layoutFor, divider,

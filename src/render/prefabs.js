@@ -24,6 +24,12 @@
 import {
   texCardboard, texFabric, texWood, texSteel, texScreen, texMirror, texPaint, tiled, matte,
 } from './textures.js';
+import { roundedBox, styleFromLocation } from './styles.js';
+
+/* The toy proposal rounds every box edge (radius 28 mm, clamped per part). Behind the same
+ * ?style= flag as the material treatment, so the option photograph shows the geometry that
+ * would actually ship — a saturated hard-edged box is not the proposal. */
+const TOY = styleFromLocation() === 'toy';
 
 /* ⚠ A TEXTURED PART TAKES NO TINT. `map` is MULTIPLIED by `color`, so passing def.colour
  * alongside a texture that already carries the object's hue darkens it twice — the couch
@@ -40,7 +46,8 @@ function flat(colour, opts = {}) {
 /** One box, positioned in the object's local frame (origin = collider centre). */
 function part(g, w, h, d, x, y, z, mat) {
   const THREE = window.THREE;
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const geo = TOY ? roundedBox(THREE, w, h, d, 0.028) : new THREE.BoxGeometry(w, h, d);
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;

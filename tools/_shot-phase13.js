@@ -131,4 +131,7 @@ M.overlay.el.hidden = true;
 if (M.title) { M.title.start(); M.title.el.hidden = true; }
 
 M.syncSize();
-M.renderer.render(M.world.scene, me.camera);
+/* Through the style's post pass when one is active — a film grade that is skipped by the
+ * screenshot is a direction judged on an image it never touched. */
+if (M.styled && M.styled.postRender) M.styled.postRender(M.renderer, M.world.scene, me.camera);
+else M.renderer.render(M.world.scene, me.camera);
