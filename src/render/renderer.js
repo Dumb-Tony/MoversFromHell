@@ -37,7 +37,7 @@ export function createRenderer(canvas) {
    * or they get double-corrected and go pale — see `canvasTex`. */
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.16;   // the toy direction's exposure (2026-08-25)
   renderer.physicallyCorrectLights = false;
 
   const camera = new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);

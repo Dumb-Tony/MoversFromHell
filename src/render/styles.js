@@ -28,7 +28,7 @@ import { LIGHTING } from './lighting.js';
 export function styleFromLocation() {
   try {
     const s = new URLSearchParams(location.search).get('style');
-    return ['toy', 'cel', 'film'].includes(s) ? s : null;
+    return ['cel', 'film'].includes(s) ? s : null;
   } catch (e) { return null; }
 }
 
@@ -44,39 +44,8 @@ export function styleFromLocation() {
  */
 export function applyStyle(mode, world, renderer) {
   const THREE = window.THREE;
-  if (mode === 'toy') return applyToy(THREE, world, renderer);
   if (mode === 'cel') return applyCel(THREE, world);
   if (mode === 'film') return applyFilm(THREE, world, renderer);
-  return { postRender: null };
-}
-
-/* ── toy: saturate, warm, harden ─────────────────────────────────────────────── */
-
-function applyToy(THREE, world, renderer) {
-  /* Colour does most of it: every material's colour is pushed toward its own saturated
-   * self. Textures stay — the tape seams and FRAGILE stencils are part of the charm — but
-   * the light gets warmer and harder so the shapes read as moulded plastic. The REAL toy
-   * pass (if chosen) also rounds the geometry; see roundedBox below, already used here for
-   * the movable objects so the photograph shows the actual proposal. */
-  world.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
-      if (!m || !m.color) continue;
-      const hsl = { h: 0, s: 0, l: 0 };
-      m.color.getHSL(hsl);
-      // Push saturation up and mid lightness apart — darks richer, lights cleaner.
-      m.color.setHSL(hsl.h, Math.min(1, hsl.s * 1.45 + 0.05), clamp01(hsl.l * 1.06));
-    }
-  });
-  /* Saturating material.color does nothing for TEXTURED surfaces — their colour is white
-   * (s = 0), which is why the first render only changed the trees. The toy read on grass,
-   * cardboard and fabric comes from light and exposure instead: harder warmer sun, deeper
-   * shadow, a notch more exposure. The geometry (roundedBox in prefabs) is the substance. */
-  world.sun.intensity *= 1.35;
-  world.sun.color.setHex(0xffdfae);
-  world.hemi.intensity *= 0.72;
-  world.ambient.intensity *= 0.85;
-  if (renderer) renderer.toneMappingExposure = 1.16;
   return { postRender: null };
 }
 
@@ -227,30 +196,6 @@ function applyFilm(THREE, world, renderer) {
 
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
-/* ── shared geometry for the toy proposal ────────────────────────────────────── */
-
-/**
- * A box with bevelled edges, built from an extruded rounded rectangle. Used by prefabs.js
- * when the toy style is active, so the option photograph shows the real proposal rather
- * than a saturated version of the hard-edged build.
- *
- * Stays INSIDE w×h×d — §13.4's collision-faithful rule applies to experiments too, and
- * m13 A1 will run against whichever geometry path is active.
- */
-export function roundedBox(THREE, w, h, d, radius = 0.03) {
-  const r = Math.min(radius, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3);
-  if (r <= 0) return new THREE.BoxGeometry(w, h, d);
-  const shape = new THREE.Shape();
-  const x = w / 2 - r, y = h / 2 - r;
-  shape.moveTo(-x, -h / 2);
-  shape.lineTo(x, -h / 2);  shape.absarc(x, -y, r, -Math.PI / 2, 0, false);
-  shape.lineTo(w / 2, y);   shape.absarc(x, y, r, 0, Math.PI / 2, false);
-  shape.lineTo(-x, h / 2);  shape.absarc(-x, y, r, Math.PI / 2, Math.PI, false);
-  shape.lineTo(-w / 2, -y); shape.absarc(-x, -y, r, Math.PI, Math.PI * 1.5, false);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: d - r * 2, bevelEnabled: true, bevelThickness: r, bevelSize: r * 0.999,
-    bevelSegments: 2, curveSegments: 4,
-  });
-  geo.translate(0, 0, -(d - r * 2) / 2);
-  return geo;
-}
+/* roundedBox moved to prefabs.js — the toy direction won and rounded geometry is now the
+ * shipping build, not a proposal. cel and film remain here, reachable via ?style=, so the
+ * decision stays photographable. */

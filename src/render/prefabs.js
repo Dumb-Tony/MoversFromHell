@@ -24,12 +24,49 @@
 import {
   texCardboard, texFabric, texWood, texSteel, texScreen, texMirror, texPaint, tiled, matte,
 } from './textures.js';
-import { roundedBox, styleFromLocation } from './styles.js';
-
-/* The toy proposal rounds every box edge (radius 28 mm, clamped per part). Behind the same
- * ?style= flag as the material treatment, so the option photograph shows the geometry that
- * would actually ship — a saturated hard-edged box is not the proposal. */
-const TOY = styleFromLocation() === 'toy';
+/* THE TOY DIRECTION WON (2026-08-25), so rounded geometry IS the build now — not a flag.
+ *
+ * ⚠ BOUNDS ARE MEASURED, NOT TRUSTED. r128's ExtrudeGeometry bevel expands the outline in
+ * ways the documentation describes loosely, and §13.4's collision-faithful rule means a
+ * 28 mm overhang is a couch visibly passing through a jamb it should catch on. So the
+ * builder constructs a candidate, measures its bounding box, and rescales to EXACTLY the
+ * requested dimensions — the measurement is the contract, and m13 A1 re-measures every
+ * prefab downstream. Cached by dimension key: the manifest re-uses a handful of sizes. */
+const _rboxCache = new Map();
+export function roundedBox(THREE, w, h, d, radius = 0.028) {
+  const key = w.toFixed(4) + '|' + h.toFixed(4) + '|' + d.toFixed(4) + '|' + radius;
+  if (_rboxCache.has(key)) return _rboxCache.get(key);
+  const r = Math.min(radius, w * 0.24, h * 0.24, d * 0.24);
+  let geo;
+  if (r <= 0.004) {
+    geo = new THREE.BoxGeometry(w, h, d);
+  } else {
+    const iw = w - 2 * r, ih = h - 2 * r;
+    const cr = Math.min(r * 0.6, iw / 2 - 1e-4, ih / 2 - 1e-4);
+    const shape = new THREE.Shape();
+    const x = iw / 2 - cr, y = ih / 2 - cr;
+    shape.moveTo(-x, -ih / 2);
+    shape.lineTo(x, -ih / 2);  shape.absarc(x, -y, cr, -Math.PI / 2, 0, false);
+    shape.lineTo(iw / 2, y);   shape.absarc(x, y, cr, 0, Math.PI / 2, false);
+    shape.lineTo(-x, ih / 2);  shape.absarc(-x, y, cr, Math.PI / 2, Math.PI, false);
+    shape.lineTo(-iw / 2, -y); shape.absarc(-x, -y, cr, Math.PI, Math.PI * 1.5, false);
+    geo = new THREE.ExtrudeGeometry(shape, {
+      depth: Math.max(0.002, d - 2 * r), bevelEnabled: true,
+      bevelThickness: r, bevelSize: r, bevelSegments: 2, curveSegments: 4,
+    });
+    geo.center();
+    // The contract: whatever the bevel did, the result IS w×h×d.
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const sx = w / Math.max(1e-6, bb.max.x - bb.min.x);
+    const sy = h / Math.max(1e-6, bb.max.y - bb.min.y);
+    const sz = d / Math.max(1e-6, bb.max.z - bb.min.z);
+    geo.scale(sx, sy, sz);
+    geo.computeVertexNormals();
+  }
+  _rboxCache.set(key, geo);
+  return geo;
+}
 
 /* ⚠ A TEXTURED PART TAKES NO TINT. `map` is MULTIPLIED by `color`, so passing def.colour
  * alongside a texture that already carries the object's hue darkens it twice — the couch
@@ -46,8 +83,7 @@ function flat(colour, opts = {}) {
 /** One box, positioned in the object's local frame (origin = collider centre). */
 function part(g, w, h, d, x, y, z, mat) {
   const THREE = window.THREE;
-  const geo = TOY ? roundedBox(THREE, w, h, d, 0.028) : new THREE.BoxGeometry(w, h, d);
-  const mesh = new THREE.Mesh(geo, mat);
+  const mesh = new THREE.Mesh(roundedBox(THREE, w, h, d, 0.028), mat);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;

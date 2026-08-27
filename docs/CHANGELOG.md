@@ -3,6 +3,60 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 14 — the toy pass — 2026-08-25
+
+**Gate:** not a §25.2 roadmap phase. "Make it look much better" forked three ways —
+toy / cel / film — and the fork was a product decision, so it shipped as three photographed
+options over one posed scene (`?style=`, previous commit) and the user chose **TOY**: lean
+into the primitives rather than apologise for them.
+**PASSED** — 857 assertions across fourteen suites (m13 grew to 35).
+
+**What the direction means, built rather than filtered:**
+
+- **Rounded geometry is the build now.** Every prefab part extrudes a rounded profile
+  instead of instancing a BoxGeometry. ⚠ Bounds are MEASURED, not trusted: r128's extrude
+  bevel expands the outline loosely, so `roundedBox` builds a candidate, measures its
+  bounding box, and rescales to exactly w×h×d — §13.4's collision-faithful rule survives by
+  construction, m13 A1 re-measures all 16 prefabs downstream, and A7 pins the direction
+  itself (a "performance fix" swapping boxes back would revert the look with every other
+  assertion green).
+- **The palette saturates at the source** — inside `matte()`, the one place every flat
+  colour passes through. Textured surfaces are untouched (their material colour is white;
+  saturating white does nothing, which is a measurement from the first mock, not a guess).
+- **The approved mock's light, baked:** sun 1.59 warm, hemi 0.22, exposure 1.16.
+- **Toy movers:** shorter legs, wider torso, an oversized head — the silhouette is the
+  style. Still normalised to exactly PLAYER.height; the capsule contract holds.
+- **THE ARMS REACH.** With a grip held, the arm pitches and leans toward the grip point and
+  the lime hand-cube sits ON it (clamped to arm's length). "Carrying looks like standing
+  next to something" had been in KNOWN_ISSUES since the first art pass; the hand markers
+  have existed since Phase 2, and this is the first time they mark the grip.
+- **Interior density:** a pendant with a glowing bulb under each room light (light from
+  nowhere reads as an artefact), a rug, pictures. The truck cab is rounded (visual inside
+  the collider AABB — §8.1 forbids the other direction).
+
+**Three bugs:**
+
+- **A picture frame shipped hanging inside the living→kitchen doorway.** m13's doorway
+  sweep only guarded the three FRONT apertures; the frame at x=2.2 sat squarely in the
+  interior opening (2.17..3.03) and passed every test. Caught by a screenshot; B1b now
+  sweeps interior doors too.
+- **`requestPointerLock` rejected over a healthy game** the moment the title screen's
+  start() could run without a user gesture — the EXACT trap already in Dev\INDEX.md from
+  ContainmentDetail, hit anyway because the wrapper was never applied here. Wrapped and
+  swallowed in Input.requestPointerLock.
+- **The arm side-lean sign was backwards** — rotating the arm's down-vector about +z moves
+  its tip toward +x, so the lean shares the sideways sign; negating it pointed the far
+  mover's arm directly away from the couch they were holding. Rendered wrong, read wrong,
+  fixed by deriving the rotation instead of guessing it.
+
+**Cel and film remain reachable** (?style=cel / ?style=film) so the decision stays
+photographable. The toy losers' one-line obituaries: cel hid the lighting work the previous
+phase paid for; film needed density the world does not yet have.
+
+**Limitation:** the reach is presentation-only inverse pointing, not IK — elbows do not
+bend, and a grip behind the mover clamps rather than turning the torso. §24.2's "procedural
+hand IK" stays Unity-side work.
+
 ## Phase 13 — the art pass, and the interior lighting — 2026-08-23
 
 **Gate:** not a §25.2 roadmap phase. §20.4 told the prototype to look diagnostic — "simple

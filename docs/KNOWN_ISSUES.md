@@ -525,10 +525,16 @@ destination especially).
 keyed by a single cache entry with the company name baked in. Fine now; a second vehicle
 means parameterising `texTruckSide`.
 
-**Nothing is animated except the walk cycle.** No doors swing, no wheels turn while the route
-runs, the trees do not move, and the mover's arms do not reach for what they are holding —
-§5.1 asks for "procedural hand IK" and the hands are still two lime cubes at the hips.
-Carrying looks like standing next to something.
+**~~The mover's arms do not reach for what they are holding.~~ CLOSED in Phase 14** — arms
+pitch and lean toward the grip and the lime hand-cubes sit on the grip points. What remains
+open from the same entry: no doors swing, no wheels turn while the route runs, the trees do
+not move. And the reach is inverse POINTING, not IK — elbows do not bend, and a grip behind
+the mover clamps rather than turning the torso (§24.2's "procedural hand IK" is Unity-side).
+
+**The toy direction commits the game.** Chosen 2026-08-25 from three photographed options
+(?style=cel and ?style=film remain live for comparison). Everything new from here should be
+authored toy-first — a realistic prop dropped into this build will now look wrong, which is
+the point of having a direction and also a constraint worth writing down.
 
 **The title card does not pause anything.** Deliberate — the suites drive `game.frame()`
 directly and a gated clock would hang all fourteen — but it means the contract clock is

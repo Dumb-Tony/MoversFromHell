@@ -29,7 +29,7 @@ import { OBJECT_DEFS } from '../src/objects/definitions.js';
 import { buildPrefab, prefabBounds, PREFABS } from '../src/render/prefabs.js';
 import { canvasTex, matte, texGrass, texCardboard } from '../src/render/textures.js';
 import { APERTURES, REFERENCE_DIMS } from '../src/render/scene.js';
-import { ZONES, ROOM as HOUSE_ROOM } from '../src/world/house.js';
+import { ZONES, ROOM as HOUSE_ROOM, INTERIOR_DOORS } from '../src/world/house.js';
 import { DEST_ZONES } from '../src/world/destination.js';
 
 const ROOM_WALL_H = HOUSE_ROOM.wallH;
@@ -106,6 +106,15 @@ lines.push('--- A. every prefab fits inside its own collider (§13.4) ---');
      Math.min(cb.size.y, cb.size.z) <= 0.850 + 0.001,
      `min(${cb.size.y.toFixed(3)}, ${cb.size.z.toFixed(3)})`);
 
+  /* THE ART DIRECTION, pinned (chosen 2026-08-25 from three photographed options). The toy
+   * look's substance is rounded geometry — a BoxGeometry has exactly 24 vertices, and an
+   * extruded rounded box has far more. If a "performance fix" quietly swaps the boxes back,
+   * the whole direction reverts and every other assertion stays green. */
+  const sample = buildPrefab(OBJECT_DEFS.box_small_01);
+  let verts = 0;
+  sample.traverse((o) => { if (o.geometry && o.geometry.attributes.position) verts = Math.max(verts, o.geometry.attributes.position.count); });
+  ok('A7 the shipping geometry is rounded, not bare boxes', verts > 24, verts + ' verts');
+
   ok('A6 every prefab in the table builds without throwing',
      Object.keys(PREFABS).every((p) => {
        try { const g = buildPrefab({ ...OBJECT_DEFS.box_small_01, prefab: p }); return !!g; }
@@ -142,6 +151,32 @@ lines.push('--- B. nothing decorative has crept into a doorway (§26.2) ---');
     });
   }
   ok('B1 all three apertures are clear of scenery', bad.length === 0, bad.slice(0, 4).join(' | '));
+
+  /* INTERIOR doors too — the blind spot that shipped a picture frame hanging in the
+   * living->kitchen opening. Every doorway in the game is a clearance the player is
+   * reasoning about, not only the three on the front elevation. */
+  const badInterior = [];
+  for (const dr of INTERIOR_DOORS) {
+    const half = dr.gap / 2 - 0.02;
+    const clear = dr.axis === 'x'
+      ? new THREE.Box3(new THREE.Vector3(dr.centre - half, 0.06, dr.at - 0.20),
+                       new THREE.Vector3(dr.centre + half, dr.height - 0.02, dr.at + 0.20))
+      : new THREE.Box3(new THREE.Vector3(dr.at - 0.20, 0.06, dr.centre - half),
+                       new THREE.Vector3(dr.at + 0.20, dr.height - 0.02, dr.centre + half));
+    world.scene.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      const b = new THREE.Box3().setFromObject(o);
+      if (b.isEmpty() || !b.intersectsBox(clear)) return;
+      const sz = b.getSize(new THREE.Vector3());
+      if (sz.x > 30 || sz.z > 30) return;
+      // Movable objects may legitimately be mid-doorway; static dressing may not.
+      let isEntity = false;
+      for (const e of registry.entities.values()) { if (e.mesh === o || e.mesh.children.includes(o)) { isEntity = true; break; } }
+      if (!isEntity) badInterior.push(dr.id + ': ' + sz.x.toFixed(2) + 'x' + sz.y.toFixed(2) + 'x' + sz.z.toFixed(2));
+    });
+  }
+  ok('B1b interior doorways are clear of scenery too', badInterior.length === 0,
+     badInterior.slice(0, 4).join(' | '));
 
   // And the numbers themselves are untouched — the art pass must not have moved a jamb.
   eq('B2 the 32" door is still 0.82 m', APERTURES.find((a) => a.id === 'interior32').gap, 0.82);

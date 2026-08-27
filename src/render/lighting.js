@@ -31,12 +31,14 @@ import { RENDER } from '../config.js';
 /** Warm tungsten, against the sun's cooler daylight. The contrast between the two is most of
  *  what makes an interior read as an interior rather than as a darker outdoors. */
 export const LIGHTING = Object.freeze({
-  sun:        { colour: 0xffe9c4, intensity: 1.18, at: { x: 16, y: 17, z: 11 } },
+  // The TOY direction's light (chosen 2026-08-25): harder, warmer, more exposed —
+  // the values of the approved mock, baked rather than multiplied at runtime.
+  sun:        { colour: 0xffdfae, intensity: 1.59, at: { x: 16, y: 17, z: 11 } },
   fill:       { colour: 0x9fc0e0, intensity: 0.26, at: { x: -12, y: 9, z: -14 } },
-  hemi:       { sky: 0xbcd8ee, ground: 0x6b6350, intensity: 0.30 },
+  hemi:       { sky: 0xbcd8ee, ground: 0x6b6350, intensity: 0.22 },
   /** A floor under the whole scene, so a shadowed corner is dim rather than black. §26.5
    *  needs states legible; nothing is legible at zero. */
-  ambient:    { colour: 0xb9c6d4, intensity: 0.11 },
+  ambient:    { colour: 0xb9c6d4, intensity: 0.10 },
   room:       {
     colour: 0xffc98e,
     intensity: 2.35,

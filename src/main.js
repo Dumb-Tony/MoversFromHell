@@ -45,7 +45,7 @@ import { buildInvoice, reconcile, reviewFor, contributionStats } from './contrac
 import { manifestSummary } from './contract/manifest.js';
 import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
-import { GripSystem, HANDS, restoreClearedObjects, moversOn } from './player/grip.js';
+import { GripSystem, HANDS, restoreClearedObjects, moversOn, localToWorld } from './player/grip.js';
 import { Hud } from './ui/hud.js';
 import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { TitleScreen } from './ui/titleScreen.js';
@@ -699,7 +699,17 @@ async function boot() {
     // Every mover is drawn, not just the one being driven.
     for (const m of movers) {
       const mp = game.state.players[m.id];
-      m.body.update(mp.position, mp.yaw, m.controller.horizontalSpeed, dt);
+      /* World-space grip points, so the body's arms reach and the hand markers sit ON the
+       * grips (§6.1). Presentation reads simulation state; never the other way (§22.2). */
+      const hands = {};
+      for (const hand of HANDS) {
+        const gr = m.grips.grips[hand];
+        if (gr) {
+          const e = registry.get(gr.entityId);
+          if (e) hands[hand] = localToWorld(e.body, gr.localPoint);
+        }
+      }
+      m.body.update(mp.position, mp.yaw, m.controller.horizontalSpeed, dt, hands);
     }
     registry.syncMeshes();
     tools.syncMeshes();

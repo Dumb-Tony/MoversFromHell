@@ -399,7 +399,16 @@ export class Input {
   }
 
   requestPointerLock() {
-    if (this.surface && this.surface.requestPointerLock) this.surface.requestPointerLock();
+    /* ⚠ requestPointerLock REJECTS (a promise, in current Chrome) rather than returning
+     * false when there is no user gesture — already in DevINDEX.md from ContainmentDetail,
+     * and it bit here anyway the moment the title screen's start() could be driven
+     * programmatically: the rejection surfaced as the crash banner over a healthy game.
+     * Wrap and swallow; pointerlockchange is the real signal either way. */
+    if (!this.surface || !this.surface.requestPointerLock) return;
+    try {
+      const p = this.surface.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (e) { /* no gesture, no lock — the click handler will try again */ }
   }
 
   // ---- polling --------------------------------------------------------------------

@@ -32,7 +32,11 @@ export function makeBlockout(clothColour) {
   const denimMat = matte(0xffffff, { map: texDenim(220, 0.26) });
   const visMat = matte(0xffffff, { map: texHiVis(66) });
 
-  const legH = H * 0.50, torsoH = H * 0.33, headR = H * 0.076;
+  /* TOY PROPORTIONS (2026-08-25): shorter legs, wider torso, a plainly oversized head.
+   * The silhouette IS the style — the old ratios were realistic, and realistic ratios on
+   * primitive geometry read as unfinished rather than as chosen. Still normalised to
+   * exactly PLAYER.height below, so the capsule contract holds. */
+  const legH = H * 0.44, torsoH = H * 0.34, headR = H * 0.105;
 
   /* THE CREW ACTUALLY LOOK LIKE A CREW NOW — hi-vis, caps, work boots, gloves.
    *
@@ -46,7 +50,7 @@ export function makeBlockout(clothColour) {
    * is not laziness: seeing where the hands are is a grip affordance the game depends on
    * from Phase 2 onward, and hi-vis gloves are also just what movers wear. */
   const mkLeg = (sx) => {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, legH, 0.17), denimMat);
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.17, legH, 0.19), denimMat);
     l.position.set(sx * 0.13, legH / 2, 0);
     // Boot: wider, darker, at the ankle. Child of the leg, so it swings with the gait.
     const boot = new THREE.Mesh(new THREE.BoxGeometry(0.175, legH * 0.17, 0.235), mat('#241f1c'));
@@ -57,11 +61,11 @@ export function makeBlockout(clothColour) {
   };
   const legL = mkLeg(-1), legR = mkLeg(1);
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, torsoH, 0.25), mat(cloth));
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, torsoH, 0.30), mat(cloth));
   torso.position.y = legH + torsoH / 2;
   // The vest, a hair proud of the shirt on all sides and stopping short at the shoulders,
   // so the mover's own colour still reads at a glance (§6.4 — you must know which is yours).
-  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.485, torsoH * 0.76, 0.285), visMat);
+  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.55, torsoH * 0.76, 0.335), visMat);
   vest.position.set(0, -torsoH * 0.08, 0);
   torso.add(vest);
   g.add(torso);
@@ -81,10 +85,10 @@ export function makeBlockout(clothColour) {
   head.add(nose);
 
   const mkArm = (sx) => {
-    const a = new THREE.Mesh(new THREE.BoxGeometry(0.11, torsoH * 0.95, 0.13), mat(skin));
-    a.position.set(sx * 0.29, legH + torsoH * 0.52, 0);
+    const a = new THREE.Mesh(new THREE.BoxGeometry(0.13, torsoH * 0.95, 0.15), mat(skin));
+    a.position.set(sx * 0.335, legH + torsoH * 0.52, 0);
     // Short sleeve over the top third.
-    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.125, torsoH * 0.34, 0.145), mat(cloth));
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.15, torsoH * 0.34, 0.17), mat(cloth));
     sleeve.position.set(0, torsoH * 0.30, 0);
     a.add(sleeve);
     g.add(a);
@@ -95,8 +99,8 @@ export function makeBlockout(clothColour) {
   // Hand markers, in the reference lime. §6.1 gives each hand its own grip, so seeing
   // where the hands are matters from Phase 2 onward — cheap to put in now.
   const mkHand = (sx) => {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), mat(hi));
-    h.position.set(sx * 0.29, legH + torsoH * 0.10, 0);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.13), mat(hi));
+    h.position.set(sx * 0.335, legH + torsoH * 0.10, 0);
     g.add(h);
     return h;
   };
@@ -128,10 +132,20 @@ export function makeBlockout(clothColour) {
   return {
     group: g,
     parts,
-    /** @param {{x,y,z}} feet  @param {number} yaw  @param {number} speed m/s */
-    update(feet, yaw, speed, dtSeconds) {
+    /**
+     * @param {{x,y,z}} feet  @param {number} yaw  @param {number} speed m/s
+     * @param {{left?:{x,y,z}|null, right?:{x,y,z}|null}} [hands]  world-space grip points.
+     *
+     * THE REACH. "Carrying looks like standing next to something" was in KNOWN_ISSUES from
+     * the day the art pass landed. With a grip point, the arm pitches to point at it and
+     * the lime hand-cube SITS ON IT — §6.1 gives each hand its own grip, and now each hand
+     * visibly has one. The cubes have marked the hands since Phase 2; this is the first
+     * time they mark the grip.
+     */
+    update(feet, yaw, speed, dtSeconds, hands) {
       g.position.set(feet.x, feet.y, feet.z);
       g.rotation.y = yaw;      // no +PI: the body already faces -Z. See the header.
+      g.updateMatrixWorld();
 
       // Cadence tracks speed, the cheap version of Chameleon's skelWalk. A real
       // procedural gait lands with the rig, not with a box mannequin.
@@ -140,12 +154,44 @@ export function makeBlockout(clothColour) {
       const swing = moving ? Math.sin(parts.phase) * Math.min(0.6, 0.18 + speed * 0.09) : 0;
       legL.rotation.x = swing;
       legR.rotation.x = -swing;
-      armL.rotation.x = -swing * 0.7;
-      armR.rotation.x = swing * 0.7;
-      if (!moving) {
-        legL.rotation.x *= 0.8; legR.rotation.x *= 0.8;
-        armL.rotation.x *= 0.8; armR.rotation.x *= 0.8;
+
+      for (const [arm, handCube, side] of [[armL, handL, 'left'], [armR, handR, 'right']]) {
+        const target = hands && hands[side];
+        if (target) {
+          /* Into body space, so the arithmetic survives the body's own yaw. The arm pivots
+           * at its top (geometry translated at build time), so the pitch that points its
+           * length at the target is atan2 of forward reach over drop — clamped to what a
+           * shoulder can do, because a grip BEHIND the mover must not fold the arm through
+           * the torso. */
+          const local = g.worldToLocal(new THREE.Vector3(target.x, target.y, target.z));
+          const shoulderY = legH + torsoH * 0.99;
+          const dy = shoulderY - local.y;
+          const reach = Math.max(0.05, -local.z);          // -Z is forward
+          arm.rotation.x = -Math.atan2(reach, Math.max(0.05, dy)) * 0.92;
+          arm.rotation.x = Math.max(-2.1, Math.min(0.35, arm.rotation.x));
+          /* And a sideways lean toward the grip, so a hold at the mover's flank does not
+           * read as an arm pointing forward while the hand floats a shoulder-width away. */
+          const sideways = local.x - (side === 'left' ? -0.335 : 0.335);
+          // Sign check, learned by rendering it wrong: rotating the arm's down-vector about
+          // +z moves its tip toward +x, so the lean SHARES the sideways sign — negating it
+          // pointed the far mover's arm directly away from the couch they were holding.
+          arm.rotation.z = Math.max(-0.9, Math.min(0.9, sideways * 1.4));
+          // The hand cube sits ON the grip point (clamped to arm's length, so a stretched
+          // grip shows the hand at full extension rather than floating off the wrist).
+          const armLen = torsoH * 0.95;
+          const stretch = Math.min(1.15, local.length() / Math.max(0.2, armLen));
+          handCube.position.set(
+            Math.max(-0.55, Math.min(0.55, local.x)),
+            Math.max(0.15, Math.min(shoulderY + 0.1, local.y)),
+            Math.max(-armLen * stretch - 0.15, Math.min(0.1, local.z)));
+        } else {
+          arm.rotation.x = (side === 'left' ? -swing : swing) * 0.7;
+          arm.rotation.z = 0;
+          if (!moving) arm.rotation.x *= 0.8;
+          handCube.position.set((side === 'left' ? -1 : 1) * 0.335, legH + torsoH * 0.10, 0);
+        }
       }
+      if (!moving) { legL.rotation.x *= 0.8; legR.rotation.x *= 0.8; }
     },
   };
 }

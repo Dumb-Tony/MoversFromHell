@@ -103,8 +103,10 @@ import {
 import {
   tiled, texGrass, texAsphalt, texConcrete, texSky, texSiding, texShingle, texPlaster,
   texBoards, texBrick, texTruckSide, texTruckWall, texTruckDeck, texSteel, matte,
+  texFabric, texPaint,
 } from './textures.js';
 import { buildLighting, detectRenderTier } from './lighting.js';
+import { roundedBox } from './prefabs.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -464,7 +466,9 @@ export function buildScene(renderTier = 'gpu') {
     const cabBoxes = [];
     for (const c of cabColliders()) {
       const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), cabMat);
+      // Rounded visual on the cab (the collider AABB is untouched; the visual sits INSIDE
+      // it, which §8.1 allows — the forbidden direction is visual outside collision).
+      const m = new THREE.Mesh(roundedBox(THREE, sx, sy, sz, 0.07), cabMat);
       m.position.set((c.minX + c.maxX) / 2, c.base + sy / 2, (c.minZ + c.maxZ) / 2);
       m.castShadow = true; m.receiveShadow = true;
       scene.add(m);
@@ -625,6 +629,60 @@ export function buildScene(renderTier = 'gpu') {
   scene.add(plat);
   addCollider(PLATFORM.x, PLATFORM.z, PLATFORM.width, PLATFORM.depth,
               PLATFORM.y - PLATFORM.thickness, PLATFORM.y, 'platform');
+
+  /* ---- interior dressing (Phase 14) -------------------------------------------------------
+   * A pendant under each room light (so the warm spot has a visible SOURCE — light from
+   * nowhere reads as a rendering artefact), a rug, and pictures on the walls. Decoration
+   * only: zero colliders, m13 C1 still asserts it. */
+  {
+    for (const rl of roomLights || []) {
+      const p = rl.position;
+      const cordH = 0.14;
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, cordH, 6), mat(0x2a2d33));
+      cord.position.set(p.x, p.y + cordH / 2 + 0.02, p.z);
+      scene.add(cord);
+      const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.17, 0.13, 12, 1, true),
+        matte(0xd8b06a, { side: THREE.DoubleSide }));
+      shade.position.set(p.x, p.y + 0.02, p.z);
+      scene.add(shade);
+      // The bulb is BASIC — unlit — so it glows regardless of what the light itself does.
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffe6b8 }));
+      bulb.position.set(p.x, p.y - 0.02, p.z);
+      scene.add(bulb);
+    }
+
+    // A rug in the living room — a plane, so it costs one draw call and no collider.
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.8),
+      matte(0xffffff, { map: tiled(texFabric(210, 0.45), 4, 3) }));
+    rug.rotation.x = -Math.PI / 2;
+    rug.position.set(2.4, 0.021, -3.6);
+    rug.receiveShadow = true;
+    scene.add(rug);
+
+    // Pictures on the partition walls, high enough to clear every carried object path.
+    const frames = [
+      /* x=1.2, NOT 2.2: the living->kitchen doorway is centred at x=2.60 with a 0.86 m gap
+       * (opening spans 2.17..3.03), and the first version hung this frame INSIDE it — m13's
+       * doorway sweep only guarded the three FRONT apertures, so a picture floating in an
+       * interior door passed every test and was caught by a screenshot. The sweep now
+       * covers interior doors as well. */
+      { x: 1.2, y: 1.75, z: -4.94, ry: 0, w: 0.5, h: 0.4, hue: 205 },
+      { x: -2.6, y: 1.75, z: -4.94, ry: 0, w: 0.38, h: 0.5, hue: 30 },
+      { x: -4.94, y: 1.7, z: -6.6, ry: Math.PI / 2, w: 0.45, h: 0.35, hue: 96 },
+    ];
+    for (const f of frames) {
+      const pic = new THREE.Group();
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h, 0.03), mat(0x6b5334));
+      const art = new THREE.Mesh(new THREE.BoxGeometry(f.w - 0.06, f.h - 0.06, 0.012),
+        matte(0xffffff, { map: tiled(texPaint(f.hue, 0.45, 0.6), 1, 1) }));
+      art.position.z = 0.012;
+      pic.add(frame); pic.add(art);
+      pic.position.set(f.x, f.y, f.z);
+      pic.rotation.y = f.ry;
+      scene.add(pic);
+    }
+  }
 
   /* ---- dressing: the house from outside, and the street it stands on ---------------------
    *

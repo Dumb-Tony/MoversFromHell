@@ -548,3 +548,26 @@ phase was judged by me, in screenshots, against my own taste — which is exactl
 evidence §25.3 warns about ("assert measured values, not vibes"). The measured claims here
 are all about faithfulness (nothing overhangs, nothing blocks a door, nothing added a
 collider); whether it LOOKS good is a claim I cannot test and have not.
+
+---
+
+## Phase 14 — the toy pass — 2026-08-25
+
+**What became more fun: telling the movers apart from the furniture.** Chunky proportions
+and an oversized head make the crew read as CHARACTERS at a glance, where before they were
+two more boxes among twenty-three. In split-screen this matters twice — you find your own
+body in your half by silhouette now, not by hunting for the hue.
+
+**The reach changed what carrying FEELS like without changing one number in the physics.**
+The grip forces are identical to Phase 4's. But an arm stretched toward the couch with the
+hand ON it says "I have hold of this" in a way a cube at the hip never did — and when the
+grip stretches near breaking, the hand visibly leaves the arm's comfortable range, which is
+§6.2's grip-stretch made legible for free.
+
+**Which moment would you tell a friend about?** Two movers carrying the couch with all four
+arms reaching to it. It is the game's whole thesis in one image, and it has been true in the
+solver since Phase 4 — this is the first time the bodies agree.
+
+**Still unanswered:** whether the toy read survives the DRIVE, where the camera sits far
+back and the rounded edges subtend a pixel. The direction was chosen on carrying scenes;
+the route needs its own look at.

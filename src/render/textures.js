@@ -101,6 +101,15 @@ export function matte(colour, opts = {}) {
     ...opts,
   });
   if (m.color && m.color.convertSRGBToLinear) m.color.convertSRGBToLinear();
+  /* THE TOY PALETTE, applied at the one place every flat colour passes through. The art
+   * direction (chosen 2026-08-25 from three photographed options) celebrates the primitive
+   * shapes with saturated colour; textured surfaces are untouched (their colour is white)
+   * and carry their look in the canvas art instead. */
+  if (m.color && !opts.map) {
+    const hsl = { h: 0, s: 0, l: 0 };
+    m.color.getHSL(hsl);
+    if (hsl.s > 0.02) m.color.setHSL(hsl.h, Math.min(1, hsl.s * 1.4 + 0.04), Math.min(1, hsl.l * 1.05));
+  }
   return m;
 }
 
