@@ -125,10 +125,11 @@ MEASURED: pulling a 90 kg couch one-handed and unbraced develops up to 467 N (fl
 needs 309 N) and the couch reaches 0.91 m/s — but nets only 8 mm of travel. It lurches
 forward, the spring pulls it back, and the mover shuffles it rather than dragging it. What
 IS true, and what m3 E3 asserts, is that a lone mover can put 90 kg into motion at all,
-which is the no-hard-denial claim the gate actually makes. Candidate levers, none yet tried
-in anger: `GRIP.maxStretch` against `GRIP.spring` (the force available at full stretch is
-spring × maxStretch = 630 N and that is the real ceiling), `CARRY.dragForceRef`, or giving
-dragged objects a lower kinetic than static friction.
+which is the no-hard-denial claim the gate actually makes. Candidate levers: `GRIP.maxStretch` against `GRIP.spring` — a braced band of 0.77 m was tried
+in Phase 11 M7 and bought nothing (0.00 m); a traction budget before the pull was tried in the
+same milestone and bought nothing usable (see the Phase 16 open items); `CARRY.dragForceRef`
+and a kinetic < static friction remain untried. The binding limit is the world-frame damping
+term, not the spring.
 
 **The ragdoll is a timed knockdown, not a simulated body.** §5.1 asks for "physical body;
 limited crawl/grab" during ragdoll. What exists is: the mover is dropped, immobilised for
@@ -234,14 +235,21 @@ are now corrected in place. **The Unity rebuild should set `Min` from the start 
 against it.** Until then, treat every friction number in `definitions.js` as a coefficient to
 be averaged, not as a force.
 
-**Solo couch dragging got harder, not easier.** With the tow speed limit in place, a lone
-mover hauling the couch one-handed for three seconds now moves it 0.00 m, where Phase 3
-measured a shuffle of 8 mm. m3 E3 still passes — a lone mover can put 90 kg into motion at
-all, which is the no-hard-denial claim — but the margin is thinner than it was. §2.1 asks to
-"allow awkward solo dragging of objects intended for two players", and the honest position is
-that solo dragging is now *technically* possible and *practically* not. The dolly is the
-intended answer (0.00 m → 2.12 m), which is a defensible design, but it means a player
-without a dolly has fewer options than §3.3's "at least two approaches" wants.
+**Solo couch drag does not travel, and a traction budget alone cannot make it (Phase 11 M7,
+measured).** One hand, unbraced, 3 s: 0.00 m, held throughout; braced: 0.00 m, held throughout;
+on the dolly 2.12 m; two movers one hand each 1.34 m. The cause is now known and pinned rather
+than guessed: the grip damps against the object's absolute velocity, so a towed couch can follow
+no faster than (spring × band − 552 N) / 569 N·s/m = 0.137 m/s unbraced, 0.248 m/s braced (m6
+B10a pins both under 0.30 m/s on purpose). The legs-anchor-the-reaction seam is in
+(`CARRY.tractionN` / `braceTractionN`, `PlayerController.applyCarry`, m3 D5) and was swept
+0–560 N: budget 0 stalls (0.00 m, held); 200 N buys 5 cm and tears the dolly haul; 330–350 N
+tears the couch hold in 0.6 s and the mover strolls 7.8 m; braced 400 N buys 0.25 m — and
+topples the fridge (1.24 m, on its side), which flips m6 B5/B6's "beyond one hand unaided". Both
+ship at 0. The next lever is hand-frame damping (grip.js `cPerHand * vp` → `cPerHand * (vp −
+vHand)` with a cached hand target), a corrected `towSpeedLimit` derivation and a friction-aware
+tow cap; it shifts every quoted lift/dolly number (m4 C4's 11 mm, m6 B4/B6) and is its own
+increment. Bracing while towing two-up measured 0.05 m vs 1.34 m unbraced — the same limit
+cycle, worth knowing before a co-op playtest.
 
 **Tools have no interaction verb yet.** §9.2 requires deploy/attach/tension/fold/retrieve
 "through the common interaction system", and the `interact` binding (E / pad X) already
@@ -568,3 +576,47 @@ file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to
 - **Style mocks (`?style=cel|film`) bypass post** — they own the frame; kept photographable.
 - **Phase 1-11 shot scripts** go through `present()` now but frame old phases; they are
   archival, not re-shot.
+
+## Phase 16 open items
+
+### M1
+
+### Phase 11 plan — M1 (2026-09-04)
+
+**Closed.** `state.phase` never left `'pickup'` until settlement (the cab bypassed `game.setPhase`); `settle()` ran twice per settlement; 11 bus emits were stamped `0` (straps.js:82/101, tools.js:169/195/223/285, interact.js:456/477/490, damage.js:123 decay path, main.js:593 flush). A tool put down with Q sank through the ground (`_putDown` did not restore `GROUP_PRESETS.object`; measured y = −1.32 m after 1 s).
+
+**Still open, recorded here.**
+- `telemetry.phaseMs` counts time in every phase, but `briefing` is always 0 because boot promotes to PICKUP synchronously (main.js) and `settlement` is always 0 because settlement pauses the clock. A briefing card that keeps BRIEFING while unpaused will start recording it without code changes.
+- SECURE (§3.4) is still never entered: the machine goes PICKUP → TRANSIT. The cab's departure carries `canDepart()`'s warning on the `CONTRACT_PHASE` validation (`{ok, warn, reason}`) — that is the "warnings acknowledged" exit, as a field rather than a phase.
+- Replay while carrying a tool still loses the tool: `resetContract` (main.js ~656-669) sets the body Dynamic but does not restore collision groups — the sibling of the Q-put-down bug, in M2's scope.
+- The m11 fixture's `lookAt()` lerps the camera: after a 40 m teleport twenty `rig.update()` calls leave the follow target 0.46 m behind (followLerp 12/s → 0.8 per update, 0.8^20 = 1.15 %), enough to miss an anchor (0.28 m aim radius). `lookAt(..., snap = true)` snaps it; sections B–D deliberately keep the lag they were tuned against (C8 stops finding the wardrobe with an exact camera).
+- `M.pendingNotices` is drained only by the rAF loop, which headless Chrome barely runs; a suite that drives many frames should drain or measure it (unchanged behaviour, now reachable from the api).
+
+### M3
+
+## Phase 11 build-side M3 — pause and the shell
+
+**An Esc-resume cannot re-take the pointer.** Chrome does not count Escape as user activation, so after resuming with Esc (or a pad Menu press) the player must click the game once to look around again; the card's foot line says so. Clicking Resume or the card's backdrop re-locks in the same gesture (`pauseScreen.onResume`, only when `input.activeDevice[0] === 'kbm'`). Not fixable from the page.
+
+**Pause is global in local co-op.** §21.4 names a SOLO pause; with two seats either player's Esc/Menu, seat 0's lost pointer lock, or a window blur pauses both. Both players are in the room, so this is recorded rather than fixed.
+
+**Pad View is two things in the van.** `COOP.joinPad` (View, raw shell button) and the `cargoGlance` binding (input.js:128, DRIVE context) share PAD.VIEW, so a View press while driving glances at the cargo AND seats/unseats the second player. Pre-existing binding; the brief prescribed View for join. Move the glance to another button in the M5 prompt pass.
+
+**A window blur under the title card pauses the world silently.** The card appears the moment the job starts, reading 'paused — window lost focus'. Deliberate: the title never shows a second card (m15 P2a).
+
+**Pressing A on the title makes the mover hop once.** A is the 'jump' binding and the same edge reaches the movers system in the frame that starts the job. Cosmetic.
+
+**A gamepad connecting or disconnecting re-edges every held button once** (input.js clears `_padSlotPrev` on both events because the slots shift). Pre-existing behaviour, now explicit; a player holding a grip while a second pad is plugged in feels one extra press.
+
+**m11 F2 is still vacuous** in `tools/m11-tests.js` — it queries `#contract/#cargo-status/#notices/#route-bar`, ids the HUD dropped in Phase 12, so every branch returns true. The repaired measurement lives in m15 F2r-F2r4 (class selectors, live rects at 1280×720). Replace m11's selector list with `['.contract', '.cargo-status', '.notices', '.route-bar']` when that file is next open.
+
+**Pad join in co-op reads the pad in slot 0 as seat 1's** (input.js `seatForPadSlot`), so the JOINER's View button leaves; seat 0's second pad also works. One pad + keyboard: the keyboard player presses F2 to leave.
+
+### M7
+
+REPLACE the Phase 6 paragraph 'Solo couch dragging got harder, not easier' (KNOWN_ISSUES.md ~237-243) with:
+
+**Solo couch drag does not travel, and a traction budget alone cannot make it (Phase 11 M7, measured).** One hand, unbraced, 3 s: 0.00 m, held throughout; braced: 0.00 m, held throughout; on the dolly 2.12 m; two movers one hand each 1.34 m. The cause is now known and pinned rather than guessed: the grip damps against the object's absolute velocity, so a towed couch can follow no faster than (spring × band − 552 N)/569 N·s/m = 0.137 m/s unbraced, 0.248 m/s braced (m6 B10a pins both under 0.30 m/s on purpose). The legs-anchor-the-reaction seam is in (`CARRY.tractionN` / `braceTractionN`, `PlayerController.applyCarry`, m3 D5) and was swept 0–560 N: budget 0 stalls (0.00 m, held); 200 N buys 5 cm and tears the dolly haul; 330–350 N tears the couch hold in 0.6 s and the mover strolls 7.8 m; braced 400 N buys 0.25 m — and topples the fridge (1.24 m, on its side), which flips m6 B5/B6's 'beyond one hand unaided'. Both ship at 0. The next lever is hand-frame damping (grip.js `cPerHand * vp` → `cPerHand * (vp − vHand)` with a cached hand target), a corrected `towSpeedLimit` derivation (lag = F_f/k + 2ζv/ω) and a friction-aware tow cap; it shifts every quoted lift/dolly number (m4 C4's 11 mm, m6 B4/B6) and is its own increment. Bracing while towing two-up measured 0.05 m vs 1.34 m unbraced — the same limit cycle, worth knowing before a co-op playtest.
+
+AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in anger:' to: 'Candidate levers: `GRIP.maxStretch` against `GRIP.spring` — a braced band of 0.77 m was tried in Phase 11 M7 and bought nothing (0.00 m); a traction budget before the pull was tried in the same milestone and bought nothing usable (see Phase 11 open items); `CARRY.dragForceRef` and a kinetic < static friction remain untried. The binding limit is the world-frame damping term, not the spring.'
+

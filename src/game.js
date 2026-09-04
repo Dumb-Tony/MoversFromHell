@@ -54,6 +54,14 @@ export function createInitialState({ contractId = 'suburban_starter', seed = nul
     ledger: { propertyDamage: [], itemDamage: [], fees: [], bonuses: [] },
     recoveryCount: 0,
 
+    /** §27.4 "capture phase duration". Sim milliseconds spent in EACH phase, keyed by the
+     *  §3.4 phase name, accumulated on the same line as elapsedWorkMs so a paused game
+     *  records nothing. Plain numbers only (§22.4; m0 E8 / m11 H2 pin serializability).
+     *  Pattern: SmallTownEmergencyServices\src\game.js `state.telemetry` counters. */
+    telemetry: {
+      phaseMs: Object.fromEntries(Object.values(PHASES).map((p) => [p, 0])),
+    },
+
     // ---- shell ----
     paused: false,
     inputContext: CONTEXTS.FOOT,
@@ -81,7 +89,9 @@ export class Game {
    *  aggregator that reads its contacts (§22.3 lists the order). */
   addSystem(name, fn) { this.systems.push({ name, fn }); return this; }
 
-  /** Observe-don't-own: subscribers get the state to READ. Nothing here clones, because
+  /** Observe-don't-own: subscribers get the state to READ — systems never write from here.
+   *  (The shell observer in main.js is the one exception: it is the shell, and it writes only
+   *  through game.togglePause / setSeats, never game.state directly.) Nothing here clones, because
    *  §22.5 wants 60 FPS with 25 bodies and a per-frame deep clone cannot pay for itself.
    *  TheBenefactors' GameStore clones on read — correct there, too slow here. */
   subscribe(fn) { this._observers.add(fn); return () => this._observers.delete(fn); }
@@ -110,6 +120,10 @@ export class Game {
     if (this.state.phase !== PHASES.BRIEFING && this.state.phase !== PHASES.SETTLEMENT) {
       this.state.elapsedWorkMs += stepMs;
     }
+    // §27.4 phase duration: every phase, including the two that bill no labour, so the
+    // record says how long the contract actually spent where. Same clock, same step.
+    const phaseMs = this.state.telemetry && this.state.telemetry.phaseMs;
+    if (phaseMs) phaseMs[this.state.phase] = (phaseMs[this.state.phase] || 0) + stepMs;
 
     if (this.input) this.input.endStep();       // edges consumed per STEP, not per frame
     this.stats.steps++;

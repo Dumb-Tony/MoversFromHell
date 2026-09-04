@@ -49,6 +49,7 @@ import { GripSystem, HANDS, restoreClearedObjects, moversOn, localToWorld } from
 import { Hud } from './ui/hud.js';
 import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { TitleScreen } from './ui/titleScreen.js';
+import { PauseScreen } from './ui/pauseScreen.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -146,7 +147,8 @@ async function boot() {
    * you make with your hands rather than a menu you failed to read. */
   const toolProblems = validateAllToolDefs();
   if (Object.keys(toolProblems).length) console.warn('[MFH] tool validation', toolProblems);
-  const tools = new ToolSystem(physics, registry, world.scene, bus);
+  // The clock getter is how a key-press transition gets a real timestamp (§27.4).
+  const tools = new ToolSystem(physics, registry, world.scene, bus, () => game.clock.simTimeMs);
   for (const s of PHASE6_TOOL_SPAWNS) tools.spawn(s.def, s);
   physics.primeQueries();
 
@@ -154,7 +156,7 @@ async function boot() {
    * §10.1: the cargo box is a real collision-enabled space, built in scene.js from
    * truck.js's records. Nothing here is an inventory: an object is loaded when it is
    * physically inside the truck and has settled there. */
-  const straps = new StrapSystem(registry, bus);
+  const straps = new StrapSystem(registry, bus, () => game.clock.simTimeMs);
   const cargo = new CargoSystem(registry, straps, tools, bus);
 
   /* ---- damage and the drive (Phase 8) ----------------------------------------------------
@@ -277,6 +279,10 @@ async function boot() {
   const interact = new InteractionSystem({
     physics, registry, tools, straps, cargo, route,
     rig: movers[0].rig, camera: movers[0].camera, bus,
+    // §3.4: the cab is a CALLER of the phase machine, not a second one. game.setPhase is
+    // the only CONTRACT_PHASE emitter, so from/to/simTimeMs are always on the event.
+    setPhase: (to, validation) => game.setPhase(to, validation),
+    now: () => game.clock.simTimeMs,
   });
 
   // ---- systems, in §22.3 order ----------------------------------------------------------
@@ -542,6 +548,32 @@ async function boot() {
   const title = new TitleScreen(ui);
   title.onStart = () => {
     if (!game.state.paused) input.requestPointerLock();
+    // A blur under the title paused the world; now that the card is gone, say so.
+    pauseScreen.refresh();
+  };
+
+  /* §21.4's solo pause, made VISIBLE (Phase 11 build-side M3). The clock has paused correctly
+   * since Phase 0; this is the card that says so and offers the way back. It observes the
+   * SIM_PAUSED/SIM_RESUMED events and yields to the title and the settlement sheet — see
+   * pauseScreen.js. Constructed after both, because `suppressed` reads them. */
+  const pauseScreen = new PauseScreen(ui, {
+    bus,
+    isPaused: () => game.state.paused,
+    suppressed: () => title.visible || invoiceScreen.visible,
+  });
+  pauseScreen.onResume = () => {
+    game.setPaused(false);
+    /* A click on the card is a real user gesture, so this lock request is honoured — the one
+     * route back to mouse-look that does not need a second click on the canvas. (Escape is
+     * NOT an activating key in Chrome, so an Esc-resume cannot re-lock; the card's foot says
+     * to click.) A pad player gets no lock they did not ask for. */
+    if (input.activeDevice[0] === 'kbm') input.requestPointerLock();
+  };
+  // §21.2 "a retry keeps settings": the same unwind the settlement sheet's replay uses.
+  pauseScreen.onRestart = () => {
+    resetContract();
+    game.setPaused(false);
+    hud.notice('new contract', 'good');
   };
 
   const stamp = document.createElement('div');
@@ -587,10 +619,40 @@ async function boot() {
     pendingNotices.push({ text: 'recovery callout — a fee at settlement', kind: 'warn' });
   });
 
+  /** §21.2's contract panel, as plain facts. ONE contract's facts, so every seat's HUD shows
+   *  the same numbers; the phase word is state.phase verbatim, which is why §3.4's machine
+   *  reaching TRANSIT and DELIVERY (Phase 11 plan, M1) is visible on screen at all. */
+  function contractFacts(summary = manifestSummary(game.state.manifest)) {
+    return {
+      phase: game.state.phase,
+      delivered: summary.delivered,
+      total: summary.total,
+      loaded: cargo.loadedEntities().length,
+      roomCorrect: summary.roomCorrect,
+      elapsedMin: game.state.elapsedWorkMs / 60000,
+      estimateMin: game.state.estimateMs / 60000,
+    };
+  }
+
   /* SETTLEMENT. §15.2: the grade "never hides" the invoice, and "negative profit still
    * completes the job", so this screen is the same screen either way. */
+  /* ONCE PER SETTLEMENT. settle() calls game.setPhase(SETTLEMENT), which emits the very
+   * CONTRACT_PHASE event the listener below turns into settle() — so without this latch a
+   * direct M.settle() ran its own body twice (invoice built twice, screen shown twice), and
+   * before the Phase 11 plan's M1 the cab's bare bus emit made the in-game path do the same. The latch is
+   * the guard, not the phase: by the time the event arrives state.phase is ALREADY
+   * 'settlement' (game.js sets it before emitting), so testing the phase would refuse the
+   * one call that matters. */
+  let settling = false;
   function settle() {
-    damage.flush();
+    if (settling) return;
+    settling = true;
+    try { settleOnce(); } finally { settling = false; }
+  }
+  function settleOnce() {
+    // Stamped with the real clock so DAMAGE_APPLIED lines closed here carry the time they
+    // were posted, not 0 (§27.4).
+    damage.flush(game.clock.simTimeMs);
     const summary = manifestSummary(game.state.manifest);
     const opts = {
       recoveries: recoveryCount(),
@@ -609,7 +671,9 @@ async function boot() {
     game.setPaused(true);
     input.releasePointerLock && input.releasePointerLock();
   }
-  bus.on(EVENTS.CONTRACT_PHASE, (e) => { if (e.to === 'settlement') settle(); });
+  // The cab's E in DELIVERY goes game.setPhase(SETTLEMENT) -> this -> settle(); the latch
+  // above makes the reverse direction (settle() -> setPhase -> this) a no-op.
+  bus.on(EVENTS.CONTRACT_PHASE, (e) => { if (e.to === PHASES.SETTLEMENT) settle(); });
 
   /**
    * §26.6: "reset removes transient straps, grips, damage records, fragments and route
@@ -715,17 +779,30 @@ async function boot() {
   }
 
   // ---- shell wiring ---------------------------------------------------------------------
-  input.onBlur = () => game.setPaused(true);           // §21.4 solo pause
+  input.onBlur = () => {                                // §21.4 solo pause
+    pauseScreen.setReason('window lost focus');
+    game.setPaused(true);
+  };
+  /* THE FIRST ESC IS SWALLOWED. While the pointer is locked, Chrome consumes the Escape that
+   * releases it and delivers no keydown, so "Esc pauses" would take two presses. The lock
+   * being lost IS the press: a locked→unlocked transition while running is the pause request
+   * it was. Not during settlement (settle() releases the lock itself, already paused) and
+   * never under the title, which owns the shell until the job starts. */
+  input.onPointerLockLost = () => {
+    if (title.visible || game.state.paused || game.state.phase === PHASES.SETTLEMENT) return;
+    game.setPaused(true);
+  };
   canvas.addEventListener('click', () => {
     // While the card is up it owns the clicks; grabbing the pointer behind it would leave
     // the player unable to press the one button on screen.
     if (title.visible) return;
     if (!input.pointerLocked && !game.state.paused) input.requestPointerLock();
   });
-  // Pause and the debug key are read on the RENDER frame, not in a system: they must keep
+  // The debug key and F2 are read on the RENDER frame, not in a system: they must keep
   // working while the simulation is paused, and a paused clock runs no systems at all.
+  // Escape is NOT read here any more: 'pause' is an ACTION (Escape + PAD.MENU, input.js),
+  // consumed once per frame by the shell observer below, so a controller can pause too.
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape') game.togglePause();
     if (e.code === 'F3') {
       e.preventDefault();
       const on = overlay.toggle();
@@ -739,8 +816,42 @@ async function boot() {
      * in may only have wanted a controller. Joining is deliberate; leaving is the same key. */
     if (e.code === COOP.joinKey) {
       e.preventDefault();
-      const n = setSeats(seatCount > 1 ? 1 : 2);
-      hud.notice(n > 1 ? 'two players — P2 on the arrow keys or a pad' : 'one player', 'good');
+      toggleSeats();
+    }
+  });
+  /** F2 and the pad's View button: join or drop the second player. One function, so the key
+   *  path and the pad path cannot drift apart (m12 E1/E2 pin what setSeats does). */
+  function toggleSeats() {
+    const n = setSeats(seatCount > 1 ? 1 : 2);
+    hud.notice(n > 1 ? 'two players — P2 on the arrow keys or a pad' : 'one player', 'good');
+  }
+
+  /* SHELL ACTIONS ARE READ ONCE PER FRAME, THROUGH THE BINDING TABLE (§4.4: "every essential
+   * action requires controller parity"; §25.3). Escape used to be a raw keycode above, which
+   * left the bound PAD.MENU 'pause' dead and a controller-only player unable to start, pause
+   * or join. Reading ACTIONS needs a per-FRAME edge buffer: the per-STEP one (`wasPressed`)
+   * is cleared by endStep, which runs zero times per frame while paused and N times while
+   * not — a render-frame reader misses it either way. `consumeShellEdge` reads the frame
+   * buffer and consumes what it sees (input.js).
+   *
+   * A game OBSERVER rather than code in loop(): observers run at the end of every
+   * game.frame(), paused or not, which is the one place the rAF loop and the suites (which
+   * never see a rAF) both pass through. ⚠ This observer is the one that WRITES — it is the
+   * shell, not a system, and it never touches game.state itself: every write goes through
+   * the same public calls a keydown handler made before (game.togglePause, setSeats). The
+   * game.js:92 "subscribers get the state to READ" contract still holds for systems. */
+  game.subscribe(() => {
+    if (title.visible) {
+      // A = confirm on a pad, which is the 'jump' binding; Enter/Space/click are the title's own.
+      if (input.consumeShellEdge('jump', 0)) title.start();
+      return;
+    }
+    for (let s = 0; s < seatCount; s++) {
+      /* A pad Menu (or seat 1's Esc) can pause while seat 0's mouse is still captured, which
+       * leaves the card up with no cursor to click it — release the lock when the toggle
+       * lands on PAUSED (the Esc path already lost it to Chrome; review minor, M3). */
+      if (input.consumeShellEdge('pause', s)) { if (game.togglePause()) input.releasePointerLock(); }
+      if (input.consumeShellButton(s, COOP.joinPad)) toggleSeats();
     }
   });
 
@@ -779,15 +890,7 @@ async function boot() {
     const summary = manifestSummary(game.state.manifest);
     const packQuality = cargo.packQuality();
     const routeStatus = route.status();
-    const contractPanel = {
-      phase: game.state.phase,
-      delivered: summary.delivered,
-      total: summary.total,
-      loaded: cargo.loadedEntities().length,
-      roomCorrect: summary.roomCorrect,
-      elapsedMin: game.state.elapsedWorkMs / 60000,
-      estimateMin: game.state.estimateMs / 60000,
-    };
+    const contractPanel = contractFacts(summary);
 
     for (let s = 0; s < seatCount; s++) {
       const me = moverOfSeat(s);
@@ -890,6 +993,11 @@ async function boot() {
     truckPose: TRUCK_POSE, cargoInterior: cargoInterior(), cargoAnchors: cargoAnchors(),
     destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
     damage, route, interact, strapLines, invoiceScreen, settle,
+    pauseScreen,
+    /* The notice queue and the contract panel's facts, because the render loop that drains
+     * one and feeds the other never runs under headless Chrome (1-3 rAF callbacks total). A
+     * suite asserts the 'arrived' notice and the phase word through these. */
+    pendingNotices, contractFacts,
     buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },

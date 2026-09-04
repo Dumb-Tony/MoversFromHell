@@ -13,7 +13,7 @@
 
 import { GameClock } from '../src/core/clock.js';
 import { EventBus, EVENTS, PHASES } from '../src/core/eventBus.js';
-import { Input, DEFAULT_BINDINGS, CONTEXTS, PAD, MOUSE } from '../src/core/input.js';
+import { Input, DEFAULT_BINDINGS, SEAT1_BINDINGS, CONTEXTS, PAD, MOUSE } from '../src/core/input.js';
 import { mulberry32, Rng, hashStr } from '../src/core/rng.js';
 import { Game, createInitialState } from '../src/game.js';
 import { SIM, RENDER, PLAYER, GRIP, DAMAGE, STRAP, TRUCK, ECONOMY } from '../src/config.js';
@@ -195,6 +195,31 @@ lines.push('--- B. action map (GDD §4.2-4.4, §21.4) ---');
   f._debugPress('KeyW');
   f.clear();
   ok('B22 clear() drops held keys (blur safety)', !f.isDown('moveForward'));
+
+  // §4.2 lists R as an essential on-foot verb and §25.3 wants it on a controller too
+  // (Phase 11 build-side M3): D-pad down, on both seats.
+  ok('B23 recover has a pad binding on seat 0',
+     (DEFAULT_BINDINGS[CONTEXTS.FOOT].recover.pad || []).includes(PAD.DPAD_DOWN));
+  ok('B23a …and on seat 1',
+     (SEAT1_BINDINGS[CONTEXTS.FOOT].recover.pad || []).includes(PAD.DPAD_DOWN));
+
+  /* SHELL EDGES. The per-STEP edge (wasPressed) is cleared by endStep, which a paused clock
+   * never calls and a running one calls before any render-frame reader gets there — so pause
+   * needs its own buffer, rotated once per poll() and read by consumeShellEdge(). A press is
+   * seen by exactly one frame read; a held key is not a second edge. */
+  const sh = new Input(window, null);
+  sh._debugPress('Escape');
+  sh.endStep();                       // a step ran: the per-step edge is gone…
+  ok('B24 the per-step edge is gone after endStep', !sh.wasPressed('pause'));
+  sh.poll();                          // …the frame begins…
+  ok('B24a …but the shell edge survives to the frame read', sh.consumeShellEdge('pause'));
+  ok('B24b …and is consumed by it', !sh.consumeShellEdge('pause'));
+  sh.poll();
+  ok('B24c …and a held key is not a new edge on the next frame', !sh.consumeShellEdge('pause'));
+  sh._debugRelease('Escape'); sh._debugPress('Escape'); sh.poll();
+  ok('B24d …while a fresh press is', sh.consumeShellEdge('pause'));
+  sh._debugPress('Escape'); sh.clear(); sh.poll();
+  ok('B24e clear() drops a pending shell edge too', !sh.consumeShellEdge('pause'));
 }
 emit('running...');
 }

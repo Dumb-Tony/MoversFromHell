@@ -27,6 +27,8 @@ import { cabPoint, cargoAnchors, cargoInterior, rampAnchorPoint } from '../src/w
 import { DEFAULT_BINDINGS, CONTEXTS } from '../src/core/input.js';
 import { reassemble } from '../src/tools/tools.js';
 import { GROUP_PRESETS } from '../src/physics/world.js';
+import { EVENTS, PHASES } from '../src/core/eventBus.js';
+import { routeSteps } from '../src/drive/route.js';
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -59,7 +61,15 @@ catch (e) {
 }
 
 const { game, physics, registry, movers, tools, straps, cargo, route, damage, interact, rig, camera, hud } = M;
+const bus = game.bus;
 const STEP = SIM.stepMs;
+const FRAME = 16.667;
+/** The boot's BRIEFING -> PICKUP transition, captured before anything else can push it out
+ *  of the 256-entry ring. G2c's sequence starts here. */
+const bootPhaseEvents = bus.log.filter((e) => e.type === EVENTS.CONTRACT_PHASE);
+/** Every CONTRACT_PHASE from the start of the real run (section E) to settlement (G). Kept
+ *  by a subscriber rather than read back from the ring, which a TV drop's IMPACTs can fill. */
+const runPhaseEvents = [];
 const I = cargoInterior();
 const ANCHORS = cargoAnchors();
 const me = () => movers[M.activeMoverIndex];
@@ -111,11 +121,18 @@ const toolByDef = (id) => { for (const t of tools.tools.values()) if (t.defId ==
  *  mouse, done directly. Mirrors grip.js's aim-from-camera / reach-from-shoulder split. */
 /**  matters inside the truck: the deck is 1.20 m up, and a mover left standing on
  *  the ground aims at the underside of the truck rather than at the cargo on it. */
-function lookAt(m, from, target) {
+function lookAt(m, from, target, snap = false) {
   placeMover(m, from.x, from.z, from.y !== undefined ? from.y : 0.2);
   const p = m.controller.position;
   rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
   rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
+  /* `snap` — A TELEPORT CAN SNAP THE CAMERA. The rig's follow target is lerped (followLerp
+   * 12/s -> 0.8 per update), so twenty updates after a 40 m jump (section T: couch spot ->
+   * truck) left it 0.46 m behind the mover, the aim ray derived from that camera missed the
+   * anchor by more than the 0.28 m tolerance, and the strap "could not be placed". Opt-in,
+   * because sections B-D were tuned against the lagging camera and C8 stops finding the
+   * wardrobe with an exact one. `_first` is the rig's own first-frame snap. */
+  if (snap) rig._first = true;
   for (let k = 0; k < 20; k++) rig.update(p, 1 / 60);
   const c = camera.position;
   rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
@@ -150,6 +167,10 @@ function pressE(m) {
 function reset() {
   straps.releaseAll();
   route.reset();
+  /* The cab now really moves the §3.4 machine (M1), so section B's cab press leaves the
+   * contract in TRANSIT. Put it back the way route.reset() puts the truck back: silently,
+   * without a CONTRACT_PHASE event, so G2c's log records only the real run from E onward. */
+  if (game.state.phase !== PHASES.PICKUP) game.state.phase = PHASES.PICKUP;
   for (const e of registry.entities.values()) {
     if (e.state.dollyId) tools.detachDolly(tools.get(e.state.dollyId));
     if (e.state.blanketId) tools.removeBlanket(tools.get(e.state.blanketId));
@@ -444,6 +465,11 @@ emit('running...');
 lines.push('--- E. the drive is reachable (GDD §3.4, §11.1) ---');
 {
   reset();
+  /* A second of REAL frames first, so the transition below is stamped later than the boot's
+   * PICKUP and G2c can order them. Frames rather than step(): only game.frame() runs the
+   * 'phase' system in main.js, and that system is the thing this section now tests. */
+  for (let k = 0; k < 60; k++) M.game.frame(FRAME);
+  bus.on(EVENTS.CONTRACT_PHASE, (e) => runPhaseEvents.push(e));
   const cab = cabPoint();
   lookAt(me(), standOffFrom(cab, 1.4), cab);
   const d = interact.describe(me());
@@ -460,17 +486,110 @@ lines.push('--- E. the drive is reachable (GDD §3.4, §11.1) ---');
 
   interact.act(me());
   eq('E4 pressing E departs (§3.4 PICKUP -> TRANSIT)', route.state, 'driving');
+  /* Before M1 this read 'pickup': the cab emitted a bare bus event nothing listened for, so
+   * the §3.4 machine never left PICKUP and DELIVERY was unreachable. */
+  eq('E4b …and the contract itself is in TRANSIT (was stuck in pickup)', game.state.phase, PHASES.TRANSIT);
   ok('E5 …and the HUD has a route to show', route.status().state === 'driving' &&
      route.status().progress >= 0);
 
-  // Drive it out.
-  for (let k = 0; k < 1750; k++) { step(1); route.step(STEP, k * STEP); }
+  /* Drive it out — through game.frame(), because the TRANSIT -> DELIVERY promotion lives in
+   * the 'phase' system and step() does not run systems. routeSteps() + 1: the route arrives
+   * when elapsedS >= 28.0 and 1680 x (1000/60) ms may land a rounding error short of it. */
+  const driveFrames = routeSteps() + 1;
+  for (let k = 0; k < driveFrames; k++) M.game.frame(FRAME);
   eq('E6 the route completes on its own', route.state, 'arrived');
+  eq('E6b arrival promotes TRANSIT -> DELIVERY (§3.4)', game.state.phase, PHASES.DELIVERY);
+  // The render loop feeds the panel from contractFacts(); headless Chrome never runs it.
+  hud.setContract(M.contractFacts());
+  ok('E6b …and the HUD contract panel names the phase (§21.2, §26.5)',
+     /delivery/i.test(hud.contract.textContent),
+     hud.contract.textContent.replace(/\s+/g, ' ').slice(0, 60));
+  // Queued for the render frame; if a stray rAF drained it, it is on the HUD instead.
+  const arrivedNotice = M.pendingNotices.some((n) => /arrived/.test(n.text)) ||
+    /arrived/.test(hud.notices.textContent);
+  ok('E6b …and the "arrived — unload through the back" notice was raised (never fired before M1)',
+     arrivedNotice, `pending=${M.pendingNotices.map((n) => n.text).join(' | ')}`);
+  lines.push(`      drive: ${driveFrames} frames; transit ${game.state.telemetry.phaseMs.transit.toFixed(0)} ms, ` +
+             `clock ${game.clock.simTimeMs.toFixed(0)} ms`);
 
   lookAt(me(), standOffFrom(cab, 1.4), cab);
   const d2 = interact.describe(me());
   ok('E7 the cab then offers to settle up', /settle/.test(d2.primary || ''), d2.primary || '');
   route.reset();
+}
+emit('running...');
+
+/* ── T. event timestamps (§27.4, §23.3) ──────────────────────────────────── */
+lines.push('--- T. event timestamps (GDD §27.4, §23.3) ---');
+{
+  /* §27.4 wants a log whose times mean something. Eleven emit sites stamped a literal 0 —
+   * every strap placed, every tool picked up, every DAMAGE_APPLIED closed by decay or by
+   * settlement. Everything here happens with the clock past the 28 s drive, so a real
+   * stamp and a forgotten one cannot be confused. */
+  const seen = [];
+  const offSeen = bus.onAny((e) => seen.push(e));
+  const tNow = game.clock.simTimeMs;
+  ok('T0 the clock is well past 1 s, so 0 is unmistakably a missing stamp', tNow >= 1000,
+     `${tNow.toFixed(0)} ms`);
+
+  // A tool transition from a key press: pick the dolly up, put it down (TOOL_STATE x2).
+  const dolly = toolByDef('dolly_flat_01');
+  const dp = posOf(dolly);
+  lookAt(me(), standOffFrom(dp, 1.2), dp);
+  interact.act(me());
+  interact.secondary(me());
+  /* Found by this fixture: _putDown never restored the collision group, so a tool put down
+   * with Q kept `toolCarried` (collides with nothing) and sank through the floor — measured
+   * y = -1.32 m here, one second after the drop, before the fix. */
+  for (let k = 0; k < 60; k++) M.game.frame(FRAME);
+  const dropped = posOf(dolly);
+  ok('T3 a tool put down with Q rests on the world instead of falling through it (y > 0 after 1 s)',
+     dropped.y > 0 && dolly.collider.collisionGroups() === GROUP_PRESETS.object,
+     `y=${dropped.y.toFixed(2)} groups=${dolly.collider.collisionGroups()} want ${GROUP_PRESETS.object}`);
+
+  // A strap placed and released through E/Q (STRAP_CHANGED x2), the section-D way.
+  const fridge = byDef('fridge_01');
+  parkAt(fridge, M.truckPose.x, I.minY + 0.90, I.maxZ - 0.6);
+  step(30);
+  const ft = posOf(fridge);
+  const anchor = [...ANCHORS].sort((a, b) =>
+    Math.hypot(b.x - ft.x, b.z - ft.z) - Math.hypot(a.x - ft.x, a.z - ft.z))[0];
+  lookAt(me(), { x: anchor.x + (anchor.side === 'L' ? 0.85 : -0.85), z: anchor.z, y: I.minY + 0.1 }, anchor, true);
+  const sawA = interact.describe(me());
+  const didA = interact.act(me());
+  lookAt(me(), { x: ft.x, z: ft.z - 1.3, y: I.minY + 0.1 }, { x: ft.x, y: ft.y, z: ft.z }, true);
+  const sawB = interact.describe(me());
+  const didB = interact.act(me());
+  const didQ = interact.secondary(me());
+  const rp = posOf(toolByDef('ramp_01')), dq = posOf(dolly);
+  lines.push(`      strap fixture: A ${sawA.target.kind} -> "${didA}", B ${sawB.target.kind} -> "${didB}", Q "${didQ}"; ` +
+             `fridge (${ft.x.toFixed(1)}, ${ft.y.toFixed(2)}, ${ft.z.toFixed(1)}) ramp (${rp.x.toFixed(1)}, ${rp.y.toFixed(2)}, ${rp.z.toFixed(1)}) ` +
+             `dolly (${dq.x.toFixed(1)}, ${dq.y.toFixed(2)}, ${dq.z.toFixed(1)})`);
+
+  // A drop, closed by the aggregation window's DECAY (DAMAGE_APPLIED via _decayWindow).
+  const tv = byDef('tv_55_01');
+  parkAt(tv, -38, 1.8, 30, Math.PI / 2);
+  for (let k = 0; k < 150; k++) M.game.frame(FRAME);
+  offSeen();
+
+  const strapEv = seen.filter((e) => e.type === EVENTS.STRAP_CHANGED);
+  const toolEv = seen.filter((e) => e.type === EVENTS.TOOL_STATE);
+  const dmgEv = seen.filter((e) => e.type === EVENTS.DAMAGE_APPLIED);
+  const stampsOf = (evs) => evs.map((e) => `${e.state || e.band}@${e.simTimeMs.toFixed(0)}`).join(', ');
+  ok('T2 every STRAP_CHANGED and TOOL_STATE raised after 1 s carries a real simTimeMs (was 0)',
+     strapEv.length >= 2 && toolEv.length >= 2 &&
+     [...strapEv, ...toolEv].every((e) => e.simTimeMs >= 1000),
+     `straps [${stampsOf(strapEv)}] tools [${stampsOf(toolEv)}]`);
+  ok('T2b every DAMAGE_APPLIED is stamped when it was posted, never before its ledger line opened, never 0',
+     dmgEv.length >= 1 && dmgEv.every((e) => e.simTimeMs > 0 && e.simTimeMs >= e.timeMs),
+     dmgEv.length ? dmgEv.map((e) => `${e.simTimeMs.toFixed(0)} >= ${e.timeMs.toFixed(0)}`).join(', ')
+                  : 'no DAMAGE_APPLIED — the drop did not register');
+
+  // A second drop left OPEN for settlement to flush (the other zero-stamp path, G2d).
+  parkAt(tv, -38, 1.8, 30, Math.PI / 2);
+  for (let k = 0; k < 42; k++) M.game.frame(FRAME);
+  ok('T2c a damage window is still open for settle() to close', damage._open.size >= 1,
+     `${damage._open.size} open`);
 }
 emit('running...');
 
@@ -485,7 +604,7 @@ lines.push('--- F. the HUD (GDD §21.1, §21.2, §26.5) ---');
                     roomCorrect: 0, elapsedMin: 1, estimateMin: 18 });
   hud.setCargo(cargo.packQuality());
   hud.setPrompt({ primary: 'pick up the flat dolly', secondary: null });
-  const centreClear = ['#contract', '#cargo-status', '#notices', '#route-bar'].every((sel) => {
+  const centreClear = ['.contract', '.cargo-status', '.notices', '.route-bar'].every((sel) => {
     const el = hud.el.querySelector(sel);
     if (!el || !el.offsetParent) return true;
     const r = el.getBoundingClientRect();
@@ -531,8 +650,45 @@ emit('running...');
 lines.push('--- G. settlement (GDD §15.2) ---');
 {
   ok('G1 the settlement screen exists and starts hidden', !!M.invoiceScreen);
+
+  /* ONCE. settle() -> game.setPhase(SETTLEMENT) -> CONTRACT_PHASE -> the listener -> settle()
+   * again: before M1 every settlement built the invoice and showed the screen twice, and the
+   * cab's bare bus emit added a third CONTRACT_PHASE with no from/to. Spy on both. */
+  let settlementEvents = 0;
+  const offCount = bus.on(EVENTS.CONTRACT_PHASE, (e) => { if (e.to === PHASES.SETTLEMENT) settlementEvents++; });
+  const ownShow = Object.prototype.hasOwnProperty.call(M.invoiceScreen, 'show');
+  const realShow = M.invoiceScreen.show;
+  let shows = 0;
+  M.invoiceScreen.show = function (...args) { shows++; return realShow.apply(this, args); };
+  const settleSeen = [];
+  const offSettleSeen = bus.onAny((e) => settleSeen.push(e));
+  const openBefore = damage._open.size;
+  const tSettle = game.clock.simTimeMs;
   M.settle();
+  offCount(); offSettleSeen();
+  if (ownShow) M.invoiceScreen.show = realShow; else delete M.invoiceScreen.show;
+
   ok('G2 settling shows the invoice', M.invoiceScreen.visible && !M.invoiceScreen.el.hidden);
+  eq('G2b one settlement raises exactly one CONTRACT_PHASE{to:settlement} (was 2)', settlementEvents, 1);
+  eq('G2b …and shows the invoice exactly once (was 2)', shows, 1);
+
+  const seq = [...bootPhaseEvents, ...runPhaseEvents];
+  const tos = seq.map((e) => e.to).join(' -> ');
+  eq('G2c the log holds the whole §3.4 run', tos, 'pickup -> transit -> delivery -> settlement');
+  const stamps = seq.map((e) => e.simTimeMs);
+  ok('G2c …with strictly increasing simTimeMs, all > 0 except the boot PICKUP',
+     stamps.length === 4 && stamps[0] === 0 &&
+     stamps.slice(1).every((t, i) => t > 0 && t > stamps[i]),
+     stamps.map((t) => t.toFixed(0)).join(' < '));
+  ok('G2c …and every entry carries from AND to — game.setPhase is the only emitter (§23.3)',
+     seq.every((e) => typeof e.from === 'string' && typeof e.to === 'string'),
+     JSON.stringify(seq.map((e) => [e.from, e.to])));
+
+  const flushed = settleSeen.filter((e) => e.type === EVENTS.DAMAGE_APPLIED);
+  ok('G2d settle() flushes the open damage window stamped with the clock, not 0',
+     openBefore >= 1 && flushed.length >= 1 &&
+     flushed.every((e) => e.simTimeMs === tSettle && e.simTimeMs >= e.timeMs),
+     `${openBefore} open -> ${flushed.length} line(s) at ${flushed.map((e) => e.simTimeMs.toFixed(0)).join(',')} (clock ${tSettle.toFixed(0)})`);
   const text = M.invoiceScreen.el.textContent;
   ok('G3 §15.2: the grade never hides the invoice — both are on screen',
      /INVOICE/.test(text) && /base contract/.test(text) && /PROFIT|LOSS/.test(text),
@@ -543,6 +699,19 @@ lines.push('--- G. settlement (GDD §15.2) ---');
   ok('G6 the screen accepts clicks — #ui does not (§21.1)',
      M.invoiceScreen.el.style.pointerEvents === 'auto');
   eq('G7 the contract is in SETTLEMENT', game.state.phase, 'settlement');
+
+  /* §27.4 "capture phase duration": the per-phase clock is the labour clock, split. */
+  const phaseMs = game.state.telemetry.phaseMs;
+  const sum = Object.values(phaseMs).reduce((a, b) => a + b, 0);
+  ok('T1 §27.4: phase durations add up to elapsedWorkMs (± one 16.667 ms step)',
+     Math.abs(sum - game.state.elapsedWorkMs) <= 16.667,
+     `${sum.toFixed(1)} vs ${game.state.elapsedWorkMs.toFixed(1)} ms`);
+  ok('T1a …TRANSIT lasted the drive (>= 27967 ms = (routeSteps() - 2) steps) and DELIVERY accrued after it',
+     phaseMs.transit >= (routeSteps() - 2) * STEP && phaseMs.transit <= (routeSteps() + 1) * STEP &&
+     phaseMs.delivery > 0,
+     JSON.stringify(Object.fromEntries(Object.entries(phaseMs).map(([k, v]) => [k, Math.round(v)]))));
+  ok('T1b …and it is plain numbers (§22.4)',
+     Object.values(phaseMs).every((v) => typeof v === 'number' && Number.isFinite(v)));
 
   /* §26.6: "reset removes transient straps, grips, damage records, fragments and route
    * state." And it must leave a PLAYABLE game, which is where a state object replaced
@@ -560,6 +729,9 @@ lines.push('--- G. settlement (GDD §15.2) ---');
      game.state.ledger.itemDamage.length === 0 && straps.count === 0 &&
      game.state.manifest.every((r) => !r.delivered));
   ok('G12 …and the game is running again', !game.state.paused);
+  ok('T1c …with the phase clock back at zero for the new run',
+     Object.values(game.state.telemetry.phaseMs).every((v) => v === 0),
+     JSON.stringify(game.state.telemetry.phaseMs));
 }
 emit('running...');
 

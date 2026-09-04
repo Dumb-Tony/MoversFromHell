@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 15,
-  label: 'phase-15',
+  phase: 16,
+  label: 'phase-16',
   date: '2026-09-04',
 });
 
@@ -199,6 +199,52 @@ export const CARRY = Object.freeze({
   pullDamping: 3.2,          // per second; how fast the pull velocity decays
   maxPullSpeed: 2.4,         // m/s — bounded, or a heavy object could fling the player
 
+  /** LEGS ANCHOR THE REACTION — the seam, and a MEASURED NEGATIVE RESULT. Phase 11 (M7).
+   *
+   *  Horizontal reaction a grounded mover's legs hold before the object starts moving THEM;
+   *  only the excess integrates into `pull` (PlayerController.applyCarry). resistedForce
+   *  still bills the full magnitude. Zero while airborne or knocked down.
+   *
+   *  THE IDEA. 100% of the reaction became pull, as if the mover stood on ice. Steady pull
+   *  = F / (PLAYER.mass x pullDamping) = F / 249.6 m/s, which reaches the couch's 1.22 m/s
+   *  tow cap at only 305 N, while the couch needs 552 N to break floor friction (Average
+   *  combine rule, registry.js). So a lone mover was hauled back at 305 N and the couch
+   *  never moved: 0.00 m in 3 s. A budget the legs absorb first should have fixed that.
+   *
+   *  THE MEASUREMENT (one mover, one hand, the m6 B3 haul, 180 steps, traction overridden
+   *  per run, every other object parked clear):
+   *
+   *    unbraced   0 N   couch 0.000 m held 180/180   dolly 2.08 m held    fridge 0.000 m
+   *    unbraced 200 N   couch 0.05 m (0.053-0.057, two runs) held 180/180   dolly 1.27 m TORN    fridge 1.27 m TOPPLED
+   *    unbraced 350 N   couch 0.001 m TORN @ 0.6 s   dolly 1.27 m TORN    mover strolls 7.8 m
+   *    braced   350 N   couch 0.040 m held 180/180   two braced 2.08 m    fridge 1.2 m TOPPLED
+   *    braced   400 N   couch 0.254 m held 180/180   two braced 2.09 m    fridge 1.24 m TOPPLED
+   *    braced   450 N   couch 0.094 m TORN @ 1.5 s   two braced 2.06 m    fridge 0.006 m torn
+   *    braced   560 N   couch 0.012 m TORN @ 0.9 s   two braced 2.07 m    fridge 0.002 m torn
+   *
+   *  WHY. The grip damps against the object's ABSOLUTE velocity (grip.js: c*vp, c = 569
+   *  N.s/m for the couch), so a towed couch drags a viscous brake on top of 552 N of
+   *  friction and can follow a hand no faster than (spring x band - 552)/c: 0.137 m/s
+   *  unbraced, 0.248 m/s braced. The mover walks at 1.22 (tow cap) or ~0.90 m/s braced (3.1 x 0.45 x 1/(1 + 327/600)). The
+   *  only thing that ever slowed the mover to what the couch could follow was the pull —
+   *  and its steady value is (552 - T)/249.6 m/s at ANY speed, so it either hauls the mover
+   *  back (T <= 250: the stall) or lets them out-walk the band (T >= 250: a tear, then a
+   *  mover strolling 7 m from a stationary couch). Every T >= 100 also tears the DOLLY haul,
+   *  whose 1.05 m/s ceiling the pull had been enforcing by accident. The traction idea is
+   *  right; it needs the damping computed in the hand's frame (the next increment) and a
+   *  tow cap that knows about friction before it can do anything but harm.
+   *
+   *  Shipped at 0: identical to Phase 6 behaviour, seam kept. tools/m3-tests.js D5 pins the
+   *  subtraction itself; tools/m6-tests.js B8-B10 pin the ceilings. */
+  tractionN: 0,
+  /** Braced (§6.2 "raises force cap and stability"), as an ABSOLUTE number, because the sweep
+   *  needs the two to differ: unbraced must stay 0 (the dolly), braced 400 N is the one value
+   *  that buys a solo braced quarter-metre — and a lone braced mover toppling the fridge
+   *  (tipping a 0.70 m deep, 110 kg fridge grabbed at 0.875 m needs 1079 x 0.35 / 0.875 = 432 N,
+   *  far under the 745 N sliding limit), which flips m6 B5/B6's "beyond one hand unaided".
+   *  That is a product decision (docs/KNOWN_ISSUES.md), so this ships at 0 too. */
+  braceTractionN: 0,
+
   /** §5.1 stumbling. Imbalance is a 0..1+ measure, not a hit-point bar: it rises while
    *  overloaded or while being yanked sideways, and falls quickly once the load is
    *  comfortable again. Crossing 1 is "stumbling"; crossing knockdownAt puts the mover on
@@ -268,6 +314,11 @@ export const COOP = Object.freeze({
   /** Seat 1 joins DELIBERATELY. A pad connecting must not split a solo player's screen —
    *  that is a regression to the validated single-player build, arriving as a surprise. */
   joinKey: 'F2',
+  /** …and the same on a controller (§25.3): the View (Back/Select) button, read by main.js's
+   *  shell observer beside F2. Standard Gamepad button index 8 — PAD.VIEW in input.js; m15
+   *  P7b asserts the two agree. A raw button rather than a bound action on purpose: joining
+   *  must never be something a remap can put on a grip. */
+  joinPad: 8,
   /** §4.1's boom, shortened for a half-width viewport: the same 4 m in half the horizontal
    *  field frames much less of the room, and the working area is what matters. */
   cameraDistance: 3.2,
@@ -348,6 +399,15 @@ export const GRIP = Object.freeze({
    *  1.15 m there was a 0.32 m dead band doing exactly that; 0.70 m keeps 16% margin.
    *  tools/m2-tests.js asserts the relationship so a later tweak cannot reintroduce it. */
   maxStretch: 0.70,
+  /** §6.2 "Brace state raises force cap and stability" — applied to the STRETCH BAND, because
+   *  for a one-hand couch the force cap never bound: the tear at spring x maxStretch = 630 N
+   *  came first, so bracing bought nothing for dragging. Braced, the band is maxStretch x
+   *  this (0.77 m, 693 N at the tear). BOUNDED ABOVE by the fridge: its effective floor
+   *  friction is 745 N and m6 B5/B6's "beyond one hand unaided" binary must survive bracing,
+   *  so 693 < 745 (52 N margin; 1.15 would leave 20 N). Also far below the braced saturation
+   *  forceCap x braceForceMult / spring = 1.5 m. tools/m6-tests.js B10 asserts both; m2 D4c
+   *  compares the BASE band and is unchanged. */
+  braceStretchMult: 1.10,
   /** Fraction of the theoretical maximum tow speed a mover is allowed to use.
    *  v_max = sqrt(k/m) * maxStretch would put the lag exactly ON the tear threshold, which
    *  tears on the first bump. 0.55 leaves the steady lag at about half the budget. */
@@ -674,7 +734,10 @@ export const MANIFEST = Object.freeze({
 
 /** §22.5 debug + performance instrumentation. Validated: Phase 0. */
 export const DEBUG = Object.freeze({
-  overlayEnabledByDefault: true,
+  /** OFF in the shipping build (Phase 11 build-side M3): it shipped ON for fifteen phases,
+   *  so every playtester saw the developer overlay before they saw the game. F3 toggles it
+   *  and the metre grid together (m15 P9). */
+  overlayEnabledByDefault: false,
   frameSampleSize: 120,      // frames averaged for the FPS readout
   eventLogLines: 8,
 });

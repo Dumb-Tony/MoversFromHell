@@ -242,6 +242,43 @@ lines.push('--- D. the object pulls back (GDD §6.2) ---');
   ok('D4 …and decays away when the force stops', Math.hypot(player.pull.x, player.pull.z) < 0.05,
      `${Math.hypot(player.pull.x, player.pull.z).toFixed(4)} m/s`);
   player.pull.x = 0; player.pull.z = 0;
+
+  /* THE TRACTION SEAM (Phase 11, M7): a grounded mover's legs anchor CARRY.tractionN of
+   * horizontal reaction before any of it becomes pull. The MECHANISM is pinned here with an
+   * instance override, because the shipped budget is 0 N — the sweep in config.js found no
+   * value that made a solo couch drag travel, and every value above 100 N tore the dolly
+   * haul. When that number comes off zero (with hand-frame damping), D1-D4 above still hold
+   * because 400 N > CARRY.tractionN, and these say what the subtraction does. */
+  const dt = STEP / 1000;
+  const savedTraction = player.tractionN;
+  player.tractionN = () => 300;
+  player.applyCarry(90, 250, 0, STEP);
+  ok('D5 a reaction inside the traction budget moves the body not at all',
+     player.pull.x === 0 && player.pull.z === 0 && player.resistedForce === 250,
+     `pull ${player.pull.x.toFixed(4)} m/s, resisted ${player.resistedForce} N`);
+  player.applyCarry(90, 400, 0, STEP);
+  const excessOnly = (100 / PLAYER.mass) * dt * Math.max(0, 1 - CARRY.pullDamping * dt);
+  ok('D5a …and above it only the EXCESS integrates, along the reaction (400 - 300 = 100 N)',
+     Math.abs(player.pull.x - excessOnly) < 1e-9 && player.resistedForce === 400,
+     `pull ${player.pull.x.toFixed(6)} vs ${excessOnly.toFixed(6)} m/s; resisted ${player.resistedForce} N still bills the full 400`);
+  player.tractionN = savedTraction;
+  player.pull.x = 0; player.pull.z = 0;
+  ok('D5b the budget is zero with the feet off the floor (airborne, knocked down)', (() => {
+    const g = player.grounded, d = player._downMs;
+    player.grounded = false; const air = player.tractionN(true);
+    player.grounded = true; player._downMs = 500; const down = player.tractionN(true);
+    player.grounded = g; player._downMs = d;
+    return air === 0 && down === 0;
+  })());
+  ok('D5c the shipped budget keeps D1/D2\'s 400 N fixture live and never exceeds the braced one',
+     CARRY.tractionN >= 0 && CARRY.tractionN < 400 && CARRY.braceTractionN >= CARRY.tractionN,
+     `tractionN ${CARRY.tractionN}, braceTractionN ${CARRY.braceTractionN}`);
+  // The M7 brief's closed form — steady pull at the couch's 552 N must sit under the 1.22 m/s
+  // tow cap — REPORTED, not asserted: at the shipped 0 N it is 2.21 vs 1.22 m/s, i.e. the stall,
+  // kept on purpose because every budget that satisfied it tore the hold (CARRY.tractionN).
+  const pullSteady = (b) => (552 - b) / (PLAYER.mass * CARRY.pullDamping);
+  lines.push(`      steady pull at 552 N: unbraced (552 - ${CARRY.tractionN}) / ${(PLAYER.mass * CARRY.pullDamping).toFixed(1)} = ` +
+             `${pullSteady(CARRY.tractionN).toFixed(2)} m/s, braced ${pullSteady(CARRY.braceTractionN).toFixed(2)} m/s, vs the 1.22 m/s tow cap`);
 }
 emit('running...');
 

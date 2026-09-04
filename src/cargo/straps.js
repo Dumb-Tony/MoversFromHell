@@ -39,10 +39,13 @@ export const STRAP_STATE = Object.freeze({
 let _nextStrapId = 0;
 
 export class StrapSystem {
-  /** @param {ObjectRegistry} registry @param {EventBus} bus */
-  constructor(registry, bus) {
+  /** @param {ObjectRegistry} registry @param {EventBus} bus
+   *  @param {()=>number} [now]  the clock's simTimeMs, so attach/release — which happen on
+   *        a key press, not inside step() — stamp the event with the real time (§27.4). */
+  constructor(registry, bus, now = null) {
     this.registry = registry;
     this.bus = bus;
+    this.now = typeof now === 'function' ? now : () => 0;
     /** strapId -> strap record. Serializable state only (§22.4). */
     this.straps = new Map();
   }
@@ -80,7 +83,7 @@ export class StrapSystem {
     this.straps.set(id, strap);
     if (this.bus) {
       this.bus.emit(EVENTS.STRAP_CHANGED,
-        { strapId: id, entityId: entity.id, anchorId: anchor.id, state: strap.state, tension: 0 }, 0);
+        { strapId: id, entityId: entity.id, anchorId: anchor.id, state: strap.state, tension: 0 }, this.now());
     }
     return strap;
   }
@@ -98,7 +101,7 @@ export class StrapSystem {
     const s = this.straps.get(strapId);
     if (!s) return false;
     this.straps.delete(strapId);
-    if (this.bus) this.bus.emit(EVENTS.STRAP_CHANGED, { strapId, state: 'released' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.STRAP_CHANGED, { strapId, state: 'released' }, this.now());
     return true;
   }
 

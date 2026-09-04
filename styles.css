@@ -536,3 +536,93 @@ body.coop #build-stamp { opacity: .45; }
   color: var(--paper);
   opacity: .42;
 }
+/* The other ways to start, under the one button. */
+#title-screen .alt {
+  margin-top: 9px;
+  font: 10px/1.4 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  opacity: .5;
+}
+
+/* ---- pause card (Phase 11 build-side M3) --------------------------------------------
+   §21.4 "solo pause", §26.5 "freezes relevant simulation safely". The card is the pause made
+   VISIBLE; the clock stopping is game.js's and predates it by fifteen phases. Same tokens as
+   the title card. z-index 30: under the title (40), over the settlement sheet — though it is
+   never shown with either (pauseScreen.js `suppressed`). */
+#pause-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  pointer-events: auto;
+  background: radial-gradient(120% 90% at 50% 40%, rgba(9,10,16,.46), rgba(9,10,16,.80));
+  backdrop-filter: blur(2px);
+}
+/* Same UA-rule trap as the title: `display: flex` beats [hidden] unless said explicitly. */
+#pause-screen[hidden] { display: none; }
+
+#pause-screen .card {
+  width: min(420px, 94vw);
+  padding: 24px 28px 18px;
+  background: rgba(23,21,34,.93);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  text-align: center;
+}
+#pause-screen .word {
+  font: 700 clamp(26px, 4.6vw, 40px)/1 Impact, Haettenschweiler, 'Arial Black', sans-serif;
+  letter-spacing: .06em;
+  color: var(--paper);
+}
+#pause-screen .tag {
+  margin-top: 8px;
+  font: 12px/1.5 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  opacity: .7;
+}
+/* Why it paused, when the player did not ask — a blur. Amber and in words (§26.5). */
+#pause-screen .why {
+  margin-top: 8px;
+  font: 700 11px/1.5 Quicksand, system-ui, sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+#pause-screen .why[hidden] { display: none; }
+
+#pause-screen .buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 18px 0 4px;
+}
+#pause-screen button {
+  padding: 11px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  color: var(--paper);
+  font: 700 13px/1 Quicksand, system-ui, sans-serif;
+  letter-spacing: .06em;
+  cursor: pointer;
+  transition: transform .12s ease, filter .12s ease;
+}
+#pause-screen button.primary { background: var(--lime); color: #101408; border-color: transparent; }
+#pause-screen button:hover  { filter: brightness(1.1); transform: translateY(-1px); }
+#pause-screen button:active { transform: translateY(1px); }
+#pause-screen button:focus-visible { outline: 2px solid var(--paper); outline-offset: 3px; }
+#pause-screen button[hidden] { display: none; }
+
+#pause-screen .foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font: 10px/1.5 Consolas, ui-monospace, monospace;
+  color: var(--paper);
+  opacity: .42;
+}
+#pause-screen .foot b { color: var(--lime); }

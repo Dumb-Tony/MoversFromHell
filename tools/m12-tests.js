@@ -154,6 +154,22 @@ lines.push('--- C. look, context and held keys are per seat ---');
   probe2.setSeatCount(2);
   probe2._debugPress('BracketRight');
   near('C9 a keyboard grip reads full pressure', probe2.analog('gripRight', 1), 1, 1e-9);
+
+  /* Losing the pointer lock (the first Esc) used to call clear() for EVERY seat — C5-C8's
+   * §6.4 bug in a different hat: seat 0's Esc dropped seat 1's couch. The lock is the
+   * mouse's, and the mouse is seat 0's, so only seat 0 is cleared (Phase 11 build-side M3). */
+  const probe3 = new Input(window, null, SEAT_BINDINGS);
+  probe3.setSeatCount(2);
+  probe3._debugPress('BracketLeft');   // seat 1 grips with the keyboard
+  probe3._debugPress('Mouse0');        // seat 0 grips with the mouse
+  probe3.pointerLocked = true;
+  let lost = 0; probe3.onPointerLockLost = () => lost++;
+  probe3._pointerLockChanged();        // what the document event calls; no lock element here
+  ok('C10 losing the pointer lock keeps seat 1\'s grip', probe3.isDown('gripLeft', 1));
+  ok('C11 …and drops seat 0\'s mouse grip', !probe3.isDown('gripLeft', 0));
+  eq('C12 …firing the lock-lost hook once, on the locked→unlocked edge', lost, 1);
+  probe3._pointerLockChanged();
+  eq('C12a …and not again while already unlocked', lost, 1);
 }
 
 /* ── D. the split-screen layout ────────────────────────────────────────────────── */

@@ -7,7 +7,9 @@ Always live, always the current `main`. Every push redeploys it — no build ste
 real cargo box, a drive that finds out how well you packed it, a second house to fill, and an
 invoice that prices every mistake you made getting there. WASD move, Shift sprint/brace,
 Space jump/mantle, **LMB/RMB to grab with each hand**, **E to use and Q to undo**, **Tab to
-swap mover**, **F2 for two-player split-screen**, R recover, F3 stats. Try carrying the couch
+swap mover**, **F2 for two-player split-screen**, R recover, F3 stats. Start with Enter, Space, a
+click or pad **A**; **F2** or pad **View** seats a second player; **R** or D-pad down recovers;
+**Esc** or pad **Menu** pauses. Try carrying the couch
 on your own — it will slow you down, unbalance you, and eventually put you on the floor. That
 is the design, not a bug. Then grab one end, Tab to the other mover, grab the other end, and
 watch it come off the ground — or press F2 and have someone else grab it.
@@ -85,8 +87,10 @@ block module loads on `file://`. `play.bat` starts `tools/serve.ps1` on ports 83
 and opens a tab. Those ports sit clear of Chameleon (8321–30), Something's Different
 (8341–50) and Airport Baggage Crew (8361–70) so all four can run at once.
 
-Click the canvas to capture the mouse. `Esc` pauses and releases it. `F3` toggles the
-developer overlay.
+Click the canvas to capture the mouse. `Esc` or pad `Menu` pauses and shows the pause card —
+Resume, Restart the contract, and Settings. Click the card to resume and re-capture the mouse;
+after an Esc/Menu resume, click once to look around again. `F3` toggles the developer overlay
+and the metre grid (off by default).
 
 ## Test it
 
@@ -140,7 +144,7 @@ GDD §25.2 defines a 13-phase roadmap.
 | 8. Drive | poor pack shifts or damages visibly | done — 38 assertions |
 | 9. Destination | manifest completes reliably | done — 41 assertions |
 | 10. Economy | ledger matches events | done — 45 assertions |
-| 11. Playtest | external groups complete and replay | next — and it is the only one that matters |
+| 11. Playtest | external groups complete and replay | build side in progress — eight milestones, ordered and specified in [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md); the playtest itself needs people |
 
 Plus four increments that are not on the roadmap. **The playable layer** gave phases 6–10 the
 input bindings and HUD each of them had deferred. **Local co-op** gave §6.4's second pair of
@@ -151,8 +155,21 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**893 assertions across fourteen suites, all passing** — plus a GPU-only suite that the
+**1045 assertions across fifteen suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
+
+**Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
+Batch 1 shipped three of its eight milestones: the §3.4 contract machine now really runs
+PICKUP → TRANSIT → DELIVERY → SETTLEMENT (the HUD names the phase, the truck's arrival raises
+the unload notice, `game.state.telemetry.phaseMs` records sim time per phase, the invoice no
+longer builds twice, and a tool put down with Q no longer falls through the floor); there is a
+pause card with Resume and Restart, reached by Esc or a pad's Menu button, and a controller alone
+can now start, pause, join and recover; and the solo couch drag was investigated to the number —
+a traction budget was swept 0–560 N and every value that moved the couch tore the hold or toppled
+the fridge, so the seam ships at zero with the real cause (world-frame grip damping) pinned by
+test. Negative results are deliverables; the table sits beside `CARRY.tractionN`.
+
+![The pause card](docs/phase16-pause.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 
@@ -291,6 +308,14 @@ mode is the same change seen from the other side.
 **0.00 m → 1.49 m**. A 1.5 m/s knock costs a bare TV 72 condition points and a wrapped one
 **zero**. A 1.20 m deck face: **0.01 m reached without a ramp, 1.22 m with one**.
 
+**Phase 11 M7 re-measured it** with the same one-hand 3 s haul: bare couch **0.00 m unbraced,
+0.00 m braced** (the hold never tears; braced the band is 0.77 m and the tow cap 1.34 m/s),
+fridge **0.00 m braced**, and **two movers one hand each 1.34 m**. The traction budget behind
+`CARRY.tractionN` was swept 0–560 N and ships at **0**: the grip damps against the object's
+absolute velocity, capping a towed couch at 0.137 m/s unbraced / 0.248 m/s braced, and every
+budget that moved the couch tore the hold or toppled the fridge. The table is at
+`CARRY.tractionN` in `src/config.js`.
+
 ![Phase 5](docs/phase5-house.png)
 
 The pickup house with its ceiling hidden. Living room at the front, kitchen and bedroom
@@ -404,9 +429,17 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
+- **An Esc-resume cannot re-lock the pointer** (a Chrome rule: Escape is not user activation) —
+  click once. Pause is global in local co-op. Pad View both joins a second player and glances at
+  the cargo while driving.
+- **`telemetry.phaseMs.briefing` and `.settlement` are always 0** in this build: boot skips
+  BRIEFING and settlement pauses the clock.
+
 - **Must be served over http.** ES modules are blocked on `file://`. Use `play.bat`.
-- **Solo dragging of the couch is weak.** It moves but does not travel — see
-  [KNOWN_ISSUES](docs/KNOWN_ISSUES.md). Lifting it with two braced hands works.
+- **Solo couch drag moves but does not travel** — 0.00 m in 3 s, braced or not, against a
+  measured world-frame damping ceiling of 0.137 / 0.248 m/s (m6 B10a pins it). The
+  traction-budget seam is in and swept (0–560 N, `CARRY.tractionN`); hand-frame grip damping
+  is the fix and is its own increment. Two movers: 1.34 m; dolly: 2.12 m.
 - **The ragdoll is a timed knockdown**, not a simulated jointed body. §5.1 asks for one;
   that is Unity-side work.
 - **Rapier forces persist and compound** until reset — the single most surprising thing

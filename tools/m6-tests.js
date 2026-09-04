@@ -20,7 +20,7 @@
  *   screwdriver dimensions  packs smaller; makes parts to lose
  */
 
-import { SIM, TOOLS, DAMAGE, PLAYER, GRIP } from '../src/config.js';
+import { SIM, TOOLS, DAMAGE, PLAYER, GRIP, CARRY } from '../src/config.js';
 import { OBJECT_DEFS } from '../src/objects/definitions.js';
 import { TOOL_DEFS, PHASE6_TOOL_SPAWNS, validateAllToolDefs } from '../src/tools/definitions.js';
 import {
@@ -29,6 +29,9 @@ import {
 } from '../src/tools/tools.js';
 import { INTERIOR_DOORS, zoneAt } from '../src/world/house.js';
 import { minProjectedWidth } from '../src/render/scene.js';
+import { EVENTS } from '../src/core/eventBus.js';
+import { restoreClearedObjects } from '../src/player/grip.js';
+import { GROUP_PRESETS } from '../src/physics/world.js';
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -123,7 +126,7 @@ const PAD = { x: -40, z: 40 };
  * Deliberately ONE mover and one hand: the dolly's claim is that it changes what a single
  * person can do, and measuring it with two would hide exactly the transition that matters.
  */
-function haulDistance(entity, useDolly, dolly) {
+function haulDistance(entity, useDolly, dolly, { brace = false } = {}) {
   releaseAll();
   const d = entity.def.dimensions;
   parkAt(entity, PAD.x, d.y / 2 + 0.02, PAD.z);
@@ -140,7 +143,7 @@ function haulDistance(entity, useDolly, dolly) {
   const muDuring = entity.collider.friction();
   let sleptSteps = 0, peakObjSpeed = 0;
   for (let k = 0; k < 180; k++) {
-    step(1, { [movers[0].id]: { move: { x: 0, y: -1 }, yaw: 0 } });
+    step(1, { [movers[0].id]: { move: { x: 0, y: -1 }, yaw: 0, brace } });
     const gr = movers[0].grips.grips.right;
     if (gr) {
       heldSteps++;
@@ -165,6 +168,74 @@ function haulDistance(entity, useDolly, dolly) {
     heldSteps, tow, peakF, peakStretch, peakPull, load,
     friction: muDuring, sleptSteps, peakObjSpeed,
     gripped: !!g,
+  };
+}
+
+/** Aim a mover's OWN rig at a point and grab — tools/m4-tests.js grabWith. m6's grabWith
+ *  above aims the shared rig, which is mover 0's; aiming it for mover 1 reports "no grip"
+ *  on every second-mover assertion (Phase 12 lesson, m4-tests.js). */
+function grabWithOwnRig(m, hand, target) {
+  const p = m.controller.position;
+  m.rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
+  m.rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
+  for (let k = 0; k < 20; k++) m.rig.update(p, 1 / 60);
+  const c = m.camera.position;
+  m.rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
+  m.rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
+  return m.grips.tryGrab(hand, m.id, game.clock.simTimeMs);
+}
+
+/**
+ * TWO MOVERS haul the same object, one hand each, side by side on its front face, for the
+ * same 180 steps as haulDistance — §26.2's "handled materially better with another
+ * grip/player", measured in the same units as the solo haul. Same return shape.
+ */
+function haulTogether(entity, { brace = false } = {}) {
+  releaseAll();
+  const d = entity.def.dimensions;
+  parkAt(entity, PAD.x, d.y / 2 + 0.02, PAD.z);
+  const zStand = PAD.z + d.z / 2 + 0.95;
+  const SIDE = 0.6;
+  placeMover(movers[0], PAD.x - SIDE, zStand);
+  placeMover(movers[1], PAD.x + SIDE, zStand);
+  step(25);
+  const gy = Math.min(d.y / 2, 1.2);
+  const g0 = grabWithOwnRig(movers[0], 'right', { x: PAD.x - SIDE, y: gy, z: PAD.z + d.z / 2 });
+  const g1 = grabWithOwnRig(movers[1], 'right', { x: PAD.x + SIDE, y: gy, z: PAD.z + d.z / 2 });
+
+  const from = posOf(entity);
+  const mFrom = { ...movers[0].controller.position };
+  let heldSteps = 0, tow = 0, peakF = 0, peakStretch = 0, peakPull = 0, load = 0;
+  const muDuring = entity.collider.friction();
+  let sleptSteps = 0, peakObjSpeed = 0;
+  const it = { move: { x: 0, y: -1 }, yaw: 0, brace };
+  for (let k = 0; k < 180; k++) {
+    step(1, { [movers[0].id]: it, [movers[1].id]: it });
+    const live = [movers[0].grips.grips.right, movers[1].grips.grips.right];
+    if (live.every(Boolean)) {
+      heldSteps++;
+      for (const gr of live) {
+        peakF = Math.max(peakF, gr.lastApplied || 0);
+        peakStretch = Math.max(peakStretch, gr.lastStretch || 0);
+      }
+    }
+    tow = movers[0].controller.towSpeedLimit;
+    peakPull = Math.max(peakPull, Math.hypot(movers[0].controller.pull.x, movers[0].controller.pull.z));
+    load = Math.max(load, movers[0].controller.carriedMass);
+    if (entity.body.isSleeping()) sleptSteps++;
+    const ev = entity.body.linvel();
+    peakObjSpeed = Math.max(peakObjSpeed, Math.hypot(ev.x, ev.z));
+  }
+  const to = posOf(entity);
+  const mTo = { ...movers[0].controller.position };
+
+  releaseAll();
+  return {
+    moved: Math.hypot(to.x - from.x, to.z - from.z),
+    moverMoved: Math.hypot(mTo.x - mFrom.x, mTo.z - mFrom.z),
+    heldSteps, tow, peakF, peakStretch, peakPull, load,
+    friction: muDuring, sleptSteps, peakObjSpeed,
+    gripped: !!g0 && !!g1,
   };
 }
 
@@ -262,13 +333,155 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
     ok('B7 …and can once it is on the dolly — §9.1\'s "new physical solution"',
        fWheel.moved > 1.0, `${fWheel.moved.toFixed(2)} m`);
 
+    /* ── Phase 11 (M7): SOLO DRAG, MEASURED HONESTLY ───────────────────────────────
+     *
+     * The milestone brief was "two config numbers and one subtraction make the solo couch
+     * drag travel": a traction budget the legs anchor before the reaction becomes pull
+     * (CARRY.tractionN / braceTractionN) and a wider braced stretch band
+     * (GRIP.braceStretchMult). The mechanism is in. The sweep that tuned it is the result,
+     * and it is a negative one — the table and the derivation are at CARRY.tractionN.
+     *
+     * In one line: the grip damps against the object's ABSOLUTE velocity, so a towed couch
+     * can follow a hand no faster than (spring x band - friction)/c = 0.137 m/s unbraced,
+     * 0.248 m/s braced, and the only thing that ever slowed the mover to that was the pull
+     * the traction budget removes. Budget 0 stalls (0.00 m, held); any budget tears (a mover
+     * strolling 7 m from a stationary couch) and tears the DOLLY haul too. Braced 400 N buys
+     * a quarter-metre and lets a lone braced mover topple the fridge — a product decision,
+     * recorded in KNOWN_ISSUES, and not taken here.
+     *
+     * So what is pinned is the MECHANISM (m3 D5) and the CEILINGS, so the next increment —
+     * hand-frame damping, which lifts the ceiling — is measured against a record rather
+     * than a hope; plus the gain that does exist: two movers tow what one cannot. */
+    {
+      const GROUND_MU = 0.9;                          // physics/world.js ground collider
+      const effectiveFriction = (e) => ((e.def.physics.friction + GROUND_MU) / 2) * e.def.mass * 9.81;
+      const frictionN = effectiveFriction(couch);      // 552 N under the Average rule
+      const cCouch = 2 * GRIP.dampingRatio * Math.sqrt(GRIP.spring * couch.def.mass);   // 569 N.s/m
+      const ceiling = (band) => Math.max(0, (GRIP.spring * band - frictionN) / cCouch);
+      const vBare = ceiling(GRIP.maxStretch);
+      const vBraced = ceiling(GRIP.maxStretch * GRIP.braceStretchMult);
+      lines.push(`      world-frame damping ceiling: ${vBare.toFixed(3)} m/s unbraced, ${vBraced.toFixed(3)} m/s braced ` +
+                 `(x 3 s = ${(vBare * 3).toFixed(2)} / ${(vBraced * 3).toFixed(2)} m); traction ${CARRY.tractionN} / ${CARRY.braceTractionN} N`);
+
+      // Everything the hauls above left on the pad goes well clear, or the next haul
+      // measures a collision — the fridge on the dolly was measured 1.49 m with the couch
+      // standing in the mover's path and 1.72 m with it parked away.
+      const FAR = { x: PAD.x - 25, z: PAD.z - 25 };
+      parkAt(fridge, FAR.x, fridge.def.dimensions.y / 2 + 0.02, FAR.z);
+
+      const solo = haulDistance(couch, false, dolly);
+      const soloBraced = haulDistance(couch, false, dolly, { brace: true });
+      show('couch bare, solo, unbraced', solo);
+      show('couch bare, solo, braced', soloBraced);
+      ok('B8 solo unbraced: the hold never tears, so the mover never strolls — and travel stays under the ceiling',
+         solo.gripped && solo.heldSteps === 180 && solo.moverMoved < 2.0 && solo.moved <= vBare * 3 + 0.05,
+         `moved ${solo.moved.toFixed(3)} m (ceiling ${(vBare * 3).toFixed(2)} m), held ${solo.heldSteps}/180, mover ${solo.moverMoved.toFixed(2)} m`);
+      ok('B9 solo braced: bracing never makes the hold LESS stable than unbraced (§6.2 "raises stability")',
+         soloBraced.gripped && soloBraced.heldSteps === 180 && soloBraced.moverMoved < 2.0 &&
+         soloBraced.moved <= vBraced * 3 + 0.05 && soloBraced.moved >= solo.moved - 0.01,
+         `moved ${soloBraced.moved.toFixed(3)} m (ceiling ${(vBraced * 3).toFixed(2)} m), held ${soloBraced.heldSteps}/180, mover ${soloBraced.moverMoved.toFixed(2)} m`);
+      ok('B10 the braced band stays under the fridge\'s sliding limit and under the braced saturation point',
+         GRIP.maxStretch * GRIP.braceStretchMult * GRIP.spring < effectiveFriction(fridge) &&
+         GRIP.maxStretch * GRIP.braceStretchMult < (GRIP.forceCap * GRIP.braceForceMult) / GRIP.spring &&
+         GRIP.maxStretch < GRIP.forceCap / GRIP.spring,
+         `${(GRIP.maxStretch * GRIP.braceStretchMult * GRIP.spring).toFixed(0)} N vs fridge ${effectiveFriction(fridge).toFixed(0)} N; ` +
+         `${(GRIP.maxStretch * GRIP.braceStretchMult).toFixed(3)} m vs ${((GRIP.forceCap * GRIP.braceForceMult) / GRIP.spring).toFixed(3)} m`);
+      /* A deliberate limitation pin, in the m6 E8 tradition: the ceiling, not the traction
+       * budget, is what bounds solo drag today. Rewrite this on purpose when the damping
+       * becomes hand-relative; do not let a retune claim the win by accident. */
+      ok('B10a …and that ceiling, under 0.30 m/s either way, bounds any solo tow (the stall at 0 N itself is the pull limit cycle, m3 D5 line)',
+         vBare < 0.30 && vBraced < 0.30 && vBraced > vBare,
+         `${vBare.toFixed(3)} / ${vBraced.toFixed(3)} m/s`);
+
+      // B5/B6's binary must survive bracing. The couch goes clear first.
+      parkAt(couch, FAR.x - 4, couch.def.dimensions.y / 2 + 0.02, FAR.z);
+      const fBraced = haulDistance(fridge, false, dolly, { brace: true });
+      show('fridge bare, solo, braced', fBraced);
+      ok('B10b a braced lone mover still cannot shift — or topple — the fridge unaided',
+         fBraced.moved < 0.35, `${fBraced.moved.toFixed(3)} m, held ${fBraced.heldSteps}/180, F ${fBraced.peakF.toFixed(0)} N`);
+      parkAt(fridge, FAR.x, fridge.def.dimensions.y / 2 + 0.02, FAR.z);
+
+      // §26.2 "handled materially better with another grip/player" — the gain that exists.
+      const pair = haulTogether(couch);
+      const pairBraced = haulTogether(couch, { brace: true });
+      show('couch bare, two movers, unbraced', pair);
+      show('couch bare, two movers, braced', pairBraced);
+      ok('B10c two movers tow what one cannot: >= 1.0 m further than solo and >= 1.5x, holding throughout (§26.2)',
+         pair.gripped && pair.heldSteps === 180 && pair.moved >= solo.moved + 1.0 && pair.moved >= solo.moved * 1.5,
+         `two ${pair.moved.toFixed(2)} m vs solo ${solo.moved.toFixed(2)} m, held ${pair.heldSteps}/180`);
+
+      /* m2 E2 and E4, run BRACED: the wider band is a longer leash, and §25.2's "no wall
+       * ghosting" has to hold on it. On a purpose-built wall on empty ground (m2's aperture
+       * wall sits inside the Phase 5 house now and the manifest box cannot be grabbed there),
+       * a braced mover first walks INTO the wall holding a box, then retreats away from it
+       * towing the box. The box may never end up past the wall, and towed it must stay
+       * within reach plus the braced band — or the grip must have said why it let go. */
+      const WALL = { minX: PAD.x - 6, maxX: PAD.x + 6, minZ: PAD.z - 32.0, maxZ: PAD.z - 31.7, top: 2.5 };
+      const wallFace = WALL.maxZ;                                   // the side the mover is on
+      physics.addStaticFromColliders([{ ...WALL, base: 0, tag: 'm6BraceWall' }]);
+      physics.primeQueries();
+      const box = byDef('box_small_01');
+      const braceWall = (drive, steps) => {
+        releaseAll();
+        parkAt(box, PAD.x, 0.3, wallFace + 1.0);
+        placeMover(movers[0], PAD.x, wallFace + 2.3);
+        placeMover(movers[1], PAD.x + 20, PAD.z + 20);
+        step(20);
+        const gb = grabWith(movers[0], 'right', posOf(box));
+        if (!gb) return null;
+        step(30);
+        let releasedBecause = null, minZ = Infinity;
+        const offEnd = game.bus.on(EVENTS.GRIP_ENDED, (ev) => { releasedBecause = ev.reason; });
+        for (let i = 0; i < steps; i++) {
+          step(1, { [movers[0].id]: { ...drive, brace: true } });
+          minZ = Math.min(minZ, posOf(box).z);
+        }
+        offEnd();
+        const bp = posOf(box);
+        const mp = movers[0].controller.position;
+        const r = {
+          z: bp.z, minZ, moverZ: mp.z, gap: Math.hypot(bp.x - mp.x, bp.z - mp.z),
+          held: !!movers[0].grips.grips.right, reason: releasedBecause,
+        };
+        releaseAll();
+        return r;
+      };
+      // Into the wall (yaw 0 faces -z; the wall is at lower z).
+      const shove = braceWall({ move: { x: 0, y: 1 }, yaw: 0, run: true }, 300);
+      ok('B10d braced into a wall: the held box never passes through it (m2 E2, braced)',
+         !!shove && shove.minZ > wallFace - 0.25 && shove.moverZ > wallFace - 0.1,
+         shove ? `box deepest z ${shove.minZ.toFixed(2)}, mover z ${shove.moverZ.toFixed(2)} (wall face ${wallFace.toFixed(2)})` : 'no grip');
+      // Away from it, towing.
+      const retreat = braceWall({ move: { x: 0, y: -1 }, yaw: 0 }, 240);
+      ok('B10e braced retreat: a towed box stays within the braced leash and never crosses the wall (m2 E4, braced)',
+         !!retreat && retreat.minZ > wallFace - 0.25 && retreat.gap < GRIP.reach + GRIP.maxStretch * GRIP.braceStretchMult &&
+         (retreat.held || retreat.reason === 'pulled out of reach' || retreat.reason === 'slipped'),
+         retreat ? `box z ${retreat.z.toFixed(2)}, gap ${retreat.gap.toFixed(2)} m, ${retreat.held ? 'still held' : 'released: ' + retreat.reason}` : 'no grip');
+
+      /* NO LEFTOVER STATE. A released object keeps the objectHeld collision group — no player
+       * collision — until restoreClearedObjects sees every mover clear of it. main.js does
+       * that every step; this harness's step() does not. Left as it was, the same box_small_01
+       * that D8c parks on its test deck no longer blocked the mover on the deck: they crossed
+       * it and walked off the far side, and D11 read y 0.02 at x -53.27 where it had read
+       * 1.22. MEASURED, one run. So the game's own clearance pass runs here, once, with every
+       * mover parked clear of everything the B hauls touched. */
+      parkAt(couch, FAR.x - 4, couch.def.dimensions.y / 2 + 0.02, FAR.z);   // also clears the pad for F4
+      placeMover(movers[0], PAD.x + 20, PAD.z + 24);
+      placeMover(movers[1], PAD.x + 20, PAD.z + 20);
+      restoreClearedObjects(registry, movers.map((m) => m.controller));
+      const stillCleared = [couch, fridge, box].filter((e) => e.state.awaitingPlayerClearance ||
+                                                              e.collider.collisionGroups() !== GROUP_PRESETS.object);
+      ok('B10f …and every object the B hauls held has its player collision back (no leftover state for D8c/D11)',
+         stillCleared.length === 0, stillCleared.map((e) => e.defId).join(', '));
+    }
+
     // Detach must put back exactly what was there, not a remembered constant.
     tools.attachDolly(dolly, couch);
     const onWheels = couch.collider.friction();
     tools.detachDolly(dolly);
-    near('B8 detaching restores the object\'s own friction exactly',
+    near('B12 detaching restores the object\'s own friction exactly',
          couch.collider.friction(), couch.def.physics.friction, 1e-6);
-    near('B9 …and it really was changed while attached', onWheels, TOOLS.dolly.rollingResistance, 1e-6);
+    near('B13 …and it really was changed while attached', onWheels, TOOLS.dolly.rollingResistance, 1e-6);
 
     /* §9.1's FAILURE MODE: "runs on slopes; load slips".
      *
@@ -297,10 +510,10 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
     const held = slopeTest(false);
     const ran = slopeTest(true);
     lines.push(`      on the 16° ramp: bare ${held.speed.toFixed(2)} m/s, on the dolly ${ran.speed.toFixed(2)} m/s`);
-    ok('B10 §9.1\'s failure mode: a dollied load runs on a slope where a bare one does not',
+    ok('B14 §9.1\'s failure mode: a dollied load runs on a slope where a bare one does not',
        ran.speed > held.speed * 2 && ran.speed > 0.8,
        `bare ${held.speed.toFixed(2)} m/s vs dollied ${ran.speed.toFixed(2)} m/s`);
-    ok('B11 …and the same tool is what caused it — no separate hazard rule',
+    ok('B15 …and the same tool is what caused it — no separate hazard rule',
        TOOLS.dolly.rollingResistance < couch.def.physics.friction);
   }
 }

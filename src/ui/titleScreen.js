@@ -13,6 +13,11 @@
  * when it puts UI on the far side of the state boundary.
  *
  * §13.4 caps the ambition: "a compact job-start screen", not a menu system. One button.
+ *
+ * STARTS ON Enter, Space, a click, or pad A (§25.3 — the pad path is read by main.js's shell
+ * observer while `visible`, because the Gamepad API has no events). Escape used to start it
+ * too, and that was a bug rather than a convenience: main.js's shell also read Escape, both
+ * listeners sit on window, and one keystroke started the job AND paused it.
  */
 
 import { BUILD } from '../config.js';
@@ -34,6 +39,7 @@ export class TitleScreen {
         </p>
 
         <button class="play" type="button">START THE JOB</button>
+        <div class="alt">Enter · Space · <span class="key">A</span> on a controller</div>
 
         <div class="cols">
           <div>
@@ -46,7 +52,7 @@ export class TitleScreen {
             </ul>
           </div>
           <div>
-            <h4>Two players <span class="key">F2</span></h4>
+            <h4>Two players <span class="key">F2</span> or <span class="key">View</span> on a pad</h4>
             <ul>
               <li><b>P1</b> keyboard and mouse, as above</li>
               <li><b>P2</b> a controller, or the arrow keys</li>
@@ -58,7 +64,7 @@ export class TitleScreen {
 
         <div class="foot">
           <span>${esc(BUILD.label)} · ${esc(BUILD.date)}</span>
-          <span><b>Esc</b> pause · <b>F3</b> stats and the metre grid</span>
+          <span><b>Esc</b> / <b>Menu</b> pause · <b>F3</b> stats and the metre grid</span>
         </div>
       </div>`;
     root.appendChild(this.el);
@@ -70,7 +76,7 @@ export class TitleScreen {
     this.el.querySelector('.play').addEventListener('click', start);
     this._key = (e) => {
       if (this._done) return;
-      if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') {
+      if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
         start();
       }

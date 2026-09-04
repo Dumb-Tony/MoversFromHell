@@ -38,7 +38,7 @@
  */
 
 import { TOOLS, GRIP } from '../config.js';
-import { EVENTS } from '../core/eventBus.js';
+import { EVENTS, PHASES } from '../core/eventBus.js';
 import { disassemble, reassemble, currentDimensions } from '../tools/tools.js';
 import { cargoAnchors, cabPoint, insideCargo, rampAnchorPoint, CARGO_BOX } from '../world/truck.js';
 import { STRAP_STATE } from '../cargo/straps.js';
@@ -64,8 +64,14 @@ export class InteractionSystem {
    * @param {ThirdPersonCamera} rig
    * @param {THREE.PerspectiveCamera} camera
    * @param {EventBus} bus
+   * @param {(to:string, validation?:object)=>string} [setPhase]  game.setPhase — the ONE
+   *        §3.4 phase-machine entry, so CONTRACT_PHASE is emitted by it and nothing else.
+   *        Defaults to a no-op for suites that build this system without a Game.
+   * @param {()=>number} [now]  the clock's simTimeMs, for stamping events raised from a
+   *        key press rather than from a step. Defaults to 0 when absent.
    */
-  constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus }) {
+  constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus,
+                setPhase = null, now = null }) {
     this.physics = physics;
     this.registry = registry;
     this.tools = tools;
@@ -75,6 +81,8 @@ export class InteractionSystem {
     this.rig = rig;
     this.camera = camera;
     this.bus = bus;
+    this.setPhase = typeof setPhase === 'function' ? setPhase : () => null;
+    this.now = typeof now === 'function' ? now : () => 0;
 
     /** Per-mover interaction state, keyed by the mover's stable id (§22.4). */
     this.state = new Map();
@@ -367,7 +375,7 @@ export class InteractionSystem {
   /* ── acting ───────────────────────────────────────────────────────────────────── */
 
   /** E. Returns a short message for the HUD, or null when nothing happened. */
-  act(mover, simTimeMs = 0) {
+  act(mover, simTimeMs = this.now()) {
     const s = this._for(mover.id);
     const t = this.probe(mover);
     const carried = s.carriedTool ? this.tools.get(s.carriedTool) : null;
@@ -453,7 +461,7 @@ export class InteractionSystem {
       const part = (e.state.removedParts || [])[0];
       if (part) {
         reassemble(this.registry, e, part);
-        if (this.bus) this.bus.emit(EVENTS.PART_CHANGED, { entityId: e.id, part, action: 'restored' }, 0);
+        if (this.bus) this.bus.emit(EVENTS.PART_CHANGED, { entityId: e.id, part, action: 'restored' }, this.now());
         return this._say(`${part} back on`);
       }
     }
@@ -474,7 +482,7 @@ export class InteractionSystem {
     tool.collider.setCollisionGroups(GROUP_PRESETS.toolCarried);
     tool.state.carriedBy = mover.id;
     s.carriedTool = tool.id;
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'carried', by: mover.id }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'carried', by: mover.id }, this.now());
     return this._say(`carrying the ${tool.def.label.toLowerCase()}`);
   }
 
@@ -485,9 +493,14 @@ export class InteractionSystem {
     tool.body.setTranslation(
       { x: p.x, y: Math.max(p.y, tool.def.dimensions.y / 2) + 0.05, z: p.z }, true);
     tool.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    /* BACK INTO THE WORLD'S COLLISION GROUP. `toolCarried` collides with nothing, including
+     * the ground; the three _applyTool drop paths restored `object` and this one did not, so
+     * a tool put down with Q fell through the floor for ever (m11 T3 measured y = -1.32 m
+     * one second after the drop, and tools have no §18.3 recovery). */
+    tool.collider.setCollisionGroups(GROUP_PRESETS.object);
     tool.state.carriedBy = null;
     s.carriedTool = null;
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'dropped' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'dropped' }, this.now());
   }
 
   _applyTool(mover, tool, t, simTimeMs) {
@@ -557,15 +570,21 @@ export class InteractionSystem {
 
   /* ── the truck ────────────────────────────────────────────────────────────────── */
 
+  /* THE PHASE CHANGES GO THROUGH game.setPhase, not a bare bus emit. Until the Phase 11
+   * plan's M1 this emitted CONTRACT_PHASE{to:'transit'} onto the bus, which nothing listened for,
+   * so state.phase stayed 'pickup' for the whole drive, DELIVERY was unreachable and the
+   * arrival notice never fired. §3.4 has one phase machine; this is a caller of it. The
+   * return strings are the HUD's and are pinned (m11 B6/E4, m12 G2/G3). */
   _useCab() {
     if (this.route.state === 'parked') {
       const advice = this.route.canDepart();
       this.route.depart();
-      if (this.bus) this.bus.emit(EVENTS.CONTRACT_PHASE, { to: 'transit' }, 0);
+      // §3.4's Secure exit is "warnings acknowledged": the advice rides on the validation.
+      this.setPhase(PHASES.TRANSIT, { ok: true, warn: !!advice.warn, reason: advice.reason || '' });
       return this._say(advice.warn ? `driving — ${advice.reason}` : 'driving');
     }
     if (this.route.state === 'arrived') {
-      if (this.bus) this.bus.emit(EVENTS.CONTRACT_PHASE, { to: 'settlement' }, 0);
+      this.setPhase(PHASES.SETTLEMENT);
       return this._say('settling up');
     }
     return null;

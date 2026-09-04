@@ -59,7 +59,9 @@ export const DEFAULT_BINDINGS = Object.freeze({
     interact:    { keys: ['KeyE'],       pad: [PAD.X] },   // use, tool, vehicle seat
     context:     { keys: ['KeyQ'],       pad: [PAD.RB] },  // context rotate / toss / cancel
     drop:        {                       pad: [PAD.B] },   // controller-only per §4.3
-    recover:     { keys: ['KeyR'] },                       // recover eligible held item/player
+    // §4.2 lists R as an essential on-foot verb, and §25.3 wants every implemented action on
+    // a standard controller: D-pad down, which §4.3 leaves free ("tool quick select" is unbuilt).
+    recover:     { keys: ['KeyR'],       pad: [PAD.DPAD_DOWN] },  // recover eligible held item/player
     // §25.2 Phase 4: swap which mover you are driving. The other one keeps holding what it
     // had, which is how a SOLO player experiences a two-person carry. Seat 1 has no such
     // action — in co-op there is nobody to swap to, and pressing it would steal a mover out
@@ -111,7 +113,7 @@ export const SEAT1_BINDINGS = Object.freeze({
     interact:    { keys: ['Quote'],        pad: [PAD.X] },
     context:     { keys: ['Semicolon'],    pad: [PAD.RB] },
     drop:        {                         pad: [PAD.B] },
-    recover:     { keys: ['Backslash'] },
+    recover:     { keys: ['Backslash'],    pad: [PAD.DPAD_DOWN] },
     pause:       {                         pad: [PAD.MENU] },
   },
   [CONTEXTS.DRIVE]: {
@@ -203,8 +205,25 @@ export class Input {
     this._pressed = new Set();    // went down since the last endStep()
     this._released = new Set();
     this._padValue = new Map();   // 'P<seat>B<i>' -> 0..1, refreshed by poll()
-    this._padPrev = new Map();
+    /* Press edges are detected by PHYSICAL SLOT ('S<slot>B<i>'), never by seat token. A join
+     * moves the first pad from seat 0 to seat 1 (seatForPadSlot), so a seat-keyed "was it
+     * down last poll" lookup finds nothing for the new seat and a button STILL HELD across
+     * the flip fires a second press — for the View button that press is "leave", the next
+     * frame's is "join", and a human 3-9 frame hold ended solo half the time (measured
+     * seatCount [2,1,2,1,2,1,2,1] over 8 held frames; m15 P7h pins the fix). */
+    this._padSlotPrev = new Map();   // 'S<slot>B<i>' -> 0..1 at the previous poll
     this._latched = new Set();    // 'seat:action', held open by gripMode 'toggle'
+    /* SHELL EDGES — a second edge buffer, per RENDER FRAME rather than per step.
+     *
+     * `_pressed` is cleared by endStep(), which the fixed-step loop calls N times per frame
+     * while running and ZERO times while paused. A shell action (pause) has to be readable
+     * on the render frame in both states, so a per-step buffer is wrong for it both ways:
+     * gone before the frame reader gets there while running, never cleared while paused.
+     * Presses land in `_shellPending`; poll() (once per frame, before the steps) rotates it
+     * into `_shellPressed`, which consumeShellEdge() reads and the next rotation drops. A
+     * press is therefore seen by exactly one frame read, and a stale one cannot linger. */
+    this._shellPending = new Set();
+    this._shellPressed = new Set();
 
     this.setBindings(bindings);
 
@@ -229,6 +248,10 @@ export class Input {
     this._bound = [];
     /** Fired when the window loses focus. main.js pauses on it (§21.4 solo pause). */
     this.onBlur = null;
+    /** Fired on a locked→unlocked pointer transition ONLY. Chrome consumes the Escape that
+     *  releases the lock and delivers no keydown for it, so the lost lock is the only trace of
+     *  the press; main.js reads it as the pause request it was. */
+    this.onPointerLockLost = null;
     /** Fired with (context, seat) so the HUD can redraw prompts (§4.4). */
     this.onContextChanged = null;
   }
@@ -371,18 +394,14 @@ export class Input {
       this.looks[0].x += e.movementX * s;
       this.looks[0].y += e.movementY * s * (this.settings.invertLookY ? -1 : 1);
     });
-    add(document, 'pointerlockchange', () => {
-      this.pointerLocked = !!this.surface && document.pointerLockElement === this.surface;
-      // Losing the lock (Esc) must not leave grips held down.
-      if (!this.pointerLocked) this.clear();
-    });
+    add(document, 'pointerlockchange', () => this._pointerLockChanged());
 
     // A held key whose keyup lands outside the window would stick forever.
     add(this.target, 'blur', () => { this.clear(); if (this.onBlur) this.onBlur(); });
 
     // Pads are resolved by SLOT in poll(), so a connect/disconnect only has to invalidate.
-    add(this.target, 'gamepadconnected',    () => { this._padValue.clear(); });
-    add(this.target, 'gamepaddisconnected', () => { this._padValue.clear(); });
+    add(this.target, 'gamepadconnected',    () => { this._padValue.clear(); this._padSlotPrev.clear(); });
+    add(this.target, 'gamepaddisconnected', () => { this._padValue.clear(); this._padSlotPrev.clear(); });
 
     return this;
   }
@@ -390,6 +409,20 @@ export class Input {
   detach() {
     for (const [t, type, fn, opts] of this._bound) t.removeEventListener(type, fn, opts);
     this._bound.length = 0;
+  }
+
+  /** The pointerlockchange handler, callable directly so a suite can lose the lock without a
+   *  real one (tools\m12-tests.js C10-C12, m15 P8). */
+  _pointerLockChanged() {
+    const was = this.pointerLocked;
+    this.pointerLocked = !!this.surface && document.pointerLockElement === this.surface;
+    if (this.pointerLocked) return;
+    /* Losing the lock (Esc) must not leave grips held down — SEAT 0's grips. The lock is the
+     * mouse's, and the mouse is seat 0's (SEAT1_BINDINGS); clearing every seat here dropped
+     * seat 1's keyboard grip the moment seat 0 pressed Esc, the same §6.4 failure setContext
+     * had, and it read as "the game dropped my couch". */
+    this._clearSeat(0);
+    if (was && this.onPointerLockLost) this.onPointerLockLost();
   }
 
   /** Hand the cursor back. The §15.2 settlement screen has a button on it, and a locked
@@ -419,6 +452,10 @@ export class Input {
   poll() {
     this._pollPads();
     this._pollLookKeys();
+    // Rotate the shell-edge buffer AFTER the pads are read, so a pad press made in this poll
+    // and a key pressed since the last frame both reach this frame's shell read, once.
+    this._shellPressed = this._shellPending;
+    this._shellPending = new Set();
   }
 
   _pollPads() {
@@ -426,7 +463,8 @@ export class Input {
     const connected = [];
     for (const p of navigator.getGamepads()) if (p && p.connected) connected.push(p);
 
-    this._padPrev = new Map(this._padValue);
+    const prev = this._padSlotPrev;          // last poll, by physical slot — see the constructor
+    const cur = new Map();
     this._padValue.clear();
     for (let s = 0; s < this.seatCount; s++) {
       this.padIndex[s] = -1;
@@ -458,10 +496,12 @@ export class Input {
         const b = buttons[i];
         const v = typeof b === 'number' ? b : (b.value !== undefined ? b.value : (b.pressed ? 1 : 0));
         const token = padToken(seat, i);
+        const slotKey = slotToken(slot, i);
         this._padValue.set(token, v);
+        cur.set(slotKey, v);
         const gate = isTrigger(i) ? thr : 0.5;
         const nowDown = v >= gate;
-        const wasDown = (this._padPrev.get(token) || 0) >= gate;
+        const wasDown = (prev.get(slotKey) || 0) >= gate;
         if (nowDown && !wasDown) { this._press(token); anyActivity = true; }
         else if (!nowDown && wasDown) this._release(token);
         else if (nowDown) { this._down.add(token); anyActivity = true; }
@@ -474,6 +514,7 @@ export class Input {
       this.looks[seat].x += st.rx * ls * 10;
       this.looks[seat].y += st.ry * ls * 10 * (this.settings.invertLookY ? -1 : 1);
     }
+    this._padSlotPrev = cur;
   }
 
   /** Seat 1 turns with keys when it has no pad. Accumulated per POLL, exactly as the right
@@ -499,6 +540,7 @@ export class Input {
   _press(token) {
     this._down.add(token);
     this._pressed.add(token);
+    this._shellPending.add(token);
     // Toggle-grip (§21.4) is resolved here, at the source, so no gameplay system needs to
     // know which mode is active — isDown('gripLeft') means the same thing either way.
     if (this.settings.gripMode === 'toggle') {
@@ -551,6 +593,26 @@ export class Input {
   wasReleased(action, seat = 0) {
     for (const t of this._tokens(action, seat)) if (this._released.has(t)) return true;
     return false;
+  }
+
+  /**
+   * Read-and-clear a SHELL edge — an action the shell (pause, start) must see on the render
+   * frame whether or not any simulation step ran. Returns true once per press; a held key or
+   * button is not a second edge. See the constructor for why this is not wasPressed().
+   */
+  consumeShellEdge(action, seat = 0) {
+    let hit = false;
+    for (const t of this._tokens(action, seat)) {
+      if (this._shellPressed.delete(t)) hit = true;
+    }
+    return hit;
+  }
+
+  /** The same for one raw pad button on a seat's pad, for shell buttons that are deliberately
+   *  NOT gameplay actions (COOP.joinPad — joining must not be something a binding can remap
+   *  onto a grip). */
+  consumeShellButton(seat, buttonIndex) {
+    return this._shellPressed.delete(padToken(seat, buttonIndex));
   }
 
   /** 0..1 pressure. Analog on a trigger, binary elsewhere. Feeds grip force (§6.2, §6.5). */
@@ -607,6 +669,7 @@ export class Input {
   /** Drop all held state (focus loss, contract reset). */
   clear() {
     this._down.clear(); this._pressed.clear(); this._released.clear();
+    this._shellPending.clear(); this._shellPressed.clear();
     this._latched.clear();
     for (const l of this.looks) { l.x = 0; l.y = 0; }
   }
@@ -635,6 +698,8 @@ export class Input {
 
 const PAD_TOKEN = /^P\d+B\d+$/;
 function padToken(seat, i) { return 'P' + seat + 'B' + i; }
+/** Edge-detection key for a PHYSICAL pad: slot among connected pads, not seat. */
+function slotToken(slot, i) { return 'S' + slot + 'B' + i; }
 
 function deadzone(v, dz) {
   const a = Math.abs(v);

@@ -294,8 +294,10 @@ export class GripSystem {
    * The result is §6.3's carry tiers expressed through the legs rather than through a
    * number: a 9 kg box gives 3.85 m/s and never binds, a couch 1.22, a fridge 1.10.
    */
-  towSpeedLimit() {
+  towSpeedLimit(brace = false) {
     let limit = Infinity;
+    // The band the lag is measured against is wider braced (GRIP.braceStretchMult).
+    const band = GRIP.maxStretch * (brace ? GRIP.braceStretchMult : 1);
     for (const hand of HANDS) {
       const grip = this.grips[hand];
       if (!grip) continue;
@@ -303,7 +305,7 @@ export class GripSystem {
       if (!entity) continue;
       const hands = Math.max(1, entity.state.grips.length);
       const omega = Math.sqrt((GRIP.spring * hands) / entity.def.mass);
-      const v = omega * GRIP.maxStretch * GRIP.towSpeedSafety;
+      const v = omega * band * GRIP.towSpeedSafety;
       if (v < limit) limit = v;
     }
     return limit;
@@ -347,6 +349,12 @@ export class GripSystem {
      * true for free. Dragging is sustainable; lifting the same object is not. */
     let supportedN = 0;
 
+    /* §6.2 "Brace state raises force cap and stability" — for a one-hand couch the cap
+     * (grip.js below) never bound, because the tear at spring x maxStretch = 630 N came
+     * first. Braced, the band widens (GRIP.braceStretchMult), and it is the band, not the
+     * cap, that decides whether a heavy drag survives a bump. */
+    const tearAt = GRIP.maxStretch * (brace ? GRIP.braceStretchMult : 1);
+
     for (const hand of HANDS) {
       const grip = this.grips[hand];
       if (!grip) continue;
@@ -368,7 +376,7 @@ export class GripSystem {
 
       // ANTI-GHOSTING. The object is behind a wall the player has walked past; it cannot
       // follow. Let go rather than letting the spring wind up and fire it through.
-      if (stretch > GRIP.maxStretch) {
+      if (stretch > tearAt) {
         this.release(hand, 'pulled out of reach', simTimeMs);
         continue;
       }
@@ -464,8 +472,10 @@ export class GripSystem {
     }
 
     if (this.player) {
-      this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs);
-      this.player.towSpeedLimit = this.towSpeedLimit();
+      // brace goes through: the legs anchor more of the reaction (CARRY.braceTractionN)
+      // and the wider band raises what the mover may tow at (GRIP.braceStretchMult).
+      this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs, brace);
+      this.player.towSpeedLimit = this.towSpeedLimit(brace);
     }
 
     // §7.3's caps apply to whatever the grips just did.

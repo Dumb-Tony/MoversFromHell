@@ -80,10 +80,10 @@ export class DamageSystem {
 
       // Speed LOST this step. A held object being carried loses nothing; a dropped one does.
       const lost = prev - speed;
-      if (lost <= 0) { this._decayWindow(e, stepMs); continue; }
+      if (lost <= 0) { this._decayWindow(e, stepMs, simTimeMs); continue; }
 
       const loss = conditionLossFor(e, lost);
-      if (loss <= 0) { this._decayWindow(e, stepMs); continue; }
+      if (loss <= 0) { this._decayWindow(e, stepMs, simTimeMs); continue; }
 
       /* §8.3's AGGREGATION. "Repeated minor contact needs cooldown and aggregation so a
        * scrape is priced coherently." A couch dragged along a wall produces a contact every
@@ -116,11 +116,14 @@ export class DamageSystem {
     }
   }
 
-  _decayWindow(entity, stepMs) {
+  /** The window closes at the CURRENT step's time, so the DAMAGE_APPLIED stamp is the
+   *  moment the line was posted and never earlier than the ledger line's own timeMs, which
+   *  is when the window opened (§27.4 wants timestamps that mean something). */
+  _decayWindow(entity, stepMs, simTimeMs = 0) {
     const w = this._open.get(entity.id);
     if (!w) return;
     w.ageMs += stepMs;
-    if (w.ageMs >= DAMAGE.aggregationWindowMs) this._closeWindow(entity, w, 0);
+    if (w.ageMs >= DAMAGE.aggregationWindowMs) this._closeWindow(entity, w, simTimeMs);
   }
 
   /** Post one aggregated §8.4 ledger line. */

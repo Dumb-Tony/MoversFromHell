@@ -602,3 +602,18 @@ glints, denim that doesn't, and hands that still land on the grip points.
 
 **Not tested yet:** Firefox and Safari (post chain self-disables on a GL error; Safari
 textures are crisper for lack of `ctx.filter`).
+
+## Phase 16 — Phase 11 build side, batch 1: the phase machine, the pause card, and the traction sweep — 2026-09-04
+
+### M1
+
+M1 (2026-09-04): no human session. Developer observation from the m11 drive: the contract panel now changes word at the cab (pickup → transit) and again at arrival (→ delivery) with the "arrived — unload through the back" notice; before this the panel said pickup through the entire 28 s drive and the notice had never once fired in any build. Phase durations for the scripted run: pickup ≈ 1.0 s (warm-up), transit 28000 ms, delivery ≈ 6 s, settlement 0 (paused). A tester who pressed Q to put a tool down would previously have watched it vanish through the ground — fixed; worth asking §27.3 Q1 ("what did the game unexpectedly prevent?") about tools specifically once M6's questionnaire exists.
+
+### M3
+
+**Pause (M3, 2026-09-04).** Esc or the pad's Menu button opens the card; the first Esc while the mouse is captured is eaten by Chrome releasing the pointer, so the lost lock is treated as the press — one Esc, one card, every time (m15 P8b). Alt-tab pauses with 'paused — window lost focus' on the card, which was the playtest-ending defect: before this a blurred player came back to a frozen world, a released pointer and a canvas click that did nothing, with 'PAUSED' visible only in the F3 overlay. Resume by clicking the card or its backdrop (re-captures the mouse), by Esc/Menu (then click once to look), or restart the contract from the card without going through settlement — the same unwind as 'Run it again' (m15 P4b-P4h: pickup, 23 rows, 0 straps, clock at 0). A controller alone can now start (A), pause (Menu), join/leave (View) and recover (D-pad down); before M3 a controller-only player could do none of the four. The review's live probe found the View join flickering with a real pad (a 3-9 frame human press ended solo half the time); pad edges are now keyed by physical slot and an 8-frame hold on a stubbed pad joins once and stays (m15 P7h). The F3 overlay is off unless asked for. Screenshot: `tools\shot.ps1 -Setup tools\_shot-pause.js -Out docs\phase16-pause.png` (1600×900).
+
+### M7
+
+**Phase 11 M7 — dragging: unchanged in the hand, and now we know exactly why.** Nothing a solo player feels has changed: a couch grabbed one-handed still shuffles (0.00 m in 3 s, held), braced or not. What changed is that the shuffle is now a measured ceiling rather than a mystery — the hand's damping brakes the couch against the WORLD, so it cannot follow a hand faster than 0.14 m/s (0.25 m/s braced), and the pull that hauls the mover back is the only thing keeping the hold from tearing. A traction budget was swept 0–560 N with a probe: every value that let the couch move either tore the hold and sent the mover strolling seven metres, or (braced 400 N: a quarter-metre) let a lone braced mover topple the fridge, which would erase the one 'you need a second person or the dolly' fact the contract has. Shipped at 0, on purpose, with the numbers next to the code. For the external playtest: the dolly (2.12 m) and a second pair of hands (1.34 m one hand each) remain the honest answers, and bracing while towing two-up is worse (0.05 m) — expect testers to discover that and call it a bug; it is the same limit cycle and is in KNOWN_ISSUES. Hand-frame damping is the fix, next increment.
+

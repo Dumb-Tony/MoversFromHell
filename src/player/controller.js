@@ -111,16 +111,25 @@ export class PlayerController {
   /** Called by the grip system each step, before step(): how much is being held and what
    *  reaction force the hands are putting into the body. §6.2's factor list ends with the
    *  object pulling back, and this is that. */
-  applyCarry(carriedMass, reactionX, reactionZ, stepMs) {
+  applyCarry(carriedMass, reactionX, reactionZ, stepMs, brace = false) {
     this.carriedMass = carriedMass;
     // Horizontal force the mover is resisting — what dragging costs, as opposed to what
-    // carrying costs. See CARRY.dragForceRef.
+    // carrying costs. See CARRY.dragForceRef. The FULL magnitude, before traction: the
+    // effort is billed whether or not the legs held it.
     this.resistedForce = Math.hypot(reactionX, reactionZ);
     const dt = stepMs / 1000;
+    /* LEGS FIRST (Phase 11). A grounded mover anchors CARRY.tractionN of horizontal reaction
+     * (more when braced) before any of it moves them; only the EXCESS becomes pull, along
+     * the reaction's own direction. Derivation at CARRY.tractionN — with the whole reaction
+     * integrating, the pull alone stalled a lone mover at 305 N against a couch that needs
+     * 552 N, and the couch measured 0.00 m in 3 s. */
+    const traction = this.tractionN(brace);
+    const excess = Math.max(0, this.resistedForce - traction);
+    const share = this.resistedForce > 0 ? excess / this.resistedForce : 0;
     // The reaction is a force on a body of PLAYER.mass; integrate it as a velocity and let
     // it decay, so a heavy object tugs the mover along rather than teleporting them.
-    this.pull.x += (reactionX / PLAYER.mass) * dt;
-    this.pull.z += (reactionZ / PLAYER.mass) * dt;
+    this.pull.x += ((reactionX * share) / PLAYER.mass) * dt;
+    this.pull.z += ((reactionZ * share) / PLAYER.mass) * dt;
     const decay = Math.max(0, 1 - CARRY.pullDamping * dt);
     this.pull.x *= decay;
     this.pull.z *= decay;
@@ -129,6 +138,14 @@ export class PlayerController {
       const k = CARRY.maxPullSpeed / sp;
       this.pull.x *= k; this.pull.z *= k;
     }
+  }
+
+  /** Horizontal force this mover's legs anchor before what they hold starts moving them
+   *  (CARRY.tractionN, or CARRY.braceTractionN braced). Zero with the feet off the floor:
+   *  airborne, or knocked down. Both ship at 0 — see the measurement at CARRY.tractionN. */
+  tractionN(brace = false) {
+    if (!this.grounded || this._downMs > 0) return 0;
+    return brace ? CARRY.braceTractionN : CARRY.tractionN;
   }
 
   /** §6.2: carried mass slows the mover. Floored so a heavy object is punishing but never

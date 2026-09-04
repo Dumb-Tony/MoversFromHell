@@ -42,12 +42,16 @@ export class ToolSystem {
    * @param {ObjectRegistry} registry  the objects tools act ON
    * @param {THREE.Scene} scene
    * @param {EventBus} bus
+   * @param {()=>number} [now]  the clock's simTimeMs. Tool transitions happen on a key
+   *        press, outside any step, so this is how their TOOL_STATE events get a real
+   *        timestamp instead of 0 (§27.4). Defaults to 0 when absent.
    */
-  constructor(physics, registry, scene, bus) {
+  constructor(physics, registry, scene, bus, now = null) {
     this.physics = physics;
     this.registry = registry;
     this.scene = scene;
     this.bus = bus;
+    this.now = typeof now === 'function' ? now : () => 0;
     /** toolId -> tool record. Stable string ids (§9.2, §22.4). */
     this.tools = new Map();
     this.byCollider = new Map();
@@ -166,7 +170,7 @@ export class ToolSystem {
     entity.state.dollyId = tool.id;
     tool.state.attachedTo = entity.id;
     entity.body.wakeUp();
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, entityId: entity.id, state: 'attached' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, entityId: entity.id, state: 'attached' }, this.now());
     return true;
   }
 
@@ -192,7 +196,7 @@ export class ToolSystem {
       e.body.wakeUp();
     }
     tool.state.attachedTo = null;
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'detached' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'detached' }, this.now());
     return true;
   }
 
@@ -220,7 +224,7 @@ export class ToolSystem {
     if (entity.state.blanketId) return false;
     entity.state.blanketId = tool.id;
     tool.state.attachedTo = entity.id;
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, entityId: entity.id, state: 'covered' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, entityId: entity.id, state: 'covered' }, this.now());
     return true;
   }
 
@@ -282,7 +286,7 @@ export class ToolSystem {
       angleDeg: geo.angleDeg, lip: geo.lip, aligned: geo.aligned, run: geo.run,
     };
     this.physics.primeQueries();
-    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'deployed' }, 0);
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'deployed' }, this.now());
     return tool.state.geometry;
   }
 
