@@ -47,19 +47,30 @@ export class DamageSystem {
    * @param {PhysicsWorld} physics
    * @param {ObjectRegistry} registry
    * @param {EventBus} bus
-   * @param {object} state  game.state, for the §8.4 ledgers
+   * @param {object|function} state  game.state, for the §8.4 ledgers — or a GETTER for it
    */
   constructor(physics, registry, bus, state) {
     this.physics = physics;
     this.registry = registry;
     this.bus = bus;
-    this.state = state;
+    this._state = state;
     /** Open aggregation windows, keyed by entity. §8.3's "cooldown and aggregation". */
     this._open = new Map();
     /** Previous-step speeds, so an impact can be measured as a CHANGE in velocity. */
     this._lastSpeed = new Map();
     this.impactCount = 0;
   }
+
+  /* THE STATE IS RESOLVED ON EVERY ACCESS, NOT CAPTURED. game.reset() replaces game.state
+   * wholesale (game.js), which is right for a plain-data state with no back-references
+   * (§22.4) — and it meant that from the first "Run it again" on, every ledger line this
+   * system posted went into the PREVIOUS run's orphaned state while the invoice read the
+   * new, empty one. Item damage was never billed on a replay, and reconcile() agreed
+   * because both read the same empty ledger (Phase 11 plan, M2). main.js hands in
+   * `() => game.state`; a suite that constructs the system directly may still pass an
+   * object, and the setter keeps `damage.state = ...` working for either. */
+  get state() { return typeof this._state === 'function' ? this._state() : this._state; }
+  set state(v) { this._state = v; }
 
   /**
    * One fixed step, AFTER physics — an impact is only visible once the solver has resolved

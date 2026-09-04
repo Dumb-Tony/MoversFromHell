@@ -30,6 +30,8 @@
  * so a hundred existing call sites keep working and cannot drift.
  */
 
+import { SETTINGS, SIM } from '../config.js';
+
 export const CONTEXTS = Object.freeze({ FOOT: 'foot', DRIVE: 'drive' });
 
 /* Standard Gamepad button indices, named so the binding table below reads as §4.3 does. */
@@ -79,7 +81,9 @@ export const DEFAULT_BINDINGS = Object.freeze({
     horn:         { mouse: [MOUSE.LEFT],  pad: [PAD.X] },
     lookBack:     { mouse: [MOUSE.RIGHT], pad: [PAD.RB] },
     exitVehicle:  { keys: ['KeyE'],       pad: [PAD.B] },  // only when stopped
-    cargoGlance:  { keys: ['KeyQ'],       pad: [PAD.VIEW] },
+    // LB, not View: View is COOP.joinPad (a raw shell button, main.js), and a glance that
+    // also seated the second player was Phase 16's known issue. m12 K4 keeps them apart.
+    cargoGlance:  { keys: ['KeyQ'],       pad: [PAD.LB] },
     resetVehicle: { keys: ['KeyR'] },                      // only when stuck
     pause:        { keys: ['Escape'],     pad: [PAD.MENU] },
     debug:        { keys: ['F3'] },
@@ -125,7 +129,7 @@ export const SEAT1_BINDINGS = Object.freeze({
     horn:         { keys: ['Quote'],      pad: [PAD.X] },
     lookBack:     { keys: ['Semicolon'],  pad: [PAD.RB] },
     exitVehicle:  { keys: ['Backslash'],  pad: [PAD.B] },
-    cargoGlance:  { keys: ['Slash'],      pad: [PAD.VIEW] },
+    cargoGlance:  { keys: ['Slash'],      pad: [PAD.LB] },   // see seat 0: View is the join button
     resetVehicle: { keys: ['KeyP'] },
     pause:        {                       pad: [PAD.MENU] },
   },
@@ -138,16 +142,60 @@ export const SEAT_BINDINGS = Object.freeze([DEFAULT_BINDINGS, SEAT1_BINDINGS]);
  *  checker cannot disagree about what counts as a look key. */
 export const LOOK_ACTIONS = Object.freeze(['lookLeft', 'lookRight', 'lookUp', 'lookDown']);
 
-/** GDD §21.4 accessibility + feel settings that belong to the input layer, not gameplay. */
+/** GDD §21.4 accessibility + feel settings that belong to the input layer, not gameplay.
+ *
+ *  THIS IS THE SCHEMA. `sanitiseSettings()` accepts exactly these keys and no others, so the
+ *  settings panel (src/ui/settings.js), the save file (src/core/save.js) and the constructor
+ *  all validate through one function (Dev\INDEX.md → "an imported save is trusted less than a
+ *  stored one — route it through the SAME validator"). Numbers are clamped to SETTINGS.ranges
+ *  in config.js; these never enter game.state (m0 E8 / m12 J3). */
 export const DEFAULT_SETTINGS = Object.freeze({
   mouseSensitivity: 1.0,
   padLookSensitivity: 2.6,   // scales right-stick look
-  keyLookRate: 15,           // look units per POLL for a held look key; see poll()
+  /** Look units per 60 Hz FRAME for a held look key (seat 1's UHJK). poll(frameMs) scales
+   *  both this and the stick by frameMs / SETTINGS.lookRefFrameMs, so the rate is a rate and
+   *  not "per whatever the monitor refreshes at" — it used to be per poll, which made a
+   *  120 Hz display turn twice as fast (Phase 11 build-side M4). */
+  keyLookRate: 15,
+  invertLookX: false,
   invertLookY: false,
   stickDeadzone: 0.18,
   triggerThreshold: 0.35,    // above this an analog trigger counts as "down"
   gripMode: 'hold',          // 'hold' (§4.4 default) | 'toggle' (accessibility option)
 });
+
+export const GRIP_MODES = Object.freeze(['hold', 'toggle']);
+
+/**
+ * Validate a settings patch against DEFAULT_SETTINGS. Never throws: unknown keys and
+ * unusable values are REPORTED in `rejected`, numbers are clamped to SETTINGS.ranges,
+ * booleans coerced, gripMode checked against GRIP_MODES. Pure, so the save loader and the
+ * live Input share it.
+ * @returns {{accepted: object, rejected: string[]}}
+ */
+export function sanitiseSettings(patch) {
+  const accepted = {};
+  const rejected = [];
+  if (!patch || typeof patch !== 'object') return { accepted, rejected: ['(not an object)'] };
+  for (const [k, v] of Object.entries(patch)) {
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, k)) { rejected.push(k); continue; }
+    const d = DEFAULT_SETTINGS[k];
+    if (typeof d === 'boolean') { accepted[k] = !!v; continue; }
+    if (typeof d === 'number') {
+      const n = Number(v);
+      if (!Number.isFinite(n)) { rejected.push(k); continue; }
+      const r = SETTINGS.ranges[k];
+      accepted[k] = r ? Math.min(r.max, Math.max(r.min, n)) : n;
+      continue;
+    }
+    if (k === 'gripMode') {
+      if (GRIP_MODES.includes(v)) accepted[k] = v; else rejected.push(k);
+      continue;
+    }
+    rejected.push(k);
+  }
+  return { accepted, rejected };
+}
 
 /**
  * Report every reason two seats would fight over one control. Empty means they cannot.
@@ -199,7 +247,8 @@ export class Input {
   constructor(target = window, surface = null, bindings = SEAT_BINDINGS, settings = {}) {
     this.target = target;
     this.surface = surface;
-    this.settings = { ...DEFAULT_SETTINGS, ...settings };
+    // Same validator as applySettings(): a constructor arg is a patch that arrived early.
+    this.settings = { ...DEFAULT_SETTINGS, ...sanitiseSettings(settings).accepted };
 
     this._down = new Set();       // codes/mouse tokens physically held
     this._pressed = new Set();    // went down since the last endStep()
@@ -303,6 +352,32 @@ export class Input {
     };
   }
 
+  // ---- settings (§21.4) -------------------------------------------------------------
+
+  /**
+   * Change feel/accessibility settings at runtime. Every consumer reads `this.settings.X`
+   * live (mousemove, _pollPads, _pollLookKeys, _press, isDown, analog), so a patch takes
+   * effect on the next event or poll with no other call. Unknown keys are reported, not
+   * thrown. A gripMode change drops every latch: a latch set is toggle-mode state, and
+   * carrying one into hold mode would leave a grip "held" by nothing.
+   * @returns {{applied: object, rejected: string[]}}
+   */
+  applySettings(patch) {
+    const { accepted, rejected } = sanitiseSettings(patch);
+    const modeChanged = Object.prototype.hasOwnProperty.call(accepted, 'gripMode') &&
+                        accepted.gripMode !== this.settings.gripMode;
+    Object.assign(this.settings, accepted);
+    if (modeChanged) this._latched.clear();
+    return { applied: accepted, rejected };
+  }
+
+  /** A copy — the live object is this class's to mutate, through applySettings only. */
+  getSettings() { return { ...this.settings }; }
+
+  /** The stick deadzone as currently configured, for a suite to probe the one number the
+   *  pad path rescales through (m16 I5). */
+  deadzone(v) { return deadzone(v, this.settings.stickDeadzone); }
+
   // ---- bindings -------------------------------------------------------------------
 
   setBindings(bindings) {
@@ -391,7 +466,7 @@ export class Input {
     add(this.target, 'mousemove', (e) => {
       if (!this.pointerLocked) return;
       const s = this.settings.mouseSensitivity;
-      this.looks[0].x += e.movementX * s;
+      this.looks[0].x += e.movementX * s * (this.settings.invertLookX ? -1 : 1);
       this.looks[0].y += e.movementY * s * (this.settings.invertLookY ? -1 : 1);
     });
     add(document, 'pointerlockchange', () => this._pointerLockChanged());
@@ -448,17 +523,27 @@ export class Input {
 
   /** Read the gamepads and the held look keys. Must run once per RENDER frame, before the
    *  step loop: the Gamepad API is poll-only, so a button tapped between polls is a button
-   *  that never happened. */
-  poll() {
-    this._pollPads();
-    this._pollLookKeys();
+   *  that never happened.
+   *
+   *  @param {number} [frameMs]  the REAL frame length. Stick and key look accumulate per
+   *  poll, so without it their angular speed scaled with the monitor's refresh rate (2.6 × 10
+   *  units per poll ≈ 3.4 rad/s at 60 Hz, 6.9 at 120). The rates in DEFAULT_SETTINGS are
+   *  authored per SETTINGS.lookRefFrameMs and scaled by frameMs / that; no argument means one
+   *  reference frame, so existing callers are unchanged. Capped at SIM.maxFrameMs for the same
+   *  reason the clock discards longer gaps — a backgrounded tab must not come back with a
+   *  quarter-turn banked. Mouse look is per pixel and needs no scaling. */
+  poll(frameMs = SETTINGS.lookRefFrameMs) {
+    const ms = Number.isFinite(frameMs) ? Math.max(0, Math.min(frameMs, SIM.maxFrameMs)) : SETTINGS.lookRefFrameMs;
+    const scale = ms / SETTINGS.lookRefFrameMs;
+    this._pollPads(scale);
+    this._pollLookKeys(scale);
     // Rotate the shell-edge buffer AFTER the pads are read, so a pad press made in this poll
     // and a key pressed since the last frame both reach this frame's shell read, once.
     this._shellPressed = this._shellPending;
     this._shellPending = new Set();
   }
 
-  _pollPads() {
+  _pollPads(scale = 1) {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
     const connected = [];
     for (const p of navigator.getGamepads()) if (p && p.connected) connected.push(p);
@@ -510,24 +595,26 @@ export class Input {
 
       // Right stick contributes to the same look accumulator the mouse writes to, so each
       // seat's camera has exactly one input to read (§4.4 parity).
-      const ls = this.settings.padLookSensitivity;
-      this.looks[seat].x += st.rx * ls * 10;
+      const ls = this.settings.padLookSensitivity * scale;
+      this.looks[seat].x += st.rx * ls * 10 * (this.settings.invertLookX ? -1 : 1);
       this.looks[seat].y += st.ry * ls * 10 * (this.settings.invertLookY ? -1 : 1);
     }
     this._padSlotPrev = cur;
   }
 
-  /** Seat 1 turns with keys when it has no pad. Accumulated per POLL, exactly as the right
-   *  stick is, so both devices reach the camera through one accumulator. */
-  _pollLookKeys() {
-    const rate = this.settings.keyLookRate;
-    const inv = this.settings.invertLookY ? -1 : 1;
+  /** Seat 1 turns with keys when it has no pad. Accumulated per poll, scaled by the frame
+   *  length exactly as the right stick is, so both devices reach the camera through one
+   *  accumulator at one rate. */
+  _pollLookKeys(scale = 1) {
+    const rate = this.settings.keyLookRate * scale;
+    const invX = this.settings.invertLookX ? -1 : 1;
+    const invY = this.settings.invertLookY ? -1 : 1;
     for (let s = 0; s < this.seatCount; s++) {
       const l = this.looks[s];
-      if (this.isDown('lookLeft', s))  l.x -= rate;
-      if (this.isDown('lookRight', s)) l.x += rate;
-      if (this.isDown('lookUp', s))    l.y -= rate * inv;
-      if (this.isDown('lookDown', s))  l.y += rate * inv;
+      if (this.isDown('lookLeft', s))  l.x -= rate * invX;
+      if (this.isDown('lookRight', s)) l.x += rate * invX;
+      if (this.isDown('lookUp', s))    l.y -= rate * invY;
+      if (this.isDown('lookDown', s))  l.y += rate * invY;
     }
   }
 
@@ -615,6 +702,12 @@ export class Input {
     return this._shellPressed.delete(padToken(seat, buttonIndex));
   }
 
+  /** The prompt glyphs for a seat on a device, from THIS input's live bindings and the seat's
+   *  active context — so a remap and a context switch both redraw (§4.4). See glyphsFor(). */
+  glyphsFor(seat = 0, device = this.activeDevice[seat]) {
+    return glyphsFor(seat, device, { bindings: this.seatBindings, context: this.contexts[seat] });
+  }
+
   /** 0..1 pressure. Analog on a trigger, binary elsewhere. Feeds grip force (§6.2, §6.5). */
   analog(action, seat = 0) {
     const def = this._def(action, seat);
@@ -696,12 +789,82 @@ export class Input {
   }
 }
 
+/* ---- prompt glyphs (§26.5 "visible prompts and BOTH input mappings", §4.4) ------------
+ *
+ * ONE source: the binding table. The HUD used to print a literal 'E', 'Q' and 'LMB / RMB'
+ * for every seat, so seat 1 — Quote/Semicolon/[ ] on the keyboard, X/RB/LT/RT on a pad —
+ * was told to press keys it does not have. A second table of "what to print per seat" would
+ * only drift from the first, so these DERIVE the label from the live binding: the first key
+ * code, or the first mouse button, or the first pad index, whichever the device has. */
+
+/** KeyboardEvent.code → what is printed on the key. Anything unlisted is the code with its
+ *  'Key'/'Digit' prefix removed, which is right for every letter and number. */
+const KEY_LABELS = Object.freeze({
+  Quote: "'", Semicolon: ';', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Slash: '/', Period: '.', Comma: ',', Minus: '-', Equal: '=', Backquote: '`',
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  Space: 'Space', Tab: 'Tab', Escape: 'Esc', Enter: 'Enter',
+  ShiftLeft: 'Shift', ShiftRight: 'R-Shift', ControlLeft: 'Ctrl', ControlRight: 'R-Ctrl',
+  AltLeft: 'Alt', AltRight: 'R-Alt',
+});
+const MOUSE_LABELS = Object.freeze({ [MOUSE.LEFT]: 'LMB', [MOUSE.MIDDLE]: 'MMB', [MOUSE.RIGHT]: 'RMB' });
+/** Built FROM `PAD`, so a button added there gets a label here without a second edit. */
+const PAD_LABELS = Object.freeze(Object.fromEntries(Object.entries(PAD).map(([name, i]) => [i, ({
+  VIEW: 'View', MENU: 'Menu',
+  DPAD_UP: 'D-up', DPAD_DOWN: 'D-down', DPAD_LEFT: 'D-left', DPAD_RIGHT: 'D-right',
+})[name] || name])));
+
+export function keyLabel(code) {
+  return KEY_LABELS[code] || String(code).replace(/^(Key|Digit)/, '');
+}
+/** For the one raw (unbound) shell button, COOP.joinPad, which the help line still names. */
+export function padLabel(i) { return PAD_LABELS[i] || 'B' + i; }
+
+/**
+ * The label a seat should be shown for an action on a device — PURE, no DOM, no instance.
+ *
+ * A binding the device does not have falls back to the other device's, so the label is never
+ * blank for an action the seat can somehow perform (seat 1's pause is pad-only; drop is
+ * pad-only everywhere). An action unbound in the seat's context falls back to FOOT, because
+ * the prompt verbs (interact/context/grips) are on-foot verbs and DRIVE never lists them.
+ *
+ * @param {string} action
+ * @param {number} seat
+ * @param {'kbm'|'pad'} device
+ * @param {{context?: string, bindings?: object[]}} [opts]  the LIVE tables; defaults are the shipped ones
+ */
+export function glyphFor(action, seat = 0, device = 'kbm',
+                         { context = CONTEXTS.FOOT, bindings = SEAT_BINDINGS } = {}) {
+  const seatMap = bindings[seat];
+  if (!seatMap) return '';
+  const def = (seatMap[context] && seatMap[context][action]) ||
+              (seatMap[CONTEXTS.FOOT] && seatMap[CONTEXTS.FOOT][action]);
+  if (!def) return '';
+  const kbm = () => (def.keys && def.keys.length) ? keyLabel(def.keys[0])
+    : (def.mouse && def.mouse.length) ? (MOUSE_LABELS[def.mouse[0]] || 'M' + def.mouse[0]) : '';
+  const pad = () => (def.pad && def.pad.length) ? (PAD_LABELS[def.pad[0]] || 'B' + def.pad[0]) : '';
+  return device === 'pad' ? (pad() || kbm()) : (kbm() || pad());
+}
+
+/** The four glyphs the HUD draws — the two prompt keys and the two grips (hud.js). */
+export function glyphsFor(seat = 0, device = 'kbm', opts) {
+  return {
+    primary:   glyphFor('interact',  seat, device, opts),
+    secondary: glyphFor('context',   seat, device, opts),
+    gripL:     glyphFor('gripLeft',  seat, device, opts),
+    gripR:     glyphFor('gripRight', seat, device, opts),
+    device,
+  };
+}
+
 const PAD_TOKEN = /^P\d+B\d+$/;
 function padToken(seat, i) { return 'P' + seat + 'B' + i; }
 /** Edge-detection key for a PHYSICAL pad: slot among connected pads, not seat. */
 function slotToken(slot, i) { return 'S' + slot + 'B' + i; }
 
-function deadzone(v, dz) {
+/** Rescaled deadzone: 0 inside, and just past the edge is ~0 rather than a jump to dz. Exported
+ *  for the suites; the live number is `input.deadzone(v)`. */
+export function deadzone(v, dz) {
   const a = Math.abs(v);
   if (a < dz) return 0;
   return Math.sign(v) * ((a - dz) / (1 - dz));   // rescaled, so just past the deadzone is ~0

@@ -92,6 +92,28 @@ Resume, Restart the contract, and Settings. Click the card to resume and re-capt
 after an Esc/Menu resume, click once to look around again. `F3` toggles the developer overlay
 and the metre grid (off by default).
 
+## Settings
+
+A settings card is reachable from the title card (**Settings** under START THE JOB) and from
+the pause card (Esc / Menu → Settings). Everything on it does something measurable: grab **hold
+or toggle**, mouse / stick / P2-key look speed, **invert** left-right and up-down, stick
+deadzone, trigger pull, **text size** (80–160 %, one CSS variable behind every font), **camera
+distance** (solo boom, 1.6–7.0 m) and the render **quality tier** (auto / full / reduced —
+applies on reload; `?tier=` on the URL still wins). Settings are saved on this machine under one
+localStorage key (`mfh.save`, schema 1) together with your **best invoice**, which the
+settlement sheet quotes as "best so far". A retry keeps every setting (§21.2). A save from
+another schema, a damaged one, or a browser that refuses storage all fall back to defaults
+without a crash. Not yet: key remapping (bindings are data in `src/core/input.js`), and no
+camera-shake, reduced-motion or subtitle switch because nothing exists for them to act on.
+
+**Prompts speak your device.** Every key chip, the grip label, the seat tag and the help line
+are derived from the binding table for your seat and the device you last used — E · Q · LMB/RMB
+on seat 0's keyboard, ' · ; · [ ] on seat 1's, X · RB · LT/RT on a pad; the switch takes a
+quarter of a second so a nudged stick cannot flicker it. One line under the contract panel says
+what to do next (the truck, how many to load, the road, how many to unload), every item you look
+at says which room it is for, and thirty seconds into a job with nothing grabbed a single notice
+names the grab buttons. Cargo glance while driving is **LB** on a pad (View is join/leave).
+
 ## Test it
 
 ```bash
@@ -155,7 +177,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**1045 assertions across fifteen suites, all passing** — plus a GPU-only suite that the
+**1272 assertions across seventeen suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -169,7 +191,19 @@ a traction budget was swept 0–560 N and every value that moved the couch tore 
 the fridge, so the seam ships at zero with the real cause (world-frame grip damping) pinned by
 test. Negative results are deliverables; the table sits beside `CARRY.tractionN`.
 
+Batch 2 shipped three more: replay is now a full unwind through the real API (tools detached,
+parts reassembled, friction and collider sizes restored, the damage ledger rebound — before this,
+item damage was silently unbilled from the second run on) with a three-run soak proving every
+resource count identical after run 1 and run 3; a settings card with versioned persistence
+(grip mode, look speeds, invert, deadzone, text size, camera distance, quality tier, best
+invoice); and prompts that speak your device, an objective line, room hints on every item, and a
+stall hint. That is six of the eight milestones.
+
 ![The pause card](docs/phase16-pause.png)
+
+![The settings card](docs/phase17-settings.png)
+
+![The objective line](docs/phase17-hud.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 
@@ -428,6 +462,12 @@ Per `Dev\INDEX.md`, most of the scaffold was copied rather than written:
 Names were kept so the lineage stays greppable.
 
 ## Known limitations
+
+- **Replay is a full unwind** (Phase 11 M2): tools are detached and retrieved, parts
+  reassembled, friction and collider sizes restored, recoveries zeroed, the damage ledger
+  rebound; `tools/m14-soak-tests.js` proves bodies, colliders, scene objects, GPU
+  geometries/textures and the strap render pool are identical after run 1 and run 3. Tools
+  still have no out-of-bounds recovery mid-run; they return to the rack only on replay.
 
 - **An Esc-resume cannot re-lock the pointer** (a Chrome rule: Escape is not user activation) —
   click once. Pause is global in local co-op. Pad View both joins a second player and glances at

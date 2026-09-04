@@ -549,7 +549,7 @@ directly and a gated clock would hang all fourteen — but it means the contract
 running while a player reads the controls. At 18 minutes of estimate that is negligible, and
 it will not be once there is a leaderboard.
 
-**No settings, so no accessibility surface.** `DEFAULT_SETTINGS` has mouse sensitivity, invert
+**~~No settings, so no accessibility surface.~~ Closed in Phase 17 (M4) — see the Phase 17 open items.** `DEFAULT_SETTINGS` has mouse sensitivity, invert
 Y, deadzone and §21.4's toggle-grip mode, and none of them are reachable without editing a
 file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to copy.
 
@@ -619,4 +619,42 @@ REPLACE the Phase 6 paragraph 'Solo couch dragging got harder, not easier' (KNOW
 **Solo couch drag does not travel, and a traction budget alone cannot make it (Phase 11 M7, measured).** One hand, unbraced, 3 s: 0.00 m, held throughout; braced: 0.00 m, held throughout; on the dolly 2.12 m; two movers one hand each 1.34 m. The cause is now known and pinned rather than guessed: the grip damps against the object's absolute velocity, so a towed couch can follow no faster than (spring × band − 552 N)/569 N·s/m = 0.137 m/s unbraced, 0.248 m/s braced (m6 B10a pins both under 0.30 m/s on purpose). The legs-anchor-the-reaction seam is in (`CARRY.tractionN` / `braceTractionN`, `PlayerController.applyCarry`, m3 D5) and was swept 0–560 N: budget 0 stalls (0.00 m, held); 200 N buys 5 cm and tears the dolly haul; 330–350 N tears the couch hold in 0.6 s and the mover strolls 7.8 m; braced 400 N buys 0.25 m — and topples the fridge (1.24 m, on its side), which flips m6 B5/B6's 'beyond one hand unaided'. Both ship at 0. The next lever is hand-frame damping (grip.js `cPerHand * vp` → `cPerHand * (vp − vHand)` with a cached hand target), a corrected `towSpeedLimit` derivation (lag = F_f/k + 2ζv/ω) and a friction-aware tow cap; it shifts every quoted lift/dolly number (m4 C4's 11 mm, m6 B4/B6) and is its own increment. Bracing while towing two-up measured 0.05 m vs 1.34 m unbraced — the same limit cycle, worth knowing before a co-op playtest.
 
 AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in anger:' to: 'Candidate levers: `GRIP.maxStretch` against `GRIP.spring` — a braced band of 0.77 m was tried in Phase 11 M7 and bought nothing (0.00 m); a traction budget before the pull was tried in the same milestone and bought nothing usable (see Phase 11 open items); `CARRY.dragForceRef` and a kinetic < static friction remain untried. The binding limit is the world-frame damping term, not the spring.'
+
+
+## Phase 17 open items
+
+### M2
+
+**Replay (§26.6 / §26.1) — fixed in M2, with the seams that remain.** `game.reset()` still replaces `game.state` wholesale; there are now THREE re-attach points that must agree about what a contract is: the manifest (rebuilt against `contractEntityIds`), the player rows, and the damage system — which no longer captures the state at all but reads `game.state` through a getter (`damage.js` `get state()`), so it cannot go stale again. `resetContract` unwinds tool effects through `detachDolly` / `removeBlanket` / `retrieveRamp` / `reassemble` before clearing any flag (the order trap tools/m11-tests.js documents). Measured over three full runs (tools/m14-soak-tests.js): bodies 71, colliders 71, scene children 325, renderer geometries 408, textures 60, strap pool 0 — identical after run 1 and run 3; ledger 3/3/3 lines at the three settlements.
+
+**Still open after M2.**
+- **Tools have no §18.3 out-of-bounds recovery.** `registry.step` walks `registry.entities` only; a tool that leaves the world mid-run stays gone until "Run it again" puts it back on the rack (which now works: y = 0.08 m for the ramp, 0.07 m dolly, 0.00 m blanket, −0.00 m screwdriver after 120 frames — the last two rest a few millimetres into the ground, inside Rapier's contact tolerance).
+- **§26.6 'fragments' is still vacuous.** Detached parts are recorded in `state.removedParts`, never spawned; there is nothing to remove, and the clause cannot be claimed either way.
+- **`entity.state.everHeld` is never written.** It is read by `heaviestMoved()` (main.js) and cleared by `respawnContract`, but no system sets it, so the "heaviest moved" stat only ever counts loaded or recovered objects.
+- **`hud._notices` accumulates under headless drive.** Notices expire by `performance.now()`, which does not advance under virtual time, so a suite that replays sees one 'new contract' notice per replay (1, 2, 3 across the soak) until the cap of 4. Harness artefact, not a game defect; m14 S7 pins the cap.
+- **`performance.memory.usedJSHeapSize` is quantised by Chrome.** The soak read ~27 MB at every sample (0.0 % growth); S8's 10 % tolerance is against a number with limited resolution, so the object counts in S1/S2 are the real growth evidence.
+
+### M4
+
+**~~No settings, so no accessibility surface.~~ CLOSED in Phase 11 M4** — the settings card (title and pause) exposes grip hold/toggle, mouse/stick/P2-key sensitivity, invert X/Y, deadzone, trigger threshold, text size, camera distance and quality tier, saved under one localStorage key with a schema gate. What remains open from the same entry:
+
+- **No key remapping UI.** `setBindings`/`bindingConflicts` exist (input.js) and nothing calls them after boot; §21.4 scopes full remapping to the full product.
+- **No camera-shake, reduced-motion or subtitle control** — deliberately: there is no shake, no particle system and no audio for one to act on. Adding the switch before the thing it switches is a lie the card would tell (§2.1).
+- **Quality tier applies on reload**, and the card says so. The tier decides how many shadow maps are BUILT before the scene exists (lighting.js), so a live switch would mean rebuilding the scene. `?tier=` on the URL still overrides the saved tier, so shot scripts and the harness are unaffected by a player's choice.
+- **Text size scales type, not boxes.** `--ts` multiplies every font-size; panel `min-width`s and the 1280-wide `#help` line are still px, so at 1.6× the help line can wrap in co-op and the contract panel grows only as tall as its text. Measured clear of the centre third at 1.5× (m16 U1d); 1.6× not measured.
+- **Camera distance is the solo boom only.** A split screen keeps COOP.cameraDistance (3.2 m) — §4.1's shortened boom is a property of the half-width viewport, not of taste. The card says so.
+- **The best invoice is device-local and profit-only** (§13.4 stub): one number, one grade, the build that wrote it. No history, no export — M6's run recorder is where that goes.
+- **A fetch() started after load never resolves under `--virtual-time-budget`** (measured, m16 stalled on `fetch('styles.css')`). Suites must not fetch; read the CSSOM or import.
+
+### M5
+
+**Resolved (Phase 16 open items → 'Pad View is two things in the van').** `cargoGlance` is now PAD.LB on both seats (input.js DRIVE tables); `COOP.joinPad` keeps View. m12 K4 asserts no bound action on any seat or context lists the join button.
+
+**The title card's control list is still typed, not derived.** src/ui/titleScreen.js:42-53 prints 'E', 'Q', 'LMB/RMB', 'F2' for every player; every HUD prompt and the #help line now come from `glyphFor` (input.js). A pad-only player reads the right glyphs everywhere except the card they start from. One-hunk follow-up: build the two columns from glyphFor(action, seat, 'kbm') and add a pad column.
+
+**Device debounce is by sample.** The shown device confirms a switch when a HUD feed sees the new device ≥ 250 ms of sim time after the feed that first saw it. In the real game the feed is every render frame, so the lag is 250 ms + one frame; a suite that changes `activeDevice` and never calls `M.feedHuds()` (or runs frames) sees no switch — by design, not a bug.
+
+**The stall hint is coaching state outside game.state.** `stallHint {ms, fired, done, armed}` lives in main.js (it is not contract data and must not be serialised); a save/restore (M4/M6) that replays a run mid-pickup starts the timer fresh. Acceptable: the hint is advisory and once per run.
+
+**m15 I1a fails after M4.** main.js now registers `pauseScreen.onSettings` at boot, so M3's 'Settings slot hidden while nothing has registered a handler' assertion is stale. Not an M5 change; M4 to retarget it.
 

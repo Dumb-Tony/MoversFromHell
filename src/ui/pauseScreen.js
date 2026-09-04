@@ -21,7 +21,8 @@
  *
  * The Settings button is a SLOT for the settings panel (Phase 11 build-side M4). It is in the
  * markup so the layout is settled now, and hidden until something registers `onSettings` —
- * a button that does nothing is worse than no button (§2.1).
+ * a button that does nothing is worse than no button (§2.1). M4 registers the panel's show()
+ * at boot (main.js), so in the shipping build the slot is live from the first pause.
  */
 
 import { EVENTS } from '../core/eventBus.js';

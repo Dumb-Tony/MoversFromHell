@@ -617,3 +617,31 @@ M1 (2026-09-04): no human session. Developer observation from the m11 drive: the
 
 **Phase 11 M7 — dragging: unchanged in the hand, and now we know exactly why.** Nothing a solo player feels has changed: a couch grabbed one-handed still shuffles (0.00 m in 3 s, held), braced or not. What changed is that the shuffle is now a measured ceiling rather than a mystery — the hand's damping brakes the couch against the WORLD, so it cannot follow a hand faster than 0.14 m/s (0.25 m/s braced), and the pull that hauls the mover back is the only thing keeping the hold from tearing. A traction budget was swept 0–560 N with a probe: every value that let the couch move either tore the hold and sent the mover strolling seven metres, or (braced 400 N: a quarter-metre) let a lone braced mover topple the fridge, which would erase the one 'you need a second person or the dolly' fact the contract has. Shipped at 0, on purpose, with the numbers next to the code. For the external playtest: the dolly (2.12 m) and a second pair of hands (1.34 m one hand each) remain the honest answers, and bracing while towing two-up is worse (0.05 m) — expect testers to discover that and call it a bug; it is the same limit cycle and is in KNOWN_ISSUES. Hand-frame damping is the fix, next increment.
 
+
+## Phase 17 — Phase 11 build side, batch 2: replay unwinds and a three-run soak, the settings card, prompts that speak your device — 2026-09-04
+
+### M2
+
+**M2 (developer notes, 2026-09-04).** "Run it again" is now an honest replay. Before this batch, pressing it after a run that used the dolly left the couch on invisible wheels for the rest of the session (friction 0.04, Min rule), a wardrobe with its doors off stayed small for ever, a tool in your hands when the invoice came up dropped through the floor and was gone, run 1's recovery callout appeared on run 2's invoice, and — worst — nothing you broke on run 2 was ever billed, so the second run always graded better than it deserved. §27.3's seventh question ("Would they replay the same contract differently?") can now be asked of an external group without the second run lying to them. The three-run soak (tools/m14-soak-tests.js, 8 s) is the check to rerun after any change to `resetContract`, `respawnContract`, `DamageSystem` or `StrapLines`; it fails loudly with the numbers if any counter drifts between run 1 and run 3.
+
+### M4
+
+**Settings (M4, 2026-09-04).** No human session yet. Developer observations from the m16 run and the two headless shots:
+
+- **Before/after look rates.** Pad right stick and seat 1's UHJK keys accumulated per POLL, so the turn rate followed the monitor: 2.6 × 10 = 26 units per frame → 3.43 rad/s at 60 Hz, **6.86 rad/s at 120 Hz**; keys 15 units → 1.98 rad/s at 60, 3.96 at 120. Now `poll(frameMs)` scales by the frame length: **3.43 / 1.98 rad/s at any refresh rate**, and a backgrounded tab's 1000 ms frame is capped at 250 ms (15 frames of look, not 60). Nothing changes on a 60 Hz display; a 120/144 Hz player who found the stick twitchy will find it half as fast. Mouse look is per pixel and was never affected. The 'sensitivity' sliders therefore mean something: 2× is twice the rad/s.
+- **Toggle grip** is reachable for the first time (§21.4 accessibility). Press LMB once to hold, once to let go; the latch clears when the mode is switched so nothing is left 'held' by a button nobody is pressing. Untested by a human — the interesting question is whether a toggled two-hand carry reads as intended or as 'the game won't let go'.
+- **Text size** 80-160 %. At 150 % the prompt is 18 px and the contract panel 16.5 px and the centre third is still clear; the title and pause cards scale with it. Panels keep their px min-widths — watch the co-op help line at 160 %.
+- **Camera distance** 1.6-7.0 m (solo). At 7 m the whole porch is in frame and the reticle prompt is small; at 1.6 m the mover fills the view — the default 4.0 m is the Phase 1 feel number and nothing here retunes it.
+- **The card is reachable from the title** (a small Settings button under START THE JOB) and from Esc/Menu. Escape closes it without resuming; the pointer is not re-captured on Done — click the game.
+- **Watch for:** a saved 'gpu' tier on a machine that has fallen back to software rendering (a slideshow the player chose; 'auto-detect' fixes it); whether anyone finds the trigger-pull slider before finding that LT/RT grab at all.
+
+### M5
+
+**Prompt glyphs per seat (M5).** Before: both halves said 'E use · Q undo' and 'hold LMB / RMB to grab'; P2 on arrows/[ ] or a pad had to be told the real keys out loud. After: P2 reads "' use · ; undo" and 'hold [ / ] to grab' on the keyboard, 'X use · RB undo' and 'hold LT / RT to grab' on a pad, and the seat tag says 'P2 · p1 · keys' or '· pad'. The switch lands 250 ms (15 steps) after the first pad input and never on a one-poll stick blip (m12 K3: 233 ms no, 267 ms yes, 100 ms flicker ignored). Watch for: a pad with real drift above the 0.18 deadzone will flip a keyboard player's glyphs to pad every 250 ms while they type — if a tester reports 'the prompt keeps changing to X', it is drift, and the fix is the deadzone setting (M4), not the debounce.
+
+**Objective line.** Top-left, one row under the contract panel: 'carry a box to the truck out front' → 'load 22 more, or drive from the cab' → 'on the road — 41% there' → 'unload — 23 left, each to its room'. It names the place, never the key; the key is on the prompt when you get there. Ask testers whether the first line got them to the truck without the help bar.
+
+**Room hint.** Looking at any manifest item now reads 'couch 3seat → living room — hold LMB/RMB to carry' before it is picked up. The room disappears once it is delivered to the right room and stays while it is in the wrong one. First-delivery 'right room 0/1' surprises should drop; note whether testers still carry to the wrong room with the line on screen.
+
+**Stall hint.** 30 s after START THE JOB with no grip by anyone, one green notice per seat: 'hold LMB / RMB on a box to grab it — two hands for the heavy ones' (LT / RT on a pad). Once per run; a replay re-arms it. It fires on the sim clock, so a paused tester is not nagged. Note the time-to-first-grip for testers who saw it versus those who did not — if most see it, 30 s is too long for the first minute and should come down.
+

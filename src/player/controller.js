@@ -217,6 +217,32 @@ export class PlayerController {
     this._climb = null;
   }
 
+  /** §26.6 contract reset: everything hardSetPosition deliberately leaves alone. The
+   *  recovery counter is billed per run (invoice.js), so a replay that inherits it bills
+   *  run 1's callout on run 2's invoice; the knockdown timer would leave a mover face-down
+   *  at the new spawn; and the last-stable point must be the spawn, or a run-2 recovery
+   *  lands at run 1's destination. Movement to the spawn is done here too so the pair
+   *  cannot be called in the wrong order. */
+  resetForContract(spawn) {
+    this.recoveries = 0;
+    this.knockdowns = 0;
+    this.lastRecoveryReason = null;
+    this.lastKnockdownReason = null;
+    this._downMs = 0;
+    this._outOfBoundsMs = 0;
+    this._sinceStableMs = 0;
+    this._vel.x = 0; this._vel.z = 0;
+    this.pull.x = 0; this.pull.z = 0;
+    this.imbalance = 0; this.exertion = 0;
+    this.carriedMass = 0; this.resistedForce = 0;
+    this.towSpeedLimit = Infinity;
+    this.state = LOCOMOTION.GROUNDED;
+    if (spawn) {
+      this.lastStable = { x: spawn.x, y: spawn.y, z: spawn.z };
+      this.hardSetPosition(spawn);
+    }
+  }
+
   /**
    * One fixed simulation step.
    * @param {number} stepMs

@@ -22,20 +22,20 @@
  */
 
 import { Game } from './game.js';
-import { Input, CONTEXTS } from './core/input.js';
+import { Input, CONTEXTS, DEFAULT_SETTINGS, glyphFor, padLabel } from './core/input.js';
 import { EventBus, EVENTS, PHASES } from './core/eventBus.js';
 import { createRenderer } from './render/renderer.js';
 import { buildScene, RAMP } from './render/scene.js';
 import { ThirdPersonCamera } from './render/camera.js';
 import { makeBlockout } from './render/playerBody.js';
 import { DebugOverlay } from './dev/debugOverlay.js';
-import { initPhysics, PhysicsWorld } from './physics/world.js';
+import { initPhysics, PhysicsWorld, GROUP_PRESETS } from './physics/world.js';
 import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
 import { overlappingZones } from './world/house.js';
-import { ToolSystem } from './tools/tools.js';
+import { ToolSystem, reassemble } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
@@ -50,6 +50,8 @@ import { Hud } from './ui/hud.js';
 import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
+import { SettingsPanel } from './ui/settings.js';
+import { load as loadSave, save as writeSave, SHELL_DEFAULTS } from './core/save.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -62,7 +64,7 @@ import { createPost, postModeFromLocation } from './render/post.js';
 import { present } from './render/present.js';
 import { ContactBlobs } from './render/contactBlobs.js';
 import { updateRimCamera } from './render/materials.js';
-import { BUILD, MOVERS, COOP, RENDER, PLAYER } from './config.js';
+import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -76,9 +78,17 @@ window.__MFH_READY = boot().catch((e) => {
 
 async function boot() {
   const { THREE, renderer, camera, syncSize } = createRenderer(canvas);
+  /* §21.2 "a retry keeps settings" / §26.6: the one device-local save, read ONCE here and
+   * never thrown from (save.js). Its settings go to the Input's constructor, its shell values
+   * to the CSS variable and the camera rigs below, its best invoice to the settlement sheet.
+   * Nothing in it enters game.state. */
+  const saved = loadSave();
   /* Quality tier before the scene, because it decides how many shadow maps get built. See
-   * detectRenderTier — shadow passes are ~100x more expensive in software than lights are. */
-  const renderTier = detectRenderTier(renderer);
+   * detectRenderTier — shadow passes are ~100x more expensive in software than lights are.
+   * A saved tier forces it ('applies on reload' on the settings card); ?tier= still wins, so
+   * the shot scripts and the harness are unaffected by whatever a player chose. */
+  const renderTier = (saved.shell.tier !== 'auto' && !tierFromLocation())
+    ? saved.shell.tier : detectRenderTier(renderer);
   /* The texture and material libraries read the tier too, and they must know it BEFORE the
    * scene is built: on the software tier they mint no height/spec canvases, no bump, no env,
    * no rim — the difference between a 4 s suite and a 600 s one (measured, Phase 13). */
@@ -110,8 +120,14 @@ async function boot() {
   let strapsPlacedTotal = 0;
 
   const bus = new EventBus();
-  const input = new Input(window, canvas).attach();
+  // The saved feel settings arrive as the constructor patch (input.js validates them).
+  const input = new Input(window, canvas, undefined, saved.settings).attach();
   const game = new Game({ contractId: 'suburban_starter', input, bus });
+  /* The SHELL's settings — the ones no system reads: UI scale (the `--ts` variable every
+   * font-size in styles.css multiplies by), the solo camera boom, the quality tier. Held
+   * here, beside seatCount, and never in game.state. */
+  const shell = { ...SHELL_DEFAULTS, ...saved.shell };
+  document.documentElement.style.setProperty('--ts', String(shell.uiScale));
 
   /* ---- the contract's objects (Phase 5) -------------------------------------------------
    * PHASE5_SPAWNS replaces the Phase 2 and Phase 3 spawn lists outright. Those were four
@@ -164,7 +180,9 @@ async function boot() {
    * constraints during transport", and a heuristic "must not secretly damage items without a
    * physical cause". So damage reads what bodies actually did, and the route applies forces
    * to those bodies. There is no path from a pack-quality score to an object's condition. */
-  const damage = new DamageSystem(physics, registry, bus, game.state);
+  // A GETTER, not game.state itself: game.reset() replaces the state object wholesale, and a
+  // captured reference kept billing replay damage to the previous run's orphaned ledger.
+  const damage = new DamageSystem(physics, registry, bus, () => game.state);
   const route = new RouteDriver(cargo, bus);
 
   /* ---- movers (Phase 4) -----------------------------------------------------------------
@@ -246,7 +264,7 @@ async function boot() {
     seatCount = want;
     input.setSeatCount(seatCount);
     document.body.classList.toggle('coop', seatCount > 1);
-    for (const m of movers) m.rig.setDistance(seatCount > 1 ? COOP.cameraDistance : RENDER.camera.distance);
+    applyCameraDistance();
     /* Seat 0 always drives mover 0 in co-op. If the solo player had Tab'd onto mover 1, the
      * joining player would otherwise be handed the mover already carrying something — and
      * the two halves would both show the same body until somebody moved. */
@@ -262,6 +280,14 @@ async function boot() {
     refreshHelp();
     return seatCount;
   }
+  /** The boom for the current seating: §4.1's shortened co-op boom is a property of the split,
+   *  the solo boom is the player's setting (§21.4 "camera distance"). One function, so a join
+   *  and a settings change cannot disagree about which applies. */
+  function applyCameraDistance() {
+    const d = seatCount > 1 ? COOP.cameraDistance : shell.cameraDistance;
+    for (const m of movers) m.rig.setDistance(d);
+  }
+  applyCameraDistance();
 
   // New colliders are invisible to raycasts until the next step (MEASURED — world.js), and
   // the very first grab probe happens before any step has run.
@@ -283,6 +309,14 @@ async function boot() {
     // the only CONTRACT_PHASE emitter, so from/to/simTimeMs are always on the event.
     setPhase: (to, validation) => game.setPhase(to, validation),
     now: () => game.clock.simTimeMs,
+    /* The destination-room hint (M5). The row is looked up through game.state each time
+     * because a reset replaces the manifest wholesale; 23 rows is not a search worth caching.
+     * 'Living room (destination)' is the zone's label for the map; the hint wants the room. */
+    manifestRow: (entityId) => game.state.manifest.find((r) => r.entityId === entityId) || null,
+    roomLabel: (zoneId) => {
+      const z = DEST_ZONES.find((zone) => zone.id === zoneId);
+      return z ? z.label.replace(/\s*\(destination\)\s*$/i, '').toLowerCase() : zoneId;
+    },
   });
 
   // ---- systems, in §22.3 order ----------------------------------------------------------
@@ -467,6 +501,34 @@ async function boot() {
     }
   });
 
+  /* §21.3's first step, advised rather than taught — Dev\INDEX.md → AirportBaggageCrew
+   * onboarding: "a first-minute rail with NO training pauses", a STALL TIMER rather than a
+   * route check. If nobody has gripped anything CONTRACT.stallHintMs into the pickup, one
+   * notice per seat says how, in that seat's own glyphs. Sim time, so a paused game cannot
+   * fire it (m0 E3); armed when the job starts (title.onStart), so time spent reading the
+   * title card is not a stall; once per run (resetContract re-arms the count); the first
+   * grip retires it — a player who has held a box does not need telling. The timer is
+   * coaching, not contract, so it lives here and never in game.state (m11 O6). */
+  const stallHint = { ms: 0, fired: false, done: false, armed: false };
+  function resetStallHint() { stallHint.ms = 0; stallHint.fired = false; stallHint.done = false; }
+  /* Declared before the stall-hint system below reads it (assigned with the HUDs further down):
+   * a `const` there was a TDZ hazard for any boot-time frame — review minor, M5. */
+  let shownDevice = [];
+  game.addSystem('stallHint', (state, stepMs) => {
+    if (!stallHint.armed || stallHint.done || state.phase !== PHASES.PICKUP) return;
+    for (const m of movers) if (hasAnyGrip(state.players[m.id])) { stallHint.done = true; return; }
+    stallHint.ms += stepMs;
+    if (stallHint.ms < CONTRACT.stallHintMs) return;
+    stallHint.done = true; stallHint.fired = true;
+    for (let s = 0; s < seatCount; s++) {
+      const g = input.glyphsFor(s, shownDevice[s]);   // declared with the HUDs below; runs only in frames
+      pendingNotices.push({
+        text: `hold ${g.gripL} / ${g.gripR} on a box to grab it — two hands for the heavy ones`,
+        kind: 'good', seat: s,
+      });
+    }
+  });
+
   game.setPhase(PHASES.PICKUP);
 
   /* Art-direction rig (?style=toy|cel|film) — three photographable proposals over one
@@ -538,6 +600,32 @@ async function boot() {
     huds.push(h);
   }
   const hud = huds[0];                       // the solo alias, kept honest: the same object
+
+  /* ---- device-aware prompts (§26.5 "both input mappings", §4.4) — Phase 11 build-side M5
+   * Which glyph set a seat sees follows input.activeDevice[seat], DEBOUNCED on sim time
+   * (PROMPTS.deviceDebounceMs). activeDevice flips on ANY pad activity — a stick a hair past
+   * its deadzone flips it every poll — and shown raw the prompt flickered E/X at frame rate.
+   * The shown device changes only once the new one has been continuous for the whole
+   * window: a one-poll blip never reaches the screen, and a real switch lands 15 steps late,
+   * which nobody can see. Presentation state, never in game.state (m0 E8). */
+  shownDevice = huds.map(() => 'kbm');
+  const candDevice = huds.map(() => 'kbm');
+  const candSinceMs = huds.map(() => 0);
+  function settleDevices() {
+    const now = game.clock.simTimeMs;
+    let changed = false;
+    for (let s = 0; s < huds.length; s++) {
+      const d = input.activeDevice[s] || 'kbm';
+      if (d === shownDevice[s]) { candDevice[s] = d; continue; }
+      if (d !== candDevice[s]) { candDevice[s] = d; candSinceMs[s] = now; continue; }
+      if (now - candSinceMs[s] >= PROMPTS.deviceDebounceMs) { shownDevice[s] = d; changed = true; }
+    }
+    if (changed) refreshHelp();
+  }
+  /** §26.5: the seat tag and the help line name the device in WORDS, not by glyph alone. */
+  function deviceName(device, seat) {
+    return device === 'pad' ? 'pad' : seat === 0 ? 'keys + mouse' : 'keys';
+  }
   const divider = new SplitDivider(ui);
   const invoiceScreen = new InvoiceScreen(ui);
   const strapLines = new StrapLines(world.scene, straps, registry);
@@ -550,6 +638,8 @@ async function boot() {
     if (!game.state.paused) input.requestPointerLock();
     // A blur under the title paused the world; now that the card is gone, say so.
     pauseScreen.refresh();
+    // The stall timer counts from the moment the job starts, not from the page load.
+    stallHint.armed = true; stallHint.ms = 0;
   };
 
   /* §21.4's solo pause, made VISIBLE (Phase 11 build-side M3). The clock has paused correctly
@@ -576,6 +666,55 @@ async function boot() {
     hud.notice('new contract', 'good');
   };
 
+  /* ---- settings (Phase 11 build-side M4) ---------------------------------------------------
+   * §21.4 / §26.5. The panel is a VIEW over this store; the store routes every key to the
+   * thing that consumes it and persists the lot (save.js). Input keys go through
+   * Input.applySettings, which validates and clamps; the three shell keys are applied here.
+   * Every control on the card moves a measured value (m16 U2) — nothing is stored for later. */
+  let bestInvoice = saved.bestInvoice;
+  function persist() {
+    return writeSave({ settings: input.getSettings(), shell, bestInvoice });
+  }
+  const settingsStore = {
+    values: () => ({ ...input.getSettings(), ...shell }),
+    apply(patch) {
+      const shellPatch = {};
+      const inputPatch = {};
+      for (const [k, v] of Object.entries(patch || {})) {
+        if (Object.prototype.hasOwnProperty.call(SHELL_DEFAULTS, k)) shellPatch[k] = v; else inputPatch[k] = v;
+      }
+      if (Object.keys(inputPatch).length) input.applySettings(inputPatch);
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'uiScale')) {
+        const r = SETTINGS.ranges.uiScale;
+        const v = Number(shellPatch.uiScale);
+        if (Number.isFinite(v)) {
+          shell.uiScale = Math.min(r.max, Math.max(r.min, v));
+          document.documentElement.style.setProperty('--ts', String(shell.uiScale));
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'cameraDistance')) {
+        const r = SETTINGS.ranges.cameraDistance;
+        const v = Number(shellPatch.cameraDistance);
+        if (Number.isFinite(v)) {
+          shell.cameraDistance = Math.min(r.max, Math.max(r.min, v));
+          applyCameraDistance();
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'tier') && SETTINGS.tiers.includes(shellPatch.tier)) {
+        shell.tier = shellPatch.tier;   // consumed by the NEXT boot (see the top of boot())
+      }
+      persist();
+    },
+    reset() {
+      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS });
+    },
+  };
+  const settingsPanel = new SettingsPanel(ui, settingsStore);
+  // Reachable from the title card and the pause card (§21.4; INDEX "settings panel").
+  title.onSettings = () => settingsPanel.show();
+  pauseScreen.onSettings = () => settingsPanel.show();
+  pauseScreen.refresh();
+
   const stamp = document.createElement('div');
   stamp.id = 'build-stamp';
   stamp.textContent = `Movers From Hell — ${BUILD.label} · ${BUILD.date} · F3 for stats`;
@@ -584,14 +723,31 @@ async function boot() {
   const help = document.createElement('div');
   help.id = 'help';
   ui.appendChild(help);
+  /* DERIVED from the live binding table through glyphFor (input.js), per seat and per shown
+   * device, for the same reason the prompt is (M5): a typed control line is a second table
+   * that drifts, and this one already said 'E' to a seat whose key is Quote. Only the words
+   * for the sticks and the mouse are authored here, because no binding names them. */
+  let helpHtml = '';
   function refreshHelp() {
-    help.innerHTML = seatCount > 1
-      ? '<b>P1</b> WASD + mouse · LMB/RMB grab · E use · Q undo &nbsp;|&nbsp; ' +
-        '<b>P2</b> arrows + UHJK look · [ ] grab · \' use · ; undo &nbsp;|&nbsp; ' +
-        '<b>F2</b> one player · Esc pause · F3'
-      : '<b>Click to look around.</b> &nbsp; WASD · Shift sprint/brace · ' +
-        'Space jump · <b>LMB/RMB grab</b> · <b>E use</b> · <b>Q undo</b> · ' +
-        'Tab swap mover · R recover · <b>F2 two players</b> · Esc pause · F3';
+    const g = (action, s) => glyphFor(action, s, shownDevice[s], { bindings: input.seatBindings });
+    const pad = (s) => shownDevice[s] === 'pad';
+    const move = (s) => pad(s) ? 'left stick'
+      : ['moveForward', 'moveLeft', 'moveBack', 'moveRight'].map((a) => g(a, s)).join('');
+    const look = (s) => pad(s) ? 'right stick look' : s === 0 ? 'mouse'
+      : ['lookUp', 'lookLeft', 'lookDown', 'lookRight'].map((a) => g(a, s)).join('') + ' look';
+    const grab = (s) => `${g('gripLeft', s)}/${g('gripRight', s)} grab`;
+    const join = pad(0) ? padLabel(COOP.joinPad) : COOP.joinKey;
+    const html = seatCount > 1
+      ? [0, 1].map((s) =>
+          `<b>P${s + 1}</b> ${deviceName(shownDevice[s], s)}: ${move(s)} + ${look(s)} · ` +
+          `${grab(s)} · ${g('interact', s)} use · ${g('context', s)} undo`).join(' &nbsp;|&nbsp; ') +
+        ` &nbsp;|&nbsp; <b>${join}</b> one player · ${g('pause', 0)} pause · F3`
+      : `<b>${pad(0) ? 'Pad.' : 'Click to look around.'}</b> &nbsp; ${move(0)}` +
+        `${pad(0) ? ' move · right stick look' : ''} · ${g('brace', 0)} sprint/brace · ` +
+        `${g('jump', 0)} jump · <b>${grab(0)}</b> · <b>${g('interact', 0)} use</b> · ` +
+        `<b>${g('context', 0)} undo</b> · ${g('swapMover', 0)} swap mover · ` +
+        `${g('recover', 0)} recover · <b>${join} two players</b> · ${g('pause', 0)} pause · F3`;
+    if (html !== helpHtml) { helpHtml = html; help.innerHTML = html; }
   }
   refreshHelp();
 
@@ -667,7 +823,21 @@ async function boot() {
       heaviestMoved: heaviestMoved(),
     });
     game.setPhase(PHASES.SETTLEMENT);
-    invoiceScreen.show(invoice, review, summary, stats);
+    /* §13.4's saved best invoice: profit is the one number (§15.2 — the grade never hides
+     * it). Replaced only when it improves, but WRITTEN at every settlement (one setItem), so
+     * a store that refused once — quota, private mode — heals on the next run; a refused
+     * store is a false from save(), never a throw, and the sheet shows regardless (m16 V5). */
+    const prevBest = bestInvoice;
+    const isBest = !prevBest || invoice.profit > prevBest.profit;
+    if (isBest) {
+      bestInvoice = {
+        profit: invoice.profit, grade: invoice.grade.letter, score: invoice.grade.score,
+        delivered: summary.delivered, total: summary.total,
+        build: BUILD.label, date: new Date().toISOString().slice(0, 10),
+      };
+    }
+    persist();
+    invoiceScreen.show(invoice, review, summary, stats, { best: prevBest, isBest });
     game.setPaused(true);
     input.releasePointerLock && input.releasePointerLock();
   }
@@ -688,14 +858,43 @@ async function boot() {
    * is that whatever was attached to it has to be re-attached.
    */
   function resetContract() {
+    /* ORDER MATTERS HERE, and getting it wrong cost an hour.
+     *
+     * The first version cleared every tool's `attachedTo` and THEN asked the registry to detach
+     * whatever was attached — but `detachDolly` begins `if (!tool.state.attachedTo) return
+     * false`, so the detach silently did nothing and the couch kept a dolly and its 0.04
+     * friction into the next test. Two assertions then PASSED on stale state from the previous
+     * section while the one that should have passed failed, which is the worst possible way for
+     * a fixture to be wrong.
+     *
+     * So: unwind the attachments first, through the same API the game uses, and only then
+     * clear what is left.
+     *
+     * (Copied verbatim from tools/m11-tests.js reset(), which got this right before the game
+     * did: until the Phase 11 plan's M2 this function nulled the flags directly, so a couch
+     * that had the dolly under it at settlement kept friction 0.04 and the Min combine rule
+     * for every later run, a wardrobe with its doors off kept the shrunken collider, and a
+     * tool in a mover's hands kept the no-collide group and fell out of the world.) */
     straps.releaseAll();
-    damage.reset();
     route.reset();
     for (const m of movers) m.grips.releaseAll('contract reset');
+    for (const e of registry.entities.values()) {
+      if (e.state.dollyId) tools.detachDolly(tools.get(e.state.dollyId));
+      if (e.state.blanketId) tools.removeBlanket(tools.get(e.state.blanketId));
+    }
+    for (const t of tools.tools.values()) {
+      // The other direction of the same link, in case a tool and its object disagree.
+      if (t.state.attachedTo && t.def.effect === 'friction') tools.detachDolly(t);
+      else if (t.state.attachedTo && t.def.effect === 'protection') tools.removeBlanket(t);
+      if (t.state.deployed) tools.retrieveRamp(t);
+    }
     for (const s of interact.state.values()) { s.carriedTool = null; s.pendingAnchor = null; }
     strapsPlacedTotal = 0;
 
     game.reset();
+    // AFTER game.reset(): the damage system reads game.state through a getter, so this
+    // clears the NEW run's ledger and windows rather than the state just thrown away.
+    damage.reset();
 
     // Re-attach what the fresh state does not know about.
     game.state.manifest = buildManifest(PHASE5_SPAWNS);
@@ -713,7 +912,9 @@ async function boot() {
     respawnContract();
     for (const [i, m] of movers.entries()) {
       const off = MOVERS.spawnOffsets[i] || { x: 0, z: 0 };
-      m.controller.hardSetPosition({
+      // Counters and timers too, not just the position: recoveries are billed per run
+      // (invoice.js), and a knockdown timer would carry a face-down mover into the new job.
+      m.controller.resetForContract({
         x: world.spawn.x + off.x, y: world.spawn.y + 0.1, z: world.spawn.z + off.z,
       });
     }
@@ -721,17 +922,26 @@ async function boot() {
       t.state.deployed = false;
       t.state.attachedTo = null;
       t.state.carriedBy = null;
+      t.state.geometry = null;
     }
     PHASE6_TOOL_SPAWNS.forEach((s, i) => {
       const t = [...tools.tools.values()][i];
       if (!t) return;
       t.body.setBodyType(physics.R.RigidBodyType.Dynamic, true);
+      /* AND THE COLLISION GROUP. A carried tool is kinematic in `toolCarried`, which collides
+       * with nothing including the ground (world.js); restoring the body type without the
+       * group — which is what this did until M2 — sent a tool held when "Run it again" was
+       * pressed through the floor for ever (tools have no §18.3 recovery). The sibling of the
+       * Q put-down bug M1 fixed in interact._putDown. */
+      t.collider.setCollisionGroups(GROUP_PRESETS.object);
       t.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
       t.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
       t.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      t.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       t.body.wakeUp();
     });
     physics.primeQueries();
+    resetStallHint();          // once per RUN: the new contract gets its own first minute
     game.setPhase(PHASES.PICKUP);
   }
 
@@ -768,11 +978,27 @@ async function boot() {
       e.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
       e.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      /* Parts go back on THROUGH reassemble(), whose guard is `removedParts.includes(part)`:
+       * clearing the list first (which is what this did until M2) left the collider at the
+       * shrunken half-extents and the mesh scaled down for the rest of the session, with no
+       * way back because the guard then refused every reassemble. */
+      for (const p of [...(e.state.removedParts || [])]) reassemble(registry, e, p);
       e.state.condition = 100;
       e.state.recoveries = 0;
       e.state.loaded = false;
+      e.state.loadedOnTrip = null;
       e.state.cargoDwellMs = 0;
       e.state.removedParts = [];
+      e.state.dimensions = null;
+      e.state.dollyId = null;
+      e.state.blanketId = null;
+      e.state.frictionBefore = null;
+      e.state.combineRuleBefore = null;
+      e.state.everHeld = false;
+      e.state.outOfBoundsMs = 0;
+      e.state.settled = false;
+      // The §18.3 last-stable point is the spawn again, not wherever run 1 left it.
+      e.state.lastStable = { x: s.x, y: s.y, z: s.z };
       e.body.wakeUp();
     });
     physics.primeQueries();
@@ -855,6 +1081,80 @@ async function boot() {
     }
   });
 
+  /** §26.7 "identify the next objective without coaching" / §21.1 "compact objective count":
+   *  ONE line (hud.js setObjective), from the phase machine and the truck, so it can never
+   *  disagree with the contract panel above it. Device-neutral on purpose — it names the
+   *  PLACE, and the prompt under the reticle names the key when you get there. */
+  function objectiveFor(facts, routeStatus) {
+    switch (facts.phase) {
+      case PHASES.PICKUP: {
+        if (facts.loaded === 0) return 'carry a box to the truck out front';
+        const left = facts.total - facts.delivered - facts.loaded;
+        return left > 0 ? `load ${left} more, or drive from the cab` : 'all aboard — drive from the cab';
+      }
+      case PHASES.TRANSIT:
+        return routeStatus && routeStatus.state === 'driving'
+          ? `on the road — ${routeStatus.event || Math.round(routeStatus.progress * 100) + '% there'}`
+          : 'on the road';
+      case PHASES.DELIVERY: {
+        const left = facts.total - facts.delivered;
+        return left > 0 ? `unload — ${left} left, each to its room` : 'all delivered — settle up at the cab';
+      }
+      case PHASES.SETTLEMENT: return 'settling up';
+      default: return '';
+    }
+  }
+
+  /**
+   * Everything the HUD is told each frame, in ONE place. The render loop calls it after the
+   * cameras move; a suite calls it directly, because headless Chrome never runs the loop
+   * (1-3 rAF callbacks total, Dev\INDEX.md) and the prompt, glyph and objective assertions
+   * (m11 O, m12 K) need the HUD fed exactly as the loop feeds it, not by a hand-built
+   * approximation. READS state and never writes it (§22.2).
+   */
+  function feedHuds(rects = layoutFor(seatCount, canvas.clientWidth || 0, canvas.clientHeight || 0)) {
+    settleDevices();
+    const summary = manifestSummary(game.state.manifest);
+    const packQuality = cargo.packQuality();
+    const routeStatus = route.status();
+    const contractPanel = contractFacts(summary);
+    const objective = objectiveFor(contractPanel, routeStatus);
+
+    for (let s = 0; s < seatCount; s++) {
+      const me = moverOfSeat(s);
+      const h = huds[s];
+      const rect = rects[s];
+
+      if (seatCount > 1) h.setRect(rect); else h.clearRect();
+      // §26.5: whose half, and which device drives it, in words; the glyphs follow the device.
+      const glyphs = input.glyphsFor(s, shownDevice[s]);
+      h.setSeatTag(seatCount > 1 ? `P${s + 1} · ${me.id} · ${deviceName(shownDevice[s], s)}` : '');
+
+      h.update(me.grips.status(), glyphs);
+      const described = interact.describe(me);
+      h.setPrompt(described, glyphs);
+
+      // §9.2's "readable preview and valid/invalid affordance" while a strap is half-placed.
+      const istate = interact._for(me.id);
+      if (istate.pendingAnchor) {
+        const anchor = interact.anchors.find((a) => a.id === istate.pendingAnchor);
+        const t = described.target;
+        strapLines.showGuide(anchor, t && t.point, t && t.kind === 'object', s);
+      } else {
+        strapLines.hideGuide(s);
+      }
+
+      /* The contract, the cargo and the route are ONE CONTRACT'S facts, so both halves show
+       * the same numbers. §11.2's "coarse cargo-status indicator" is a property of the truck,
+       * not of the player looking at it — giving each seat a private version would invent a
+       * disagreement the simulation does not have. */
+      h.setContract(contractPanel);
+      h.setObjective(objective);
+      h.setCargo(packQuality);
+      h.setRoute(routeStatus);
+    }
+  }
+
   // ---- main loop ------------------------------------------------------------------------
   let lastT = performance.now();
   function loop(now) {
@@ -887,44 +1187,15 @@ async function boot() {
 
     /* ---- per-seat presentation. READS state and never writes it (§22.2). ---------------- */
     const rects = layoutFor(seatCount, canvas.clientWidth || 0, canvas.clientHeight || 0);
-    const summary = manifestSummary(game.state.manifest);
-    const packQuality = cargo.packQuality();
-    const routeStatus = route.status();
-    const contractPanel = contractFacts(summary);
-
     for (let s = 0; s < seatCount; s++) {
       const me = moverOfSeat(s);
-      const h = huds[s];
-      const rect = rects[s];
-
       me.rig.update(game.state.players[me.id].position, dt);
-      applyAspect(me.camera, rect);
-
-      if (seatCount > 1) h.setRect(rect); else h.clearRect();
-      h.setSeatTag(seatCount > 1 ? `P${s + 1} · ${me.id}` : '');
-
-      h.update(me.grips.status());
-      const described = interact.describe(me);
-      h.setPrompt(described);
-
-      // §9.2's "readable preview and valid/invalid affordance" while a strap is half-placed.
-      const istate = interact._for(me.id);
-      if (istate.pendingAnchor) {
-        const anchor = interact.anchors.find((a) => a.id === istate.pendingAnchor);
-        const t = described.target;
-        strapLines.showGuide(anchor, t && t.point, t && t.kind === 'object', s);
-      } else {
-        strapLines.hideGuide(s);
-      }
-
-      /* The contract, the cargo and the route are ONE CONTRACT'S facts, so both halves show
-       * the same numbers. §11.2's "coarse cargo-status indicator" is a property of the truck,
-       * not of the player looking at it — giving each seat a private version would invent a
-       * disagreement the simulation does not have. */
-      h.setContract(contractPanel);
-      h.setCargo(packQuality);
-      h.setRoute(routeStatus);
+      applyAspect(me.camera, rects[s]);
     }
+    // The HUD text — prompt glyphs, objective, contract, cargo, route — in the one function
+    // the suites can call too (feedHuds, above). Cameras first, so the prompt reads this
+    // frame's aim.
+    feedHuds(rects);
     divider.update(rects);
 
     while (pendingNotices.length) {
@@ -994,10 +1265,21 @@ async function boot() {
     destZones: DEST_ZONES, destShell: DEST_SHELL, insideDestination,
     damage, route, interact, strapLines, invoiceScreen, settle,
     pauseScreen,
+    /* Settings (M4): the panel, the store it views, and the best invoice it persists. */
+    settingsPanel, settingsStore,
+    get bestInvoice() { return bestInvoice; },
+    get shellSettings() { return { ...shell }; },
     /* The notice queue and the contract panel's facts, because the render loop that drains
      * one and feeds the other never runs under headless Chrome (1-3 rAF callbacks total). A
      * suite asserts the 'arrived' notice and the phase word through these. */
     pendingNotices, contractFacts,
+    /* The HUD feed, the objective line, the debounced device per seat and the stall timer
+     * (M5): the render loop never runs under headless Chrome, so a suite feeds the HUD the
+     * way the loop does and reads back what it showed (m11 O, m12 K). */
+    feedHuds, objectiveFor, shownDevice: (s) => shownDevice[s], stallHint, resetStallHint,
+    /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
+     * through the settlement sheet and assert what the invoice will be told (M2). */
+    resetContract, recoveryCount,
     buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },
@@ -1025,6 +1307,15 @@ async function boot() {
 
 /** §4.2's Shift is sprint-when-free and brace-when-gripping. Grips arrive in Phase 2; this
  *  is the one place that decides which meaning applies. */
+/** `?tier=gpu|software` from the URL, or null. detectRenderTier reads the same parameter; it
+ *  is asked here only to decide whether the SAVED tier may speak at all (the URL wins). */
+function tierFromLocation() {
+  try {
+    const t = new URLSearchParams(location.search).get('tier');
+    return (t === 'gpu' || t === 'software') ? t : null;
+  } catch (e) { return null; }
+}
+
 function hasAnyGrip(p) {
   return !!(p.grips && (p.grips.left || p.grips.right));
 }

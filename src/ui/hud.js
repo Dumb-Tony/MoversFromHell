@@ -18,7 +18,20 @@
  * The DOM is touched only when something actually changed. A HUD that rewrites innerHTML
  * every frame is a HUD that eats the §26.6 frame budget, and this one is updated from the
  * render loop at whatever rate the game runs.
+ *
+ * GLYPHS ARE DERIVED, NEVER TYPED (Phase 11 build-side M5). For fifteen phases this file
+ * printed a literal 'E', 'Q' and 'LMB / RMB' for every seat, so seat 1 — Quote/Semicolon/[ ]
+ * on the keyboard, X/RB/LT/RT on a pad — was told to press keys it does not have (§26.5
+ * "both input mappings"). Every glyph now arrives as a `glyphs` set from input.glyphsFor(),
+ * which reads the live binding table; the default, when nobody passes one, is the same
+ * function on the shipped table for this seat's keyboard. The VERB never changes — only the
+ * key chip — because the verb is what the player (and m11 B6/D4/E3) reads.
  */
+
+import { glyphsFor } from '../core/input.js';
+
+/** Tokens a device-neutral hint may carry; setPrompt resolves them from the glyph set. */
+const GLYPH_TOKEN = /\{(primary|secondary|gripL|gripR)\}/g;
 
 export class Hud {
   /* CLASSES, NOT IDS. There is one HUD per SEAT in co-op (§6.4), and two elements sharing an
@@ -38,7 +51,10 @@ export class Hud {
       </div>
       <div class="grip-label"></div>
       <div class="prompt"></div>
-      <div class="contract"></div>
+      <div class="corner-tl">
+        <div class="contract"></div>
+        <div class="objective"></div>
+      </div>
       <div class="cargo-status"></div>
       <div class="route-bar"><div class="fill"></div><span class="label"></span></div>
       <div class="notices"></div>
@@ -51,6 +67,7 @@ export class Hud {
     this.label = this.el.querySelector('.grip-label');
     this.prompt = this.el.querySelector('.prompt');
     this.contract = this.el.querySelector('.contract');
+    this.objective = this.el.querySelector('.objective');
     this.cargoStatus = this.el.querySelector('.cargo-status');
     this.routeBar = this.el.querySelector('.route-bar');
     this.routeFill = this.routeBar.querySelector('.fill');
@@ -105,8 +122,10 @@ export class Hud {
     node.innerHTML = html;
   }
 
-  /** §21.1's reticle. Unchanged from Phase 2 — it was already right. */
-  update(status) {
+  /** §21.1's reticle. Unchanged from Phase 2 — it was already right.
+   *  @param {object} [glyphs]  from input.glyphsFor(seat, device); this seat's keyboard set
+   *                            when absent. */
+  update(status, glyphs = null) {
     for (const [side, el] of [['left', this.left], ['right', this.right]]) {
       const g = status[side];
       const cls = 'hand ' + side +
@@ -120,7 +139,10 @@ export class Hud {
     if (slipping) { text = 'SLIPPING'; cls = 'slipping'; }
     else if (held.length === 2 && held[0].entityId === held[1].entityId) { text = 'two hands'; cls = 'holding'; }
     else if (held.length) { text = 'holding'; cls = 'holding'; }
-    else if (status.hovered) { text = 'hold LMB / RMB to grab'; cls = 'ready'; }
+    else if (status.hovered) {
+      const g = glyphs || glyphsFor(this.seat, 'kbm');
+      text = `hold ${g.gripL} / ${g.gripR} to grab`; cls = 'ready';
+    }
     if (this.label.textContent !== text) this.label.textContent = text;
     /* THE STRUCTURAL CLASS HAS TO SURVIVE THE STATE CLASS. This line read
      * `this.label.className = cls`, which was safe for five phases because the element was
@@ -136,15 +158,34 @@ export class Hud {
    * §4.4's visible meaning for a context-sensitive key.
    *
    * @param {{primary, secondary, hint, carrying}} d  from InteractionSystem.describe()
+   * @param {object} [glyphs]  from input.glyphsFor(seat, device); this seat's keyboard set
+   *                           when absent (m11 F3 reads 'E' for seat 0 with no argument).
+   *                           A `hint` may carry {gripL}/{gripR}/{primary}/{secondary}
+   *                           tokens — interact.js is device-neutral; the HUD resolves them.
    */
-  setPrompt(d) {
+  setPrompt(d, glyphs = null) {
     if (!d) { this._set(this.prompt, 'prompt', ''); return; }
+    const g = glyphs || glyphsFor(this.seat, 'kbm');
     const bits = [];
     if (d.carrying) bits.push(`<span class="carry">carrying: ${esc(d.carrying)}</span>`);
-    if (d.primary) bits.push(`<span class="key">E</span> ${esc(d.primary)}`);
-    if (d.secondary) bits.push(`<span class="key alt">Q</span> ${esc(d.secondary)}`);
-    if (!d.primary && !d.secondary && d.hint) bits.push(`<span class="hint">${esc(d.hint)}</span>`);
+    if (d.primary) bits.push(`<span class="key">${esc(g.primary)}</span> ${esc(d.primary)}`);
+    if (d.secondary) bits.push(`<span class="key alt">${esc(g.secondary)}</span> ${esc(d.secondary)}`);
+    if (!d.primary && !d.secondary && d.hint) {
+      const hint = esc(d.hint).replace(GLYPH_TOKEN, (_, k) => esc(g[k] || ''));
+      bits.push(`<span class="hint">${hint}</span>`);
+    }
     this._set(this.prompt, 'prompt', bits.join('<span class="sep">·</span>'));
+  }
+
+  /**
+   * §26.7 "identify the next objective without coaching" / §21.1 "compact objective count".
+   * ONE line under the contract panel, derived every frame from the phase machine and the
+   * truck (main.js objectiveFor) — never a checklist, which §21.1 forbids over the working
+   * area and which 23 rows would be. Device-neutral: it names the PLACE; the prompt under
+   * the reticle names the key when you get there.
+   */
+  setObjective(text) {
+    this._set(this.objective, 'objective', text ? `<b>next</b> ${esc(text)}` : '');
   }
 
   /**

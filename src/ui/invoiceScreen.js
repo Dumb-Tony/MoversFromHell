@@ -42,9 +42,22 @@ export class InvoiceScreen {
    * @param {object} review   reviewFor()
    * @param {object} summary  manifestSummary()
    * @param {object} stats    contributionStats()
+   * @param {object} [extras]
+   * @param {object|null} [extras.best]  §13.4's saved best invoice BEFORE this run
+   *        ({profit, grade, build}), from src/core/save.js — null on a fresh machine
+   * @param {boolean} [extras.isBest]  this run beat it (or is the first)
    */
-  show(invoice, review, summary, stats) {
+  show(invoice, review, summary, stats, extras = {}) {
     const money = (n) => (n < 0 ? '−' : '') + Math.abs(n).toFixed(2);
+
+    /* The one number that persists between runs (§13.4 "saved best invoice", §21.2 replay).
+     * Words, not a medal: a loss can still be the best so far, and §15.2 says the sheet is
+     * the same sheet either way. */
+    const best = extras.best || null;
+    let bestLine = '';
+    if (extras.isBest && best) bestLine = `new best so far — was ${money(best.profit)} (${esc(best.grade)})`;
+    else if (extras.isBest) bestLine = 'first settlement on this machine — kept as the best so far';
+    else if (best) bestLine = `best so far ${money(best.profit)} (${esc(best.grade)}) · ${esc(best.build)}`;
 
     const rows = invoice.lines.map((l) => `
       <div class="line ${l.amount < 0 ? 'out' : 'in'}">
@@ -77,6 +90,7 @@ export class InvoiceScreen {
           <span>${loss ? 'LOSS' : 'PROFIT'}</span>
           <span class="amt">${money(invoice.profit)}</span>
         </div>
+        <div class="best${extras.isBest ? ' new' : ''}">${bestLine}</div>
 
         <div class="grade">
           <span class="letter g-${invoice.grade.letter}">${invoice.grade.letter}</span>

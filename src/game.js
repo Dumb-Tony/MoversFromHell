@@ -102,7 +102,9 @@ export class Game {
   /** One RENDER frame. Returns steps executed, so the overlay can show catch-up. */
   frame(realDeltaMs) {
     this.stats.frames++;
-    if (this.input) this.input.poll();          // gamepad is poll-only; must precede steps
+    // Gamepad is poll-only; must precede steps. The frame length scales stick/key look so
+    // 'sensitivity' is per second, not per refresh (input.js poll).
+    if (this.input) this.input.poll(realDeltaMs);
     const steps = this.clock.advance(realDeltaMs, (stepMs, simTimeMs) => this.step(stepMs, simTimeMs));
     this._notify();
     return steps;

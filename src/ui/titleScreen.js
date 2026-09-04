@@ -39,7 +39,8 @@ export class TitleScreen {
         </p>
 
         <button class="play" type="button">START THE JOB</button>
-        <div class="alt">Enter · Space · <span class="key">A</span> on a controller</div>
+        <div class="alt">Enter · Space · <span class="key">A</span> on a controller
+          · <button class="settings" type="button" data-act="settings">Settings</button></div>
 
         <div class="cols">
           <div>
@@ -70,12 +71,20 @@ export class TitleScreen {
     root.appendChild(this.el);
 
     this.onStart = null;
+    /** §21.4: the settings panel is reachable BEFORE the job starts as well as from the pause
+     *  card (Phase 11 build-side M4). main.js registers the panel's show(). */
+    this.onSettings = null;
     this._done = false;
 
     const start = () => this.start();
     this.el.querySelector('.play').addEventListener('click', start);
+    this.el.querySelector('.settings').addEventListener('click', () => {
+      if (this.onSettings) this.onSettings();
+    });
     this._key = (e) => {
       if (this._done) return;
+      // Enter/Space on the focused Settings button is that button's click, not a start.
+      if (e.target && e.target.closest && e.target.closest('button.settings')) return;
       if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
         start();

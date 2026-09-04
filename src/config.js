@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 16,
-  label: 'phase-16',
+  phase: 17,
+  label: 'phase-17',
   date: '2026-09-04',
 });
 
@@ -322,6 +322,26 @@ export const COOP = Object.freeze({
   /** §4.1's boom, shortened for a half-width viewport: the same 4 m in half the horizontal
    *  field frames much less of the room, and the working area is what matters. */
   cameraDistance: 3.2,
+});
+
+/* Phase 11 build-side M5 — the first-minute comprehension layer (§21.3, §26.5, §26.7). */
+export const PROMPTS = Object.freeze({
+  /** §26.5 "both input mappings": a seat's prompt glyphs follow the device it last used —
+   *  but only once it has been that device for this long of SIM time. `activeDevice` flips
+   *  on ANY pad activity (a stick a hair past its deadzone flips it every poll), and an
+   *  undebounced prompt flickered E/X at frame rate. 250 ms = 15 steps: invisible on a real
+   *  switch, immune to a one-poll blip. Sim time, so a paused game neither counts nor
+   *  flickers (m12 K3). */
+  deviceDebounceMs: 250,
+});
+export const CONTRACT = Object.freeze({
+  /** §21.3's first step, advised rather than taught (Dev\INDEX.md → AirportBaggageCrew
+   *  onboarding: "a first-minute rail with NO training pauses" — a STALL TIMER, not a route
+   *  check). If nobody has gripped anything this far into the pickup, one notice says how.
+   *  SIM time, so a paused game cannot fire it (m0 E3); once per run; the first grip retires
+   *  it (m11 O6). 30 s: long enough to have walked the house and looked at the truck, short
+   *  enough to reach a tester before the first minute is over. */
+  stallHintMs: 30000,
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */
@@ -730,6 +750,39 @@ export const MANIFEST = Object.freeze({
   /** §12.3 "settled ... for a dwell time". Long enough that skidding through does not
    *  count, short enough that it never feels like the game is withholding credit. */
   dwellMs: 1200,
+});
+
+/** §21.4 settings panel + §26.6 versioned, device-local save (Phase 11 build-side M4).
+ *
+ *  The input keys and their defaults live with their consumer (input.js DEFAULT_SETTINGS);
+ *  THIS is where every slider's bounds and the shell's own settings are tuned. `ranges` is
+ *  what sanitiseSettings() clamps to, so a hand-edited save cannot set a 400× mouse. */
+export const SETTINGS = Object.freeze({
+  /** One localStorage key; the payload carries `schema` and a load with any other schema
+   *  returns defaults and leaves the blob untouched (§26.6, §27.1). */
+  saveKey: 'mfh.save',
+  schema: 1,
+  /** Hard caps on the strings a saved best invoice may carry back into the DOM. */
+  textLimits: { grade: 2, build: 40, date: 10 },
+  /** The frame the pad/key look rates are authored against (one 60 Hz frame). poll(frameMs)
+   *  scales by frameMs / this, so 'sensitivity' is a rad/s and not a rad/refresh. */
+  lookRefFrameMs: 16.667,
+  ranges: {
+    mouseSensitivity:   { min: 0.2, max: 4.0, step: 0.1 },
+    padLookSensitivity: { min: 0.5, max: 6.0, step: 0.1 },
+    keyLookRate:        { min: 4,   max: 40,  step: 1 },
+    stickDeadzone:      { min: 0,   max: 0.6, step: 0.02 },
+    triggerThreshold:   { min: 0.1, max: 0.9, step: 0.05 },
+    /** UI scale is the `--ts` CSS variable every font-size in styles.css multiplies by. */
+    uiScale:            { min: 0.8, max: 1.6, step: 0.1 },
+    /** The boom, in metres, inside the rig's own clamp (RENDER.camera.distanceMin/Max). */
+    cameraDistance:     { min: RENDER.camera.distanceMin, max: RENDER.camera.distanceMax, step: 0.1 },
+  },
+  /** Settings that are the SHELL's, not the input layer's. Persisted beside the input keys. */
+  shellDefaults: { uiScale: 1, cameraDistance: RENDER.camera.distance, tier: 'auto' },
+  /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
+   *  the tier decides how many shadow maps get BUILT, before the scene exists. */
+  tiers: ['auto', 'gpu', 'software'],
 });
 
 /** §22.5 debug + performance instrumentation. Validated: Phase 0. */

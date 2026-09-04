@@ -398,7 +398,7 @@ lines.push('--- I. §21.1 centre clear (m11 F2 repaired), the M4 slot, the blur 
   const ps = M.pauseScreen;
   const sb = card().querySelector('[data-act="settings"]');
   ok('I1 a Settings slot exists for M4', !!sb);
-  eq('I1a …hidden while nothing has registered a handler', sb.hidden, true);
+  eq('I1a …shown, because M4 registers a settings handler at boot (was hidden until then)', sb.hidden, false);
   let opened = 0;
   ps.onSettings = () => opened++;
   ps.refresh();

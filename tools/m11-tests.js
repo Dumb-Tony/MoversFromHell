@@ -21,6 +21,7 @@
  */
 
 import { SIM, TOOLS, MANIFEST } from '../src/config.js';
+import { CONTRACT } from '../src/config.js';   // Phase 11 build-side M5, section O
 import { TARGET } from '../src/player/interact.js';
 import { STRAP_STATE } from '../src/cargo/straps.js';
 import { cabPoint, cargoAnchors, cargoInterior, rampAnchorPoint } from '../src/world/truck.js';
@@ -29,6 +30,10 @@ import { reassemble } from '../src/tools/tools.js';
 import { GROUP_PRESETS } from '../src/physics/world.js';
 import { EVENTS, PHASES } from '../src/core/eventBus.js';
 import { routeSteps } from '../src/drive/route.js';
+/* Phase 11 plan M2 (replay unwinds through the real API) — what section G13-G17 pins. */
+import { RECOVERY } from '../src/config.js';
+import { LINE_KINDS } from '../src/contract/invoice.js';
+import { disassemble } from '../src/tools/tools.js';
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -732,6 +737,284 @@ lines.push('--- G. settlement (GDD §15.2) ---');
   ok('T1c …with the phase clock back at zero for the new run',
      Object.values(game.state.telemetry.phaseMs).every((v) => v === 0),
      JSON.stringify(game.state.telemetry.phaseMs));
+}
+emit('running...');
+
+/* ── G13-G17. replay unwinds what the run attached (Phase 11 plan M2) ────── */
+lines.push('--- G13-G17. replay unwinds through the real API (GDD §26.6, §26.4, §27.1) ---');
+{
+  /* §26.6: "reset removes transient straps, grips, damage records, fragments and route
+   * state." Until M2, resetContract nulled the tool FLAGS and left the EFFECTS: a couch with
+   * the dolly under it at settlement kept friction 0.04 and the Min combine rule for every
+   * later run, a wardrobe with its doors off kept the shrunken collider (and reassemble's
+   * guard then refused to ever restore it), a ramp in the mover's hands kept the no-collide
+   * group and fell through the world, run 1's recovery was billed again on run 2, and — the
+   * one that mattered most — the damage system kept writing to the state object game.reset()
+   * had thrown away, so no replay was ever billed for item damage. G11 passed vacuously.
+   *
+   * So: attach everything a run can attach, settle, press "Run it again", and check each is
+   * really gone rather than flagged gone. The game is in PICKUP after G8's replay. */
+  reset();
+  const couch = byDef('couch_3seat_01');
+  const wardrobe = byDef('wardrobe_01');
+  const tv = byDef('tv_55_01');
+  const dolly = toolByDef('dolly_flat_01');
+  const sd = toolByDef('screwdriver_01');
+  const ramp = toolByDef('ramp_01');
+  const R = physics.R;
+
+  // Dolly under the couch, the section-C way.
+  parkAt(couch, -30, 0.45, 30);
+  let p = posOf(dolly);
+  lookAt(me(), standOffFrom(p, 1.2), p);
+  interact.act(me());
+  step(10);
+  lookAt(me(), standOffFrom({ x: -30, y: 0.45, z: 30 }, 1.5), { x: -30, y: 0.45, z: 30 });
+  interact.act(me());
+  const dollyOn = couch.state.dollyId === dolly.id && couch.collider.friction() < 0.1;
+
+  // Wardrobe doors off, the section-C way; then the screwdriver goes down (Q, looking at
+  // nothing — Q at the wardrobe would put the doors back on).
+  parkAt(wardrobe, -34, 1.02, 30);
+  p = posOf(sd);
+  lookAt(me(), standOffFrom(p, 1.1), p);
+  interact.act(me());
+  step(6);
+  lookAt(me(), standOffFrom({ x: -34, y: 1.0, z: 30 }, 1.5), { x: -34, y: 1.0, z: 30 });
+  interact.act(me());
+  const doorsOff = (wardrobe.state.removedParts || []).includes('doors') &&
+    wardrobe.collider.halfExtents().z * 2 < wardrobe.def.dimensions.z - 1e-6;
+  lookAt(me(), { x: -20, z: 60 }, { x: -20, y: 0.2, z: 90 });
+  interact.secondary(me());
+
+  // The ramp in hand at settlement — the sibling of M1's Q put-down bug.
+  p = posOf(ramp);
+  lookAt(me(), standOffFrom(p, 1.2), p);
+  interact.act(me());
+  const rampCarried = interact._for(me().id).carriedTool === ramp.id &&
+    ramp.collider.collisionGroups() === GROUP_PRESETS.toolCarried;
+
+  // One mover recovery this run (§18.3), billed on THIS run's invoice and no other.
+  me().controller.recoverNow('fixture');
+  const recovered = me().controller.recoveries === 1 && M.recoveryCount() === 1;
+  ok('G13a fixture: dolly under the couch, doors off, ramp carried, one recovery',
+     dollyOn && doorsOff && rampCarried && recovered,
+     `dolly=${dollyOn} doors=${doorsOff} ramp=${rampCarried} recovered=${recovered} ` +
+     `(carried=${interact._for(me().id).carriedTool})`);
+
+  M.settle();
+  const text1 = M.invoiceScreen.el.textContent;
+  ok('G17a run 1\'s invoice bills the recovery it had', text1.includes(LINE_KINDS.RECOVERY),
+     text1.replace(/\s+/g, ' ').slice(0, 120));
+
+  M.invoiceScreen.onReplay();
+  eq('G13b …and "Run it again" returns to PICKUP, unpaused', game.state.phase + (game.state.paused ? '/paused' : ''), 'pickup');
+
+  // G14 — the dolly's effect is gone, not just its flag.
+  const mu = couch.collider.friction();
+  ok('G14 after replay the couch has its own friction back (0.35 ± 1e-6, was 0.04 for ever)',
+     Math.abs(mu - couch.def.physics.friction) < 1e-6 && Math.abs(couch.def.physics.friction - 0.35) < 1e-9,
+     `mu=${mu} want ${couch.def.physics.friction}`);
+  ok('G14 …and the Average combine rule (the dolly\'s Min rule is gone)',
+     couch.collider.frictionCombineRule() === R.CoefficientCombineRule.Average,
+     `rule=${couch.collider.frictionCombineRule && couch.collider.frictionCombineRule()} want ${R.CoefficientCombineRule.Average}`);
+  ok('G14 …with both ends of the link cleared', couch.state.dollyId == null && dolly.state.attachedTo == null,
+     `dollyId=${couch.state.dollyId} attachedTo=${dolly.state.attachedTo}`);
+
+  // G15 — the wardrobe is whole again, and can be taken apart again.
+  const wz = wardrobe.collider.halfExtents().z * 2;
+  ok('G15 after replay the wardrobe collider is its full size again (0.60 ± 1e-6)',
+     Math.abs(wz - wardrobe.def.dimensions.z) < 1e-6 && Math.abs(wardrobe.def.dimensions.z - 0.60) < 1e-9,
+     `${wz.toFixed(4)} vs ${wardrobe.def.dimensions.z}`);
+  ok('G15 …the mesh scale is 1 and removedParts is empty',
+     wardrobe.mesh.scale.z === 1 && wardrobe.mesh.scale.x === 1 && wardrobe.mesh.scale.y === 1 &&
+     (wardrobe.state.removedParts || []).length === 0,
+     `scale=${wardrobe.mesh.scale.z} parts=${JSON.stringify(wardrobe.state.removedParts)}`);
+  const again = disassemble(registry, wardrobe, 'doors');
+  ok('G15 …and disassemble() works again (reassemble\'s guard was permanently refusing it)',
+     !!again && wardrobe.collider.halfExtents().z * 2 < wardrobe.def.dimensions.z - 1e-6,
+     again ? JSON.stringify(again.after) : 'null');
+  reassemble(registry, wardrobe, 'doors');
+
+  // G16 — a tool carried into the settlement is back in the world, not falling through it.
+  ok('G16 after replay the carried ramp is dynamic and back in the object collision group',
+     ramp.body.isDynamic() && ramp.collider.collisionGroups() === GROUP_PRESETS.object &&
+     !interact._for(me().id).carriedTool && ramp.state.carriedBy == null,
+     `dynamic=${ramp.body.isDynamic()} groups=${ramp.collider.collisionGroups()} want ${GROUP_PRESETS.object}`);
+  for (let k = 0; k < 120; k++) M.game.frame(FRAME);
+  const ry = posOf(ramp).y;
+  ok('G16 …and after 120 frames it is resting on the rack, above the recovery floor',
+     ry > RECOVERY.objectFloorY && ry > 0, `y=${ry.toFixed(3)} (floor ${RECOVERY.objectFloorY})`);
+
+  // G13 — damage on the replayed run reaches THIS run's ledger and its invoice.
+  const ledger0 = game.state.ledger.itemDamage.length;
+  parkAt(tv, -38, tv.def.dimensions.y / 2 + 1.5, 30, Math.PI / 2);
+  for (let k = 0; k < 150; k++) M.game.frame(FRAME);
+  damage.flush(game.clock.simTimeMs);
+  const ledger = game.state.ledger.itemDamage;
+  ok('G13 a TV dropped from 1.5 m AFTER a replay reaches game.state\'s ledger (was written to the orphaned run-1 state)',
+     ledger0 === 0 && ledger.length >= 1 && damage.state === game.state,
+     `${ledger0} -> ${ledger.length} lines; damage.state is game.state: ${damage.state === game.state}`);
+  const summary2 = M.manifestSummary(game.state.manifest);
+  const inv2 = M.buildInvoice(game.state, summary2, { recoveries: M.recoveryCount(), collisions: 0 });
+  const itemLine = inv2.lines.find((l) => l.kind === LINE_KINDS.ITEM_DAMAGE);
+  ok('G13 …and the invoice carries an item-damage line citing every ledger entry',
+     !!itemLine && itemLine.from.length === ledger.length && ledger.length >= 1,
+     itemLine ? `${itemLine.from.length} of ${ledger.length} cited, ${itemLine.amount.toFixed(2)}` : 'no item-damage line');
+  const rec2 = M.reconcile(inv2, game.state, { recoveries: M.recoveryCount(), collisions: 0 });
+  ok('G13 …which reconcile() re-derives from the records', rec2.ok, rec2.problems.join(' | '));
+
+  // G17 — run 2 had no recovery, so run 2's invoice has no recovery line.
+  M.settle();
+  const text2 = M.invoiceScreen.el.textContent;
+  eq('G17 no recovery happened on run 2, and none is counted at its settlement', M.recoveryCount(), 0);
+  ok('G17 …so run 2\'s invoice has no recovery-fee line (run 1\'s was billed again before M2)',
+     !text2.includes(LINE_KINDS.RECOVERY) && !inv2.lines.find((l) => l.kind === LINE_KINDS.RECOVERY),
+     text2.replace(/\s+/g, ' ').slice(0, 120));
+  ok('G17 …while its item-damage line is on screen (§26.4 invoice accuracy on replay)',
+     text2.includes(LINE_KINDS.ITEM_DAMAGE), text2.replace(/\s+/g, ' ').slice(0, 120));
+  M.invoiceScreen.onReplay();
+  eq('G17 …and a third run starts clean', game.state.ledger.itemDamage.length + M.recoveryCount() + straps.count, 0);
+}
+emit('running...');
+
+/* ── O. the first minute (Phase 11 build-side M5: §26.7, §21.1, §21.3, §26.5) ────────
+ *
+ * §26.7 rests on "identify the next objective without coaching". Before M5 that rested on
+ * 'PICKUP · manifest 0/23' and the cab prompt: nothing said where the truck was, nothing
+ * said which room an item was for until the FIRST WRONG DELIVERY, and a player who never
+ * found the grab buttons was never told. Everything here is read back through M.feedHuds(),
+ * the one function the render loop uses, because headless Chrome never runs the loop.
+ */
+lines.push('--- O. the next objective, the room, and the stall hint (M5: §26.7, §21.1, §21.3) ---');
+{
+  reset();
+  route.reset();
+  M.feedHuds();
+  const obj = () => hud.el.querySelector('.objective').textContent.replace(/\s+/g, ' ').trim();
+  eq('O0 the run is back in PICKUP with nothing loaded',
+     `${game.state.phase}/${cargo.loadedEntities().length}`, 'pickup/0');
+  ok('O1 pickup, nothing loaded: the objective names the truck', /truck/i.test(obj()), obj());
+
+  // One box into the truck, counted by cargo.step the way a carried one would be.
+  const box = byDef('box_small_01');
+  const boxWas = posOf(box);
+  parkAt(box, M.truckPose.x, I.minY + 0.30, I.maxZ - 1.0);
+  let dwell = 0;
+  while (cargo.loadedEntities().length === 0 && dwell < 240) { M.game.frame(FRAME); dwell++; }
+  eq('O2 a box parked in the truck counts as loaded', cargo.loadedEntities().length, 1);
+  M.feedHuds();
+  ok('O2 …and the objective now offers the drive, with the count left to load',
+     /drive/i.test(obj()) && /\b22\b/.test(obj()), obj());
+  parkAt(box, boxWas.x, boxWas.y, boxWas.z);
+  for (let k = 0; k < 20 && cargo.loadedEntities().length > 0; k++) M.game.frame(FRAME);
+
+  // DELIVERY: how many are left. Phase set silently, the way reset() does (no event).
+  game.state.phase = PHASES.DELIVERY;
+  M.feedHuds();
+  const sum = M.manifestSummary(game.state.manifest);
+  const left = sum.total - sum.delivered;
+  ok(`O3 in DELIVERY the objective counts what is left (${left})`,
+     /unload/i.test(obj()) && new RegExp(`\\b${left}\\b`).test(obj()), obj());
+  game.state.phase = PHASES.TRANSIT;
+  M.feedHuds();
+  ok('O3a in TRANSIT it is the road', /road/i.test(obj()), obj());
+  game.state.phase = PHASES.PICKUP;
+  M.feedHuds();
+
+  /* O4 — the room, BEFORE the pickup. The couch is a living-room item; the hint says so
+   * while it still stands in the pickup house. By ENTITY, not by definition: box_small_01
+   * spawns five times across three rooms, so a defId lookup would name one room for all. */
+  const couch = byDef('couch_3seat_01');
+  const couchWas = posOf(couch);
+  parkAt(couch, -30, 0.45, 30);
+  lookAt(me(), standOffFrom({ x: -30, y: 0.45, z: 30 }, 1.5), { x: -30, y: 0.45, z: 30 });
+  const seen = interact.describe(me());
+  const couchRow = game.state.manifest.find((r) => r.entityId === couch.id);
+  eq('O4 the couch is a manifest item bound for the living room', couchRow && couchRow.toZone, 'dest_living');
+  ok('O4 …and the hint under the reticle names the room before the pickup (§21.1, §26.5)',
+     seen.target.kind === TARGET.OBJECT && /living/i.test(seen.hint || ''),
+     seen.hint || `kind=${seen.target.kind} primary=${seen.primary}`);
+  ok('O4a the hint is device-neutral until the HUD resolves it',
+     /\{gripL\}/.test(seen.hint || '') && /\{gripR\}/.test(seen.hint || ''), seen.hint);
+  hud.setPrompt(seen);
+  ok('O4b …LMB/RMB for seat 0\'s keyboard, no token left on screen',
+     /LMB\/RMB/.test(hud.prompt.textContent) && !/\{/.test(hud.prompt.textContent), hud.prompt.textContent);
+  hud.setPrompt(seen, M.input.glyphsFor(0, 'pad'));
+  ok('O4c …LT/RT on a pad, same verb', /LT\/RT/.test(hud.prompt.textContent) && /carry/.test(hud.prompt.textContent),
+     hud.prompt.textContent);
+  const boxRows = game.state.manifest.filter((r) => r.defId === 'box_small_01');
+  const boxZones = new Set(boxRows.map((r) => r.toZone));
+  ok('O4d five box_small_01 rows span three rooms — a defId lookup could not tell them apart',
+     boxRows.length === 5 && boxZones.size === 3, `${boxRows.length} rows, ${[...boxZones].join(',')}`);
+  const kitchenBox = registry.get(boxRows.find((r) => r.toZone === 'dest_kitchen').entityId);
+  const kbWas = posOf(kitchenBox);
+  parkAt(kitchenBox, -30, 0.30, 36);
+  lookAt(me(), standOffFrom({ x: -30, y: 0.30, z: 36 }, 1.3), { x: -30, y: 0.30, z: 36 });
+  const seenBox = interact.describe(me());
+  ok('O4e …so a kitchen box says kitchen', /kitchen/i.test(seenBox.hint || ''),
+     seenBox.hint || `kind=${seenBox.target.kind}`);
+  parkAt(kitchenBox, kbWas.x, kbWas.y, kbWas.z);
+  parkAt(couch, couchWas.x, couchWas.y, couchWas.z);
+
+  // O5 — §21.1 with the new line included (F2's predicate, plus .objective), and ONE row.
+  M.feedHuds();
+  const centreClearO = ['.contract', '.cargo-status', '.notices', '.route-bar', '.objective'].every((sel) => {
+    const el = hud.el.querySelector(sel);
+    if (!el || !el.offsetParent) return true;
+    const r = el.getBoundingClientRect();
+    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    const wx = window.innerWidth / 6, wy = window.innerHeight / 6;
+    return r.right < cx - wx || r.left > cx + wx || r.bottom < cy - wy || r.top > cy + wy;
+  });
+  ok('O5 §21.1: the objective line joins the panels that stay out of the middle third', centreClearO);
+  const objEl = hud.el.querySelector('.objective');
+  const cs = getComputedStyle(objEl);
+  const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6;
+  ok('O5b …and it is ONE row (§21.1 "not a checklist")',
+     objEl.offsetHeight > 0 && objEl.offsetHeight <= 2 * lineH,
+     `${objEl.offsetHeight}px tall, line ${lineH.toFixed(1)}px: "${obj()}"`);
+  ok('O5c …that sits under the contract panel, not over it',
+     objEl.getBoundingClientRect().top >= hud.contract.getBoundingClientRect().bottom,
+     `objective top ${objEl.getBoundingClientRect().top.toFixed(0)} vs contract bottom ${hud.contract.getBoundingClientRect().bottom.toFixed(0)}`);
+
+  /* O6 — the stall hint. Advisory, once, on SIM time (Dev\INDEX.md → AirportBaggageCrew
+   * onboarding). Armed by the job starting (title.start), never by the page loading. */
+  reset();
+  for (const m of movers) m.grips.releaseAll('O6');
+  if (M.title.visible) M.title.start(); else M.stallHint.armed = true;
+  M.resetStallHint();
+  M.pendingNotices.length = 0;
+  hud._notices.length = 0;
+  const hints = () => M.pendingNotices.filter((n) => /grab|hold/.test(n.text)).length +
+                      hud._notices.filter((n) => /grab|hold/.test(n.text)).length;
+  ok('O6 the job start arms a zeroed stall timer', M.stallHint.armed && M.stallHint.ms === 0 && !M.stallHint.fired,
+     JSON.stringify(M.stallHint));
+  const t0 = game.clock.simTimeMs;
+  for (let k = 0; k < 60; k++) M.game.frame(FRAME);
+  ok('O6a 60 running frames advance it by exactly the sim clock',
+     Math.abs(M.stallHint.ms - (game.clock.simTimeMs - t0)) < 1e-6 && M.stallHint.ms > 900,
+     `${M.stallHint.ms.toFixed(1)} vs clock ${(game.clock.simTimeMs - t0).toFixed(1)} ms`);
+  game.setPaused(true);
+  const msPaused = M.stallHint.ms;
+  for (let k = 0; k < 60; k++) M.game.frame(FRAME);
+  eq('O6b 60 PAUSED frames advance it by 0 (m0 E3 through the hint)', M.stallHint.ms, msPaused);
+  game.setPaused(false);
+  M.stallHint.ms = CONTRACT.stallHintMs - 5 * STEP;
+  for (let k = 0; k < 4; k++) M.game.frame(FRAME);
+  eq(`O6c one step short of CONTRACT.stallHintMs (${CONTRACT.stallHintMs} ms) there is no hint`, hints(), 0);
+  for (let k = 0; k < 2; k++) M.game.frame(FRAME);
+  eq('O6d …and at the threshold exactly ONE notice matching /grab|hold/ is raised', hints(), 1);
+  const hintText = (M.pendingNotices.find((n) => /grab|hold/.test(n.text)) ||
+                    hud._notices.find((n) => /grab|hold/.test(n.text)) || {}).text || '';
+  ok('O6d …in seat 0\'s own glyphs (LMB / RMB), as a good-news notice',
+     /LMB \/ RMB/.test(hintText), hintText);
+  for (let k = 0; k < 120; k++) M.game.frame(FRAME);
+  eq('O6e …and never a second one this run', hints(), 1);
+  M.invoiceScreen.onReplay();
+  ok('O6f a replay re-arms it for the next run', M.stallHint.armed && !M.stallHint.fired && M.stallHint.ms === 0,
+     JSON.stringify(M.stallHint));
+  M.pendingNotices.length = 0;
 }
 emit('running...');
 

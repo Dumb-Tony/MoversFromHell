@@ -16,9 +16,14 @@
  * §20.2 asks for "restrained edge/material response, not permanent neon", which is why the
  * pending-strap guide line is dashed and dim rather than a beam.
  *
- * ONE MESH PER STRAP, REUSED. Straps come and go constantly while packing, and rebuilding
- * geometry every frame is the kind of thing that quietly costs the §26.6 frame budget. Meshes
- * are pooled by strap id and hidden rather than destroyed.
+ * ONE RECORD PER STRAP, REUSED WHILE THE STRAP LIVES, DISPOSED WHEN IT GOES. Straps come and
+ * go constantly while packing, and rebuilding geometry every frame is the kind of thing that
+ * quietly costs the §26.6 frame budget, so a strap's two segment meshes are pooled by strap
+ * id for as long as the strap exists. They are NOT kept after it: strap ids are a monotonic
+ * counter (straps.js) that never repeats, so a pool that only hid its entries grew by two
+ * meshes, two geometries and two materials for every strap ever placed in the session — the
+ * "decals" half of §26.6's "no unbounded growth over three runs" (Phase 11 plan, M2). The
+ * pool's size therefore equals the number of live straps, which tools/m14-soak-tests.js pins.
  */
 
 import { STRAP } from '../config.js';
@@ -36,25 +41,41 @@ export class StrapLines {
     this.scene = scene;
     this.straps = straps;
     this.registry = registry;
-    this.pool = new Map();          // strapId -> {mesh, material}
+    this.pool = new Map();          // strapId -> {mesh, material, mesh2, material2}
     this.guides = new Map();        // seat -> the dashed line while that player places a strap
     this._t = 0;
   }
 
-  _mesh(id) {
+  _segmentMesh() {
+    const THREE = window.THREE;
+    const material = new THREE.MeshBasicMaterial({ color: 0x39c9b0 });
+    // A unit-length box along +Z, scaled per frame — cheaper than rebuilding geometry and
+    // it keeps the strap a solid object rather than a 1px line that vanishes at distance.
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    return { mesh, material };
+  }
+
+  /** The strap's record: two segments through the sag point, so the line bends. */
+  _rec(id) {
     let rec = this.pool.get(id);
     if (!rec) {
-      const THREE = window.THREE;
-      const material = new THREE.MeshBasicMaterial({ color: 0x39c9b0 });
-      // A unit-length box along +Z, scaled per frame — cheaper than rebuilding geometry and
-      // it keeps the strap a solid object rather than a 1px line that vanishes at distance.
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
-      mesh.frustumCulled = false;
-      this.scene.add(mesh);
-      rec = { mesh, material };
+      const a = this._segmentMesh(), b = this._segmentMesh();
+      rec = { mesh: a.mesh, material: a.material, mesh2: b.mesh, material2: b.material };
       this.pool.set(id, rec);
     }
     return rec;
+  }
+
+  /** Release a strap's record for good: out of the scene, GPU buffers freed, out of the pool. */
+  _evict(id, rec) {
+    for (const mesh of [rec.mesh, rec.mesh2]) {
+      this.scene.remove(mesh);
+      if (mesh.geometry && mesh.geometry.dispose) mesh.geometry.dispose();
+      if (mesh.material && mesh.material.dispose) mesh.material.dispose();
+    }
+    this.pool.delete(id);
   }
 
   /** Presentation only — runs on the render frame and never writes to state (§22.4). */
@@ -82,26 +103,23 @@ export class StrapLines {
       const mid = a.clone().add(b).multiplyScalar(0.5);
       mid.y -= Math.min(0.45, slack * 0.5);
 
-      const { mesh, material } = this._mesh(s.id);
+      const { mesh, material, mesh2, material2 } = this._rec(s.id);
       mesh.visible = true;
 
       // Two segments through the sag point, so the line bends instead of just moving.
       this._segment(mesh, a, mid, s);
-      const second = this._mesh(s.id + ':b');
-      live.add(s.id + ':b');
-      second.mesh.visible = true;
-      this._segment(second.mesh, mid, b, s);
+      mesh2.visible = true;
+      this._segment(mesh2, mid, b, s);
       // Copies an ALREADY-converted colour, so no second conversion here — doing it
       // twice darkens the second line and the pair stop matching.
-      second.material.color.setHex(material.color.getHex());
-      second.material.opacity = material.opacity;
-      second.material.transparent = material.transparent;
-
-      void material;
+      material2.color.setHex(material.color.getHex());
+      material2.opacity = material.opacity;
+      material2.transparent = material.transparent;
     }
 
-    for (const [id, rec] of this.pool) {
-      if (!live.has(id)) rec.mesh.visible = false;
+    // A strap that is released or failed is gone (§10.3), and so is its record — not hidden.
+    for (const [id, rec] of [...this.pool]) {
+      if (!live.has(id)) this._evict(id, rec);
     }
   }
 

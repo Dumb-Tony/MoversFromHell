@@ -26,6 +26,9 @@ import { SIM } from '../src/config.js';
 import { bindingConflicts, DEFAULT_BINDINGS, SEAT1_BINDINGS, SEAT_BINDINGS, CONTEXTS, PAD, MOUSE, Input }
   from '../src/core/input.js';
 import { layoutFor } from '../src/render/coopView.js';
+// Phase 11 build-side M5 (section K): the glyph derivation and the two config numbers it pins.
+import { glyphFor } from '../src/core/input.js';
+import { COOP, PROMPTS } from '../src/config.js';
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -379,6 +382,160 @@ lines.push('--- I. no regression to single player ---');
 
   eq('I8 solo renders one viewport', layoutFor(M.seatCount, 1600, 900).length, 1);
 }
+
+/* ── K. the prompt speaks each seat's device (Phase 11 build-side M5, §26.5, §4.4) ─────
+ *
+ * For fifteen phases the HUD printed a literal 'E' and 'LMB / RMB' for every seat, so seat 1
+ * — Quote/Semicolon/[ ] on the keyboard, X/RB/LT/RT on a pad — was told to press keys it does
+ * not have. The fix derives every glyph from the binding table (input.js glyphFor), so there
+ * is nothing to drift; the assertions below are the ones the brief numbered (K1-K3) plus the
+ * join-button collision Phase 16 recorded (K4).
+ */
+lines.push('--- K. device-aware prompt glyphs per seat (M5: §26.5 "both input mappings") ---');
+{
+  // K1 — PURE: the label comes from the binding table, with no DOM and no Input instance.
+  eq('K1 glyphFor(interact, seat 0, kbm) is E', glyphFor('interact', 0, 'kbm'), 'E');
+  eq('K1 …seat 1 on the keyboard is the Quote key', glyphFor('interact', 1, 'kbm'), "'");
+  eq('K1 …seat 0 on a pad is X', glyphFor('interact', 0, 'pad'), 'X');
+  eq('K1 …and seat 1\'s left grip on a pad is LT', glyphFor('gripLeft', 1, 'pad'), 'LT');
+  eq('K1a a mouse binding labels as its button', glyphFor('gripLeft', 0, 'kbm'), 'LMB');
+  eq('K1b a pad-only action still gets a label on the keyboard (seat 1 pause → Menu)',
+     glyphFor('pause', 1, 'kbm'), 'Menu');
+  eq('K1c seat 1\'s arrows print as arrows', glyphFor('moveForward', 1, 'kbm'), '↑');
+  eq('K1d an unbound action is an empty label, not a crash', glyphFor('nothing', 0, 'kbm'), '');
+
+  // K2 — seat 1's HUD, fed the glyph set the loop feeds it.
+  M.setSeats(2);
+  input.activeDevice[1] = 'kbm';
+  const d = { primary: 'pick up the flat dolly', secondary: 'cancel strap', target: null };
+  huds[1].setPrompt(d, input.glyphsFor(1, 'kbm'));
+  const t1 = huds[1].prompt.textContent;
+  ok('K2 seat 1 on the keyboard is told to press \' — never E',
+     t1.includes("'") && !/\bE\b/.test(t1), t1);
+  ok('K2 …and ; to undo, never Q', /;/.test(t1) && !/\bQ\b/.test(t1), t1);
+  ok('K2 …with the VERB untouched (m11 B6/D4/E3 match on the words)',
+     /pick up the flat dolly/.test(t1) && /cancel strap/.test(t1), t1);
+  huds[1].update({ left: null, right: null, hovered: 'x' }, input.glyphsFor(1, 'kbm'));
+  const l1 = huds[1].label.textContent;
+  ok('K2 …and its grips are [ / ] — not LMB / RMB', /\[ \/ \]/.test(l1) && !/LMB/.test(l1), l1);
+  ok('K2a …while the structural class survives (H4a)', huds[1].label.classList.contains('grip-label'));
+  huds[1].setPrompt(d, input.glyphsFor(1, 'pad'));
+  ok('K2b seat 1 on a pad reads X and RB', /\bX\b/.test(huds[1].prompt.textContent) &&
+     /\bRB\b/.test(huds[1].prompt.textContent), huds[1].prompt.textContent);
+  ok('K2c the seat tag names the device in words (§26.5)', (() => {
+    M.feedHuds();
+    return /keys/.test(huds[1].seatTag.textContent) && /P2/.test(huds[1].seatTag.textContent);
+  })(), huds[1].seatTag.textContent);
+
+  /* K3 — THE DEBOUNCE, through the real feed. `input.activeDevice` flips on any pad activity
+   * (a stick a hair past its deadzone flips it every poll); the shown device follows it only
+   * after PROMPTS.deviceDebounceMs of continuous SIM time. Seat 0 is stood in front of a
+   * parked box (grip label + device-neutral hint) and then the dolly (a primary verb, so the
+   * key chip is on screen). Helpers copied from tools/m11-tests.js placeMover/parkAt/lookAt. */
+  const placeMover = (m, x, z, y = 0.2) => {
+    m.controller.hardSetPosition({ x, y, z });
+    m.controller._vel.x = 0; m.controller._vel.z = 0; m.controller.velocityY = 0;
+  };
+  const parkAt = (body, x, y, z) => {
+    body.setTranslation({ x, y, z }, true);
+    body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    body.wakeUp();
+    physics.primeQueries();
+  };
+  const lookAt = (m, from, target) => {
+    placeMover(m, from.x, from.z);
+    const p = m.controller.position;
+    m.rig.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z));
+    m.rig.pitch = Math.atan2(target.y - (p.y + 1.4), Math.hypot(target.x - p.x, target.z - p.z));
+    m.rig._first = true;
+    for (let k = 0; k < 20; k++) m.rig.update(p, 1 / 60);
+    const c = m.camera.position;
+    m.rig.yaw = Math.atan2(-(target.x - c.x), -(target.z - c.z));
+    m.rig.pitch = Math.atan2(target.y - c.y, Math.hypot(target.x - c.x, target.z - c.z));
+    m.grips.syncAim();
+    physics.primeQueries();
+  };
+  const feed = (n) => { for (let i = 0; i < n; i++) { game.frame(SIM.stepMs); M.feedHuds(); } };
+  const prompt = () => huds[0].prompt.textContent;
+  const label = () => huds[0].label.textContent;
+
+  const box = [...registry.entities.values()].find((e) => e.defId === 'box_small_01');
+  const dolly = [...tools.tools.values()].find((t) => t.defId === 'dolly_flat_01');
+  const boxAt = { x: -30, y: 0.30, z: 30 };
+  parkAt(box.body, boxAt.x, boxAt.y, boxAt.z);
+  const atBox = () => lookAt(movers[0], { x: boxAt.x, z: boxAt.z + 1.3 }, boxAt);
+  const atDolly = () => { const t = dolly.body.translation(); lookAt(movers[0], { x: t.x, z: t.z + 1.2 }, { x: t.x, y: t.y, z: t.z }); };
+
+  input.activeDevice[0] = 'kbm'; input.activeDevice[1] = 'kbm';
+  atBox(); feed(20);
+  eq('K3 seat 0 starts on the keyboard', M.shownDevice(0), 'kbm');
+  ok('K3 …with LMB / RMB on the grip label', /LMB \/ RMB/.test(label()), label());
+  ok('K3 …and the device-neutral hint resolved to LMB/RMB, no token left',
+     /LMB\/RMB/.test(prompt()) && !/\{/.test(prompt()), prompt());
+
+  // Switch to a pad. 14 frames = 233 ms: not yet. 2 more = 267 ms: switched.
+  input.activeDevice[0] = 'pad'; M.feedHuds();
+  const tCand = game.clock.simTimeMs;
+  feed(14);
+  ok(`K3a ${(game.clock.simTimeMs - tCand).toFixed(0)} ms of pad is NOT yet a switch (< ${PROMPTS.deviceDebounceMs})`,
+     M.shownDevice(0) === 'kbm' && /LMB/.test(label()), `${M.shownDevice(0)} "${label()}"`);
+  feed(2);
+  ok(`K3b …${(game.clock.simTimeMs - tCand).toFixed(0)} ms is (>= ${PROMPTS.deviceDebounceMs})`,
+     M.shownDevice(0) === 'pad', M.shownDevice(0));
+  ok('K3b …and the grip label reads LT / RT', /LT \/ RT/.test(label()) && !/LMB/.test(label()), label());
+  ok('K3b …the hint LT/RT', /LT\/RT/.test(prompt()), prompt());
+  atDolly(); M.feedHuds();
+  ok('K3b …and the key chip is X', /\bX\b/.test(prompt()) && /dolly/.test(prompt()) && !/\bE\b/.test(prompt()), prompt());
+  const helpPad = document.querySelector('#help').textContent;
+  ok('K3c the help line follows the device too (co-op: P1 pad)', /P1 pad/.test(helpPad) && /X use/.test(helpPad), helpPad.slice(0, 80));
+
+  // Back to the keyboard, same rule.
+  input.activeDevice[0] = 'kbm'; M.feedHuds(); feed(16);
+  eq('K3d back to the keyboard after the same window', M.shownDevice(0), 'kbm');
+  ok('K3d …with E on the chip', /\bE\b/.test(prompt()) && !/\bX\b/.test(prompt()), prompt());
+  atBox(); feed(1);   // one step: `hovered` is refreshed by grips.step, not by the feed
+  ok('K3d …and LMB / RMB on the label', /LMB \/ RMB/.test(label()), label());
+
+  // A one-poll blip — 100 ms of 'pad' — never reaches the screen.
+  input.activeDevice[0] = 'pad'; M.feedHuds(); feed(6);
+  input.activeDevice[0] = 'kbm'; M.feedHuds(); feed(20);
+  ok('K3e a 100 ms flicker to pad does not change the glyph',
+     M.shownDevice(0) === 'kbm' && /LMB \/ RMB/.test(label()) && !/LT/.test(label()),
+     `${M.shownDevice(0)} "${label()}"`);
+  // …and a paused game neither counts nor flickers: sim time, not wall time.
+  input.activeDevice[0] = 'pad'; M.feedHuds();
+  game.setPaused(true);
+  for (let i = 0; i < 60; i++) { game.frame(SIM.stepMs); M.feedHuds(); }
+  eq('K3f 60 paused frames of pad do not switch (the debounce is on SIM time)', M.shownDevice(0), 'kbm');
+  game.setPaused(false);
+  input.activeDevice[0] = 'kbm'; M.feedHuds(); feed(20);
+
+  // K4 — the Phase 16 known issue: View was BOTH the join button and cargoGlance.
+  const claims = [];
+  M.input.seatBindings.forEach((seatMap, s) => {
+    for (const [ctx, actions] of Object.entries(seatMap)) {
+      for (const [action, def] of Object.entries(actions)) {
+        if ((def.pad || []).includes(COOP.joinPad)) claims.push(`seat ${s} ${ctx} ${action}`);
+      }
+    }
+  });
+  ok('K4 no bound action shares the pad join button (View) on any seat or context',
+     claims.length === 0, claims.join(', '));
+  ok('K4a …cargoGlance still has a pad button, elsewhere',
+     glyphFor('cargoGlance', 0, 'pad', { context: CONTEXTS.DRIVE }) !== '' &&
+     glyphFor('cargoGlance', 0, 'pad', { context: CONTEXTS.DRIVE }) !== 'View',
+     glyphFor('cargoGlance', 0, 'pad', { context: CONTEXTS.DRIVE }));
+
+  M.setSeats(1);
+  input.activeDevice[0] = 'kbm'; input.activeDevice[1] = 'kbm';
+  feed(20);
+  const helpSolo = document.querySelector('#help').textContent;
+  ok('K5 the solo help line is derived from the same table (E use, LMB/RMB grab)',
+     /E use/.test(helpSolo) && /LMB\/RMB grab/.test(helpSolo) && /WASD/.test(helpSolo), helpSolo.slice(0, 90));
+}
+emit('running...');
 
 /* ── J. it still runs ──────────────────────────────────────────────────────────── */
 lines.push('--- J. the build survives all of the above ---');

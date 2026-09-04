@@ -69,9 +69,13 @@ export class InteractionSystem {
    *        Defaults to a no-op for suites that build this system without a Game.
    * @param {()=>number} [now]  the clock's simTimeMs, for stamping events raised from a
    *        key press rather than from a step. Defaults to 0 when absent.
+   * @param {(entityId:string)=>object|null} [manifestRow]  the manifest row for an entity,
+   *        for the destination-room hint (§21.1 "destination feedback"). By ENTITY id, never
+   *        by defId: box_small_01 spawns five times across three rooms. Defaults to none.
+   * @param {(zoneId:string)=>string} [roomLabel]  a zone id → the words the hint prints.
    */
   constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus,
-                setPhase = null, now = null }) {
+                setPhase = null, now = null, manifestRow = null, roomLabel = null }) {
     this.physics = physics;
     this.registry = registry;
     this.tools = tools;
@@ -83,6 +87,8 @@ export class InteractionSystem {
     this.bus = bus;
     this.setPhase = typeof setPhase === 'function' ? setPhase : () => null;
     this.now = typeof now === 'function' ? now : () => 0;
+    this.manifestRow = typeof manifestRow === 'function' ? manifestRow : () => null;
+    this.roomLabel = typeof roomLabel === 'function' ? roomLabel : (id) => id;
 
     /** Per-mover interaction state, keyed by the mover's stable id (§22.4). */
     this.state = new Map();
@@ -307,12 +313,26 @@ export class InteractionSystem {
         if ((e.state.removedParts || []).length) {
           return { primary: null, secondary: `put the ${e.state.removedParts[0]} back on`, target: t };
         }
-        return { primary: null, secondary: null, target: t, hint: `${label(e)} — hold LMB/RMB to carry` };
+        /* DEVICE-NEUTRAL. The grips are LMB/RMB for seat 0's mouse, [ ] for seat 1's
+         * keyboard and LT/RT on a pad; the HUD knows which seat and device it is drawing
+         * for and resolves the tokens (hud.js setPrompt). The room comes first because it
+         * is the thing nothing else on screen says (§26.5 "destination … understandable"). */
+        return { primary: null, secondary: null, target: t,
+                 hint: `${label(e)}${this._roomHint(e)} — hold {gripL}/{gripR} to carry` };
       }
 
       default:
         return { primary: null, secondary: null, target: t };
     }
+  }
+
+  /** ' → living room' for a manifest item not yet in its room, '' otherwise. The contract
+   *  panel's 'right room' line appears only AFTER the first delivery; this names the room
+   *  BEFORE the pickup, which is when the choice is made (§21.1, §26.7). */
+  _roomHint(entity) {
+    const row = this.manifestRow(entity.id);
+    if (!row || !row.toZone || (row.delivered && row.roomCorrect)) return '';
+    return ` → ${this.roomLabel(row.toZone)}`;
   }
 
   _applyLabel(tool, t) {
