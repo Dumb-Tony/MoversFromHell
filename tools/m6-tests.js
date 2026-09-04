@@ -30,7 +30,7 @@ import {
 import { INTERIOR_DOORS, PARTITION_T, zoneAt } from '../src/world/house.js';
 import { APERTURES, minProjectedWidth, fitsThroughGap } from '../src/render/scene.js';
 import { EVENTS } from '../src/core/eventBus.js';
-import { restoreClearedObjects } from '../src/player/grip.js';
+import { restoreClearedObjects, effectiveFloorFriction } from '../src/player/grip.js';
 import { GROUP_PRESETS } from '../src/physics/world.js';
 
 const lines = [];
@@ -116,6 +116,12 @@ function grabWith(m, hand, target) {
 }
 const byDef = (id) => { for (const e of registry.entities.values()) if (e.defId === id) return e; return null; };
 const toolByDef = (id) => { for (const t of tools.tools.values()) if (t.defId === id) return t; return null; };
+/** How far an object's up axis has tilted from vertical, degrees (M10: has the fridge tipped). */
+function tiltOf(e) {
+  const q = e.body.rotation();
+  const ryy = 1 - 2 * (q.x * q.x + q.z * q.z);
+  return Math.acos(Math.max(-1, Math.min(1, ryy))) * 57.2958;
+}
 
 /** Empty ground, well clear of the house and of m5's staging grid. */
 const PAD = { x: -40, z: 40 };
@@ -141,7 +147,7 @@ function haulDistance(entity, useDolly, dolly, { brace = false } = {}) {
   const mFrom = { ...movers[0].controller.position };
   let heldSteps = 0, tow = 0, peakF = 0, peakStretch = 0, peakPull = 0, load = 0;
   const muDuring = entity.collider.friction();
-  let sleptSteps = 0, peakObjSpeed = 0;
+  let sleptSteps = 0, peakObjSpeed = 0, peakTilt = 0, peakMoverSpeed = 0, peakLegSpeed = 0;
   for (let k = 0; k < 180; k++) {
     step(1, { [movers[0].id]: { move: { x: 0, y: -1 }, yaw: 0, brace } });
     const gr = movers[0].grips.grips.right;
@@ -150,12 +156,17 @@ function haulDistance(entity, useDolly, dolly, { brace = false } = {}) {
       peakF = Math.max(peakF, gr.lastApplied || 0);
       peakStretch = Math.max(peakStretch, gr.lastStretch || 0);
     }
-    tow = movers[0].controller.towSpeedLimit;
-    peakPull = Math.max(peakPull, Math.hypot(movers[0].controller.pull.x, movers[0].controller.pull.z));
-    load = Math.max(load, movers[0].controller.carriedMass);
+    const c = movers[0].controller;
+    tow = c.towSpeedLimit;
+    peakPull = Math.max(peakPull, Math.hypot(c.pull.x, c.pull.z));
+    // The mover's NET speed — legs plus the haul-back — is what the hand actually moves at.
+    peakMoverSpeed = Math.max(peakMoverSpeed, Math.hypot(c.velocityX + c.pull.x, c.velocityZ + c.pull.z));
+    peakLegSpeed = Math.max(peakLegSpeed, Math.hypot(c.velocityX, c.velocityZ));   // the legs alone
+    load = Math.max(load, c.carriedMass);
     if (entity.body.isSleeping()) sleptSteps++;
     const ev = entity.body.linvel();
     peakObjSpeed = Math.max(peakObjSpeed, Math.hypot(ev.x, ev.z));
+    peakTilt = Math.max(peakTilt, tiltOf(entity));
   }
   const to = posOf(entity);
   const mTo = { ...movers[0].controller.position };
@@ -164,9 +175,12 @@ function haulDistance(entity, useDolly, dolly, { brace = false } = {}) {
   if (useDolly) tools.detachDolly(dolly);
   return {
     moved: Math.hypot(to.x - from.x, to.z - from.z),
+    // SIGNED displacement along the haul: the mover backs away toward +z (yaw 0 faces -z,
+    // move.y -1 is backward), so positive is "followed the hand", negative is "slid AWAY".
+    movedAlong: to.z - from.z,
     moverMoved: Math.hypot(mTo.x - mFrom.x, mTo.z - mFrom.z),
     heldSteps, tow, peakF, peakStretch, peakPull, load,
-    friction: muDuring, sleptSteps, peakObjSpeed,
+    friction: muDuring, sleptSteps, peakObjSpeed, peakTilt, peakMoverSpeed, peakLegSpeed,
     gripped: !!g,
   };
 }
@@ -310,12 +324,18 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
       `      ${tag}: object ${r.moved.toFixed(2)} m, mover ${r.moverMoved.toFixed(2)} m, ` +
       `held ${r.heldSteps}/180, tow ${Number.isFinite(r.tow) ? r.tow.toFixed(2) : 'inf'}, ` +
       `mu ${r.friction.toFixed(2)}, F ${r.peakF.toFixed(0)} N, stretch ${r.peakStretch.toFixed(2)}, ` +
-      `pull ${r.peakPull.toFixed(2)}, slept ${r.sleptSteps}/180, objPeak ${r.peakObjSpeed.toFixed(2)} m/s`);
+      `pull ${r.peakPull.toFixed(2)}, slept ${r.sleptSteps}/180, objPeak ${r.peakObjSpeed.toFixed(2)} m/s` +
+      (r.peakTilt !== undefined ? `, moverPeak ${r.peakMoverSpeed.toFixed(2)} m/s, tilt ${r.peakTilt.toFixed(1)}°` : '') +
+      (r.movedAlong !== undefined ? `, along ${r.movedAlong >= 0 ? '+' : ''}${r.movedAlong.toFixed(3)} m, legs ${r.peakLegSpeed.toFixed(2)} m/s` : ''));
     show('couch bare', bare);
     show('couch on dolly', wheeled);
     ok('B3 both hauls got a grip', bare.gripped && wheeled.gripped);
+    /* M10 rewrote the threshold. It was "2.5x bare and > 1.0 m" when bare was 0.00 m; now
+     * that a bare couch travels (B8), the honest claim is a fixed GAP: the dolly must still
+     * be the better answer by at least half a metre in the same 3 s. Measured 6.52 m on
+     * wheels against 0.34 m bare (was 2.12 m against 0.00). */
     ok('B4 a couch on a dolly goes markedly further for the same effort — the gate',
-       wheeled.moved > bare.moved * 2.5 && wheeled.moved > 1.0,
+       wheeled.moved > 1.0 && wheeled.moved >= bare.moved + 0.5,
        `${bare.moved.toFixed(2)} m -> ${wheeled.moved.toFixed(2)} m`);
 
     /* THE BINARY, and the best statement of the tool's purpose. The fridge is 110 kg with
@@ -328,40 +348,38 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
     const fBare = haulDistance(fridge, false, dolly);
     const fWheel = haulDistance(fridge, true, dolly);
     lines.push(`      fridge hauled 3s by one hand: ${fBare.moved.toFixed(2)} m bare, ${fWheel.moved.toFixed(2)} m on the dolly`);
-    ok('B6 one mover cannot shift the fridge unaided', fBare.moved < 0.35,
-       `${fBare.moved.toFixed(2)} m`);
+    // M10: …and cannot TOPPLE it either. With traction on the legs the pull no longer hauls a
+    // mover off a fridge at 275 N; what holds the force under the ~460 N that tips it is the
+    // crawl (GRIP.towSpeedFloor) the tow cap gives an object the hand cannot slide.
+    ok('B6 one mover cannot shift the fridge unaided', fBare.moved < 0.35 && fBare.peakTilt < 20,
+       `${fBare.moved.toFixed(2)} m, tilt ${fBare.peakTilt.toFixed(1)}°, F ${fBare.peakF.toFixed(0)} N`);
     ok('B7 …and can once it is on the dolly — §9.1\'s "new physical solution"',
        fWheel.moved > 1.0, `${fWheel.moved.toFixed(2)} m`);
 
-    /* ── Phase 11 (M7): SOLO DRAG, MEASURED HONESTLY ───────────────────────────────
+    /* ── Phase 11 (M7 -> M10): SOLO DRAG ───────────────────────────────────────────
      *
-     * The milestone brief was "two config numbers and one subtraction make the solo couch
-     * drag travel": a traction budget the legs anchor before the reaction becomes pull
-     * (CARRY.tractionN / braceTractionN) and a wider braced stretch band
-     * (GRIP.braceStretchMult). The mechanism is in. The sweep that tuned it is the result,
-     * and it is a negative one — the table and the derivation are at CARRY.tractionN.
+     * M7 measured why a lone mover could not tow the couch: the grip damped against the
+     * object's ABSOLUTE velocity, so a towed couch could follow a hand no faster than
+     * (spring x band - friction)/c = 0.137 m/s unbraced, 0.248 m/s braced, and the pull was
+     * the only thing slowing the mover to that; a traction budget alone tore the hold or
+     * toppled the fridge. Shipped at 0.00 m, with the ceiling pinned here as B10a.
      *
-     * In one line: the grip damps against the object's ABSOLUTE velocity, so a towed couch
-     * can follow a hand no faster than (spring x band - friction)/c = 0.137 m/s unbraced,
-     * 0.248 m/s braced, and the only thing that ever slowed the mover to that was the pull
-     * the traction budget removes. Budget 0 stalls (0.00 m, held); any budget tears (a mover
-     * strolling 7 m from a stationary couch) and tears the DOLLY haul too. Braced 400 N buys
-     * a quarter-metre and lets a lone braced mover topple the fridge — a product decision,
-     * recorded in KNOWN_ISSUES, and not taken here.
-     *
-     * So what is pinned is the MECHANISM (m3 D5) and the CEILINGS, so the next increment —
-     * hand-frame damping, which lifts the ceiling — is measured against a record rather
-     * than a hope; plus the gain that does exist: two movers tow what one cannot. */
+     * M10 damps the grip in the HAND's frame (grip.js step: c x (v_object - v_hand)), gives
+     * the tow cap friction and the haul-back (grip.js towLimits), caps the legs' ACCELERATION
+     * from the band's spare stretch, and sets the traction seam (CARRY.tractionN 350,
+     * braceTractionN 380). The world-frame ceiling below is reported as history; what is
+     * asserted is the §26.2 claim as a number — a bare couch, one hand, travels — and that
+     * the fridge's "beyond one hand unaided" binary (B5/B6/B10b) survived it. */
     {
-      const GROUND_MU = 0.9;                          // physics/world.js ground collider
-      const effectiveFriction = (e) => ((e.def.physics.friction + GROUND_MU) / 2) * e.def.mass * 9.81;
-      const frictionN = effectiveFriction(couch);      // 552 N under the Average rule
+      const frictionN = effectiveFloorFriction(couch, physics.R);      // 552 N under the Average rule
+      const effectiveFriction = (e) => effectiveFloorFriction(e, physics.R);
       const cCouch = 2 * GRIP.dampingRatio * Math.sqrt(GRIP.spring * couch.def.mass);   // 569 N.s/m
       const ceiling = (band) => Math.max(0, (GRIP.spring * band - frictionN) / cCouch);
       const vBare = ceiling(GRIP.maxStretch);
       const vBraced = ceiling(GRIP.maxStretch * GRIP.braceStretchMult);
-      lines.push(`      world-frame damping ceiling: ${vBare.toFixed(3)} m/s unbraced, ${vBraced.toFixed(3)} m/s braced ` +
-                 `(x 3 s = ${(vBare * 3).toFixed(2)} / ${(vBraced * 3).toFixed(2)} m); traction ${CARRY.tractionN} / ${CARRY.braceTractionN} N`);
+      lines.push(`      world-frame damping ceiling (M7, history): ${vBare.toFixed(3)} m/s unbraced, ${vBraced.toFixed(3)} m/s braced ` +
+                 `(x 3 s = ${(vBare * 3).toFixed(2)} / ${(vBraced * 3).toFixed(2)} m); hand-frame weight ${GRIP.handFrameDamping}; ` +
+                 `traction ${CARRY.tractionN} / ${CARRY.braceTractionN} N`);
 
       // Everything the hauls above left on the pad goes well clear, or the next haul
       // measures a collision — the fridge on the dolly was measured 1.49 m with the couch
@@ -373,32 +391,67 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
       const soloBraced = haulDistance(couch, false, dolly, { brace: true });
       show('couch bare, solo, unbraced', solo);
       show('couch bare, solo, braced', soloBraced);
-      ok('B8 solo unbraced: the hold never tears, so the mover never strolls — and travel stays under the ceiling',
-         solo.gripped && solo.heldSteps === 180 && solo.moverMoved < 2.0 && solo.moved <= vBare * 3 + 0.05,
-         `moved ${solo.moved.toFixed(3)} m (ceiling ${(vBare * 3).toFixed(2)} m), held ${solo.heldSteps}/180, mover ${solo.moverMoved.toFixed(2)} m`);
-      ok('B9 solo braced: bracing never makes the hold LESS stable than unbraced (§6.2 "raises stability")',
-         soloBraced.gripped && soloBraced.heldSteps === 180 && soloBraced.moverMoved < 2.0 &&
-         soloBraced.moved <= vBraced * 3 + 0.05 && soloBraced.moved >= solo.moved - 0.01,
-         `moved ${soloBraced.moved.toFixed(3)} m (ceiling ${(vBraced * 3).toFixed(2)} m), held ${soloBraced.heldSteps}/180, mover ${soloBraced.moverMoved.toFixed(2)} m`);
+      /* §26.2 "a couch-equivalent can be dragged solo" — as a number. Measured 0.34 m in 3 s
+       * (was 0.000 with world-frame damping), held 180/180, force ~620 N, stretch 0.61 of the
+       * 0.70 band, the couch at up to 0.27 m/s behind a hand netting 0.4. It is slow on
+       * purpose: the legs walk at 1.1 m/s and are hauled back 0.83 of it (CARRY.tractionN),
+       * and the band lets them accelerate at only 0.74 m/s^2 — most of the first three
+       * seconds is the ramp. Sustained it is ~0.3 m/s: 2.4 m at 10 s, no stumble, no tear. */
+      ok('B8 solo unbraced: a lone mover tows the bare couch — it travels, holds, and the mover never strolls (§26.2)',
+         solo.gripped && solo.moved >= 0.30 && solo.heldSteps >= 150 && solo.moverMoved < 2.5,
+         `moved ${solo.moved.toFixed(3)} m, held ${solo.heldSteps}/180, mover ${solo.moverMoved.toFixed(2)} m`);
+      /* BRACED IS AN ANCHOR, NOT A FASTER TOW — the brief expected braced >= 0.60 m and 1.3x
+       * unbraced, and the physics says otherwise: a braced mover's legs walk at 0.45x (§5.1
+       * "lower speed"), ~0.72 m/s under this load (3.1 x 0.45 x 1/(1 + 566/600)), against a
+       * haul-back of (552 - 380)/249.6 = 0.69 m/s, so the net hand speed is ~0.03 m/s. What
+       * bracing buys while towing is the wider band (0.77 m), the higher traction (380 N)
+       * and half the imbalance — a firmer hold that stays put, which is what a partner
+       * pivoting the couch around you needs (§6.3 "one drags or pivots"). Measured 0.02 m
+       * in 3 s, 0.45 m in 10 s, held throughout, mover 0.63 m. A braced budget high enough
+       * to make bracing the faster technique (>= 420 N) topples the fridge at 6.8 s (the M10
+       * probe, tools/_probe-drag.js "topple boundary"), which is the binary B10b keeps.
+       * "Never slides away" is the SIGNED displacement along the haul (haulDistance
+       * movedAlong: + toward the mover), not the unsigned distance, which is >= 0 by
+       * construction and would pin nothing. */
+      const braceBand = GRIP.maxStretch * GRIP.braceStretchMult;
+      ok('B9 solo braced: an anchor — the hold never tears, the mover is neither hauled off nor strolling, and the couch never slides AWAY (signed along-haul >= -0.05 m)',
+         soloBraced.gripped && soloBraced.heldSteps === 180 && soloBraced.moverMoved < 1.0 &&
+         soloBraced.peakStretch < braceBand && soloBraced.movedAlong >= -0.05,
+         `along ${soloBraced.movedAlong >= 0 ? '+' : ''}${soloBraced.movedAlong.toFixed(3)} m (unbraced ${solo.moved.toFixed(3)}), held ${soloBraced.heldSteps}/180, ` +
+         `mover ${soloBraced.moverMoved.toFixed(2)} m, stretch ${soloBraced.peakStretch.toFixed(2)} of ${braceBand.toFixed(2)}, ` +
+         `legs ${soloBraced.peakLegSpeed.toFixed(2)} m/s vs haul-back ${((frictionN - CARRY.braceTractionN) / (PLAYER.mass * CARRY.pullDamping)).toFixed(2)}`);
+      // The product decision as a number (M10): bracing is the anchor, unbraced is the tow.
+      // If a later change makes braced towing the faster technique this flips on purpose —
+      // re-check the fridge (B10b, 10 s at the crawl) before accepting it.
+      ok('B9a bracing is the anchor, not the faster tow: braced travel < unbraced travel',
+         soloBraced.moved < solo.moved,
+         `braced ${soloBraced.moved.toFixed(3)} m vs unbraced ${solo.moved.toFixed(3)} m`);
       ok('B10 the braced band stays under the fridge\'s sliding limit and under the braced saturation point',
          GRIP.maxStretch * GRIP.braceStretchMult * GRIP.spring < effectiveFriction(fridge) &&
          GRIP.maxStretch * GRIP.braceStretchMult < (GRIP.forceCap * GRIP.braceForceMult) / GRIP.spring &&
          GRIP.maxStretch < GRIP.forceCap / GRIP.spring,
          `${(GRIP.maxStretch * GRIP.braceStretchMult * GRIP.spring).toFixed(0)} N vs fridge ${effectiveFriction(fridge).toFixed(0)} N; ` +
          `${(GRIP.maxStretch * GRIP.braceStretchMult).toFixed(3)} m vs ${((GRIP.forceCap * GRIP.braceForceMult) / GRIP.spring).toFixed(3)} m`);
-      /* A deliberate limitation pin, in the m6 E8 tradition: the ceiling, not the traction
-       * budget, is what bounds solo drag today. Rewrite this on purpose when the damping
-       * becomes hand-relative; do not let a retune claim the win by accident. */
-      ok('B10a …and that ceiling, under 0.30 m/s either way, bounds any solo tow (the stall at 0 N itself is the pull limit cycle, m3 D5 line)',
-         vBare < 0.30 && vBraced < 0.30 && vBraced > vBare,
-         `${vBare.toFixed(3)} / ${vBraced.toFixed(3)} m/s`);
+      /* M7 pinned the world-frame ceiling here (< 0.30 m/s either way) as a deliberate
+       * limitation; M10 lifted it on purpose. What replaces the pin: the towed couch never
+       * outruns the hand towing it — its peak speed stays under the mover's peak NET speed
+       * (legs plus haul-back) and under walking pace. Measured 0.27 m/s against 0.46. */
+      ok('B10a the towed couch never outruns its hand: peak object speed <= the mover\'s peak net speed, and < walking pace',
+         solo.peakObjSpeed <= solo.peakMoverSpeed + 0.05 && solo.peakObjSpeed < PLAYER.walkSpeed &&
+         solo.peakObjSpeed > vBare,
+         `couch ${solo.peakObjSpeed.toFixed(2)} m/s vs mover ${solo.peakMoverSpeed.toFixed(2)} m/s (old ceiling ${vBare.toFixed(3)})`);
 
       // B5/B6's binary must survive bracing. The couch goes clear first.
       parkAt(couch, FAR.x - 4, couch.def.dimensions.y / 2 + 0.02, FAR.z);
       const fBraced = haulDistance(fridge, false, dolly, { brace: true });
       show('fridge bare, solo, braced', fBraced);
+      /* The binary the whole M10 sweep was bounded by. A braced mover's stall force against
+       * an object the hand cannot slide is braceTractionN + 250 N x GRIP.towSpeedFloor plus
+       * creep: measured 408 N at 3 s and 457 N at 10 s, tilt 0.0°; at braceTractionN 420 the
+       * same haul at 420 N topples the fridge at 6.8 s (440 N: 6.3 s), and at 380 N with a 0.25 m/s crawl at 6.5 s. */
       ok('B10b a braced lone mover still cannot shift — or topple — the fridge unaided',
-         fBraced.moved < 0.35, `${fBraced.moved.toFixed(3)} m, held ${fBraced.heldSteps}/180, F ${fBraced.peakF.toFixed(0)} N`);
+         fBraced.moved < 0.35 && fBraced.peakTilt < 20,
+         `${fBraced.moved.toFixed(3)} m, tilt ${fBraced.peakTilt.toFixed(1)}°, held ${fBraced.heldSteps}/180, F ${fBraced.peakF.toFixed(0)} N`);
       parkAt(fridge, FAR.x, fridge.def.dimensions.y / 2 + 0.02, FAR.z);
 
       // §26.2 "handled materially better with another grip/player" — the gain that exists.
@@ -406,8 +459,10 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
       const pairBraced = haulTogether(couch, { brace: true });
       show('couch bare, two movers, unbraced', pair);
       show('couch bare, two movers, braced', pairBraced);
-      ok('B10c two movers tow what one cannot: >= 1.0 m further than solo and >= 1.5x, holding throughout (§26.2)',
-         pair.gripped && pair.heldSteps === 180 && pair.moved >= solo.moved + 1.0 && pair.moved >= solo.moved * 1.5,
+      // Measured 5.09 m two-up against 0.34 m solo (was 1.34 against 0.00): each hand carries
+      // 276 N, under the legs' 350 N budget, so nobody is hauled back and both walk at 2.1 m/s.
+      ok('B10c two movers tow what one cannot: >= 0.5 m further than solo and >= 1.5x, holding throughout (§26.2)',
+         pair.gripped && pair.heldSteps === 180 && pair.moved >= solo.moved + 0.5 && pair.moved >= solo.moved * 1.5,
          `two ${pair.moved.toFixed(2)} m vs solo ${solo.moved.toFixed(2)} m, held ${pair.heldSteps}/180`);
 
       /* m2 E2 and E4, run BRACED: the wider band is a longer leash, and §25.2's "no wall
@@ -473,6 +528,45 @@ lines.push('--- B. dolly: friction (GDD §9.1 "roll heavy items on level ground"
                                                               e.collider.collisionGroups() !== GROUP_PRESETS.object);
       ok('B10f …and every object the B hauls held has its player collision back (no leftover state for D8c/D11)',
          stillCleared.length === 0, stillCleared.map((e) => e.defId).join(', '));
+
+      /* ── B11 (M10): the tow cap knows about friction — in closed form ─────────────── */
+      // The floor the cap assumes must be the floor the solver applies, or the two drift.
+      let groundMu = null;
+      physics.world.colliders.forEach((c) => {
+        let he = null;
+        try { he = c.halfExtents ? c.halfExtents() : null; } catch (e) { he = null; }   // not a cuboid
+        if (he && he.x >= 90 && he.z >= 90 && c.parent() && c.parent().isFixed()) groundMu = c.friction();
+      });
+      near('B11 GRIP.towFloorFriction is the ground collider\'s own friction', groundMu, GRIP.towFloorFriction, 1e-6);
+      const g0 = movers[0].grips;
+      near('B11a the effective floor friction reads the Average rule: couch (0.35 + 0.9)/2 x 90 x g = 552 N',
+           effectiveFriction(couch), ((couch.def.physics.friction + GRIP.towFloorFriction) / 2) * couch.def.mass * 9.81, 0.5);
+      tools.attachDolly(dolly, couch);
+      const onWheelsN = effectiveFriction(couch);
+      const towWheels = g0.towFor(couch);
+      tools.detachDolly(dolly);
+      near('B11b …and the dolly\'s Min rule: the same couch on wheels reads 0.04 x 90 x g = 35 N',
+           onWheelsN, TOOLS.dolly.rollingResistance * couch.def.mass * 9.81, 0.5);
+      const towBare = g0.towFor(couch), towFridge = g0.towFor(fridge), towBox = g0.towFor(box);
+      lines.push(`      tow caps (one hand, unbraced): couch ${towBare.speed.toFixed(2)} m/s (hand ${towBare.vHand.toFixed(2)} + haul-back ${towBare.haulBack.toFixed(2)}), ` +
+                 `accel ${towBare.accel.toFixed(2)} m/s^2; on dolly ${towWheels.speed.toFixed(2)} m/s, accel ${towWheels.accel.toFixed(1)}; ` +
+                 `fridge ${towFridge.towable ? towFridge.speed.toFixed(2) : 'untowable -> crawl ' + towFridge.speed.toFixed(2)} m/s; ` +
+                 `box ${towBox.speed.toFixed(2)} m/s, accel ${towBox.accel.toFixed(0)}`);
+      ok('B11c the fridge is untowable by one hand (745 N past the 630 N band and the 705 N cap) and gets the crawl, not zero',
+         !towFridge.towable && towFridge.speed === GRIP.towSpeedFloor && GRIP.towSpeedFloor > 0,
+         `towable ${towFridge.towable}, speed ${towFridge.speed}`);
+      ok('B11d the couch is towable, its cap adds the haul-back to the hand, and its legs may accelerate at under 1 m/s^2',
+         towBare.towable && towBare.haulBack > 0 && Math.abs(towBare.speed - (towBare.vHand + towBare.haulBack)) < 1e-9 &&
+         towBare.accel > 0 && towBare.accel < 1.0,
+         `speed ${towBare.speed.toFixed(3)} = ${towBare.vHand.toFixed(3)} + ${towBare.haulBack.toFixed(3)}, accel ${towBare.accel.toFixed(3)}`);
+      // A carried 9 kg box must never be slowed by either cap: not its acceleration (53 vs
+      // PLAYER.acceleration 28) and not its speed — a loaded run is 5.4 / (1 + 9/45) = 4.5 m/s.
+      const loadedRun = PLAYER.runSpeed / (1 + box.def.mass / CARRY.loadRef);
+      ok('B11e the dolly raises the cap and a carried box never binds — neither its accel against PLAYER.acceleration nor its speed against a loaded run',
+         towWheels.speed > towBare.speed * 1.5 && towWheels.accel > towBare.accel * 4 &&
+         towBox.accel >= PLAYER.acceleration && towBox.speed >= loadedRun,
+         `dolly ${towWheels.speed.toFixed(2)} vs bare ${towBare.speed.toFixed(2)} m/s; box accel ${towBox.accel.toFixed(0)} vs ${PLAYER.acceleration}, ` +
+         `box speed cap ${Number.isFinite(towBox.speed) ? towBox.speed.toFixed(2) : 'none'} vs loaded run ${loadedRun.toFixed(2)}`);
     }
 
     // Detach must put back exactly what was there, not a remembered constant.

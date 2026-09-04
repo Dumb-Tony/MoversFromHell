@@ -380,7 +380,7 @@ lines.push('--- R4. recoveries, cargo motion and the settlement tally (GDD §18.
    * the envelope, so on the bus a ROAD_FORCE is stamped 'hardBrake'/'sharpTurn'/'speedBump'.
    * Recorded here so the day route.js renames the key, this line flips and says so. */
   const asRoadForce = recorder.events.slice(d0).filter((e) => e.type === EVENTS.ROAD_FORCE).length;
-  lines.push(`      NOTE: ${asRoadForce} of the 3 road events arrived stamped ROAD_FORCE (route.js payload \`type\` clobbers the envelope; ` +
+  lines.push(`      NOTE: ${asRoadForce} of the 3 road events arrived stamped ROAD_FORCE (route.js used to shadow the envelope's type — fixed at integration, envelope keys win; ` +
              `the recorder recognises them by the TRUCK.roadEvents table)`);
   lines.push(`      drive "${depart}": worst shift ${c.worstCargoShift.toFixed(3)} m, ${c.cargo.shifted}/${c.cargo.measured} shifted, ` +
              `${c.roadEvents} road events, loaded ${c.cargo.loaded} unloaded ${c.cargo.unloaded}`);

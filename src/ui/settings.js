@@ -14,8 +14,11 @@
  *
  * ONLY SETTINGS THAT MEASURABLY CONSUME are on this card (INDEX.md: "assert consumption, not
  * presence" — m16 U2 walks every `[data-setting]` and checks its consumer moved). There is no
- * camera-shake, reduced-motion or subtitle control because there is no shake, no particle
- * system and no audio for one to act on yet; a switch wired to nothing is a lie (§2.1).
+ * camera-shake or reduced-motion control because there is no shake and no particle system for
+ * one to act on yet; a switch wired to nothing is a lie (§2.1). The Sound group (Phase 11
+ * build-side M9) exists because src/audio/audio.js now does: three §21.4 "volume categories"
+ * routed to audio.setMaster / setBus, and captions (§21.4 Hearing, §26.5 "subtitles … exist")
+ * routed to every HUD's caption line (m18 A11).
  *
  * The four controls §21.4 lists that were already true by construction, so nobody rediscovers
  * it: colour-independent cues (every HUD state carries words or a shape, styles.css), visible
@@ -49,6 +52,16 @@ const ROWS = Object.freeze({
     { key: 'tier', label: 'Quality', kind: 'select', options: SETTINGS.tiers,
       names: { auto: 'auto-detect', gpu: 'full (GPU)', software: 'reduced (no GPU)' },
       note: 'Applies on reload — the tier decides how many shadow maps get built.' },
+  ],
+  /* §21.4 Hearing: "volume categories" and "subtitles with direction" (M9). The shell keys
+   * audioMaster / audioUi / audioWorld / captions; the store routes the sliders to
+   * audio.setMaster / setBus and the switch to every HUD's caption line. */
+  audio: [
+    { key: 'audioMaster', label: 'Master volume', kind: 'range', fmt: (v) => Math.round(v * 100) + '%' },
+    { key: 'audioUi', label: 'Interface sounds', kind: 'range', fmt: (v) => Math.round(v * 100) + '%' },
+    { key: 'audioWorld', label: 'World sounds', kind: 'range', fmt: (v) => Math.round(v * 100) + '%',
+      note: 'Impacts, straps, tools, the truck and your own strain. Sound starts on the first click or key.' },
+    { key: 'captions', label: 'Captions for sounds (with a direction arrow)', kind: 'check' },
   ],
 });
 
@@ -101,6 +114,7 @@ export class SettingsPanel {
         <h2>Settings</h2>
         <div class="set-group"><div class="set-head">Grip and look</div>${ROWS.grip.map(row).join('')}</div>
         <div class="set-group"><div class="set-head">Display</div>${ROWS.display.map(row).join('')}</div>
+        <div class="set-group"><div class="set-head">Sound</div>${ROWS.audio.map(row).join('')}</div>
         <p class="set-note">Saved on this machine. A retry keeps every setting (§21.2).</p>
         <div class="set-actions">
           <button type="button" data-act="defaults">Defaults</button>
@@ -109,7 +123,7 @@ export class SettingsPanel {
       </div>`;
 
     this._defs = new Map();
-    for (const d of [...ROWS.grip, ...ROWS.display]) this._defs.set(d.key, d);
+    for (const d of [...ROWS.grip, ...ROWS.display, ...ROWS.audio]) this._defs.set(d.key, d);
     this._controls = Array.from(this.el.querySelectorAll('[data-setting]'));
 
     for (const c of this._controls) {

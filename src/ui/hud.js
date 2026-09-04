@@ -58,6 +58,7 @@ export class Hud {
       <div class="cargo-status"></div>
       <div class="route-bar"><div class="fill"></div><span class="label"></span></div>
       <div class="notices"></div>
+      <div class="caption"></div>
       <div class="seat-tag"></div>`;
     root.appendChild(this.el);
 
@@ -73,6 +74,7 @@ export class Hud {
     this.routeFill = this.routeBar.querySelector('.fill');
     this.routeLabel = this.routeBar.querySelector('.label');
     this.notices = this.el.querySelector('.notices');
+    this.caption = this.el.querySelector('.caption');
     this.seatTag = this.el.querySelector('.seat-tag');
 
     this._keys = {};
@@ -251,6 +253,30 @@ export class Hud {
     this._notices = this._notices.filter((n) => n.until > now);
     if (this._notices.length !== before) this._renderNotices();
   }
+
+  /**
+   * §21.4 Hearing / §26.5 "subtitles … exist" (Phase 11 build-side M9): the last sound cue's
+   * caption, bottom-centre above the help line, with a direction glyph when the cue happened
+   * somewhere (audio.js directionGlyph from this seat's own facing). ONE line, for
+   * AUDIO.captionMs of sim time; the audio layer decides what and when (lastCaption), the HUD
+   * only shows it — so the caption exists with the sound off, or refused, or never armed.
+   * Text with no glyph is exactly the cue's caption (m18 A8).
+   */
+  setCaption(text, glyph = '') {
+    const html = text
+      ? (glyph ? `<span class="dir">${esc(glyph)}</span> ` : '') + esc(text)
+      : '';
+    this._set(this.caption, 'caption', html);
+  }
+
+  /** The settings card's captions switch (shell key `captions`). Hidden is hidden: the text
+   *  is still fed, so switching it back on shows the current caption at once. */
+  setCaptionsEnabled(on) {
+    const hidden = !on;
+    if (this.caption.hidden !== hidden) this.caption.hidden = hidden;
+  }
+
+  get captionsEnabled() { return !this.caption.hidden; }
 
   _renderNotices() {
     const html = this._notices

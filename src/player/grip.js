@@ -25,11 +25,12 @@
  *      Kinematic attachment, the usual shortcut, ghosts through everything by definition.
  */
 
-import { GRIP, PLAYER, CARRY } from '../config.js';
+import { GRIP, PLAYER, CARRY, SIM } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
 import { GROUP_PRESETS } from '../physics/world.js';
 
 export const HANDS = Object.freeze(['left', 'right']);
+const ZERO = Object.freeze({ x: 0, y: 0, z: 0 });
 
 export class GripSystem {
   /**
@@ -71,6 +72,13 @@ export class GripSystem {
      * one being driven. An unattended mover's hands stay where IT last put them. */
     this.aimYaw = 0;
     this.aimPitch = 0;
+
+    /* Every GRIP number this system reads goes through here. Production is the frozen
+     * config; a probe or a suite may hand ONE mover a copy with a value changed
+     * (`grips.tuning = { ...GRIP, towSpeedSafety: 0.7 }`) to sweep it in a single run — the
+     * instance-override rule from m3 D5 (`controller.tractionN = () => T`), applied to a
+     * whole block instead of one method. Never mutate GRIP; it is frozen for a reason. */
+    this.tuning = GRIP;
   }
 
   /** Adopt the shared rig's orientation as this mover's own. Called for the mover currently
@@ -214,6 +222,13 @@ export class GripSystem {
       lastDemand: 0,    // what the spring WANTED, before the §6.4 clamp
       lastApplied: 0,   // what actually reached the body — this is the bounded one
       lastStretch: 0,
+      /* Phase 11 (M10): the hand target's own motion, for hand-frame damping. `lastTarget`
+       * is where the hand was last step; `handSteps` counts steps since the grab or since
+       * the last target jump, so the finite difference is never taken across a teleport or
+       * the settling of a fresh grab (GRIP.handVelWarmupSteps). */
+      lastTarget: null,
+      handSteps: 0,
+      lastHandSpeed: 0,
     };
     this.grips[hand] = grip;
 
@@ -275,42 +290,135 @@ export class GripSystem {
     for (const h of HANDS) if (this.grips[h]) this.release(h, reason, simTimeMs);
   }
 
-  /** How many hands (of this player) are on a given entity. §6.2's hand-count factor. */
+  /** The §6.2 force cap for ONE of this mover's hands on `entity`: every multiplier §6.2
+   *  names (brace, hand count, wet surface, the object's own grip, §5.2 exertion), min'd
+   *  against the GRIP.maxAccel half of the §6.4 bound, then split between this mover's
+   *  hands so two hands do not silently double the cap on top of the two-hand bonus. One
+   *  function, so step() and towSpeedLimit() can never disagree about how strong a hand is.
+   *  `fresh` skips the §5.2 exertion penalty: the RESTED cap, which is what exertion itself
+   *  is measured against (see step()). It has to be computed here rather than by dividing
+   *  the tired cap back out, because the acceleration half of the min() does not scale with
+   *  strength — for a 9 kg box (225 N against 750) the division would inflate the reference
+   *  by 1/strengthFraction and a tired mover would under-register exertion on light loads. */
+  capPerHand(entity, hands, brace, fresh = false) {
+    const G = this.tuning;
+    let strength = G.forceCap * (entity.def.grip.forceMult || 1);
+    if (brace) strength *= G.braceForceMult;
+    if (hands > 1) strength *= G.twoHandForceMult;
+    if (entity.state.wet) strength *= G.wetGripMult;
+    // §5.2: sustained overload "may reduce maximum force". Never to zero — exertion makes
+    // a hard hold harder to keep, which is what motivates a partner or a tool, and is
+    // explicitly not a stamina bar that forbids the attempt.
+    if (this.player && !fresh) strength *= this.player.strengthFraction;
+    /* A hand is limited by how fast it can MOVE as well as how hard it can pull. Without
+     * the acceleration term, 750 N on a 9 kg box is 8.5 g and a dropped box leaves at
+     * 17 m/s. Brace and hand count buy strength, not hand speed, so they do not raise
+     * this half. See GRIP.maxAccel. */
+    return Math.min(strength, entity.def.mass * G.maxAccel) / Math.max(1, hands);
+  }
+
   /**
    * How fast this mover may walk without tearing what they are holding, m/s.
    *
-   * A hand is a spring, so a towed object trails the hand by about v/omega, where
-   * omega = sqrt(k_eff/m) is the natural frequency of the hand-object pair. Walk faster than
-   * the spring can accelerate the object and that lag grows past GRIP.maxStretch and the
-   * hold lets go. Nothing enforces that; it is simply what a spring does.
+   * Phase 6 derived this as omega x band x safety — a towed object trails the hand by
+   * v/omega — and it gave a couch 1.22 m/s, a fridge 1.10 and a 9 kg box 3.85. Two things
+   * were wrong with it, and Phase 11 M7 measured both. That lag is the UNDAMPED figure; at
+   * critical damping against the world the real steady lag was F_f/k + 2*zeta*v/omega, and
+   * a couch could follow a hand no faster than 0.137 m/s before the band tore. And it knew
+   * nothing about friction, which is the whole difference between a couch on the floor and
+   * the same couch on a dolly.
    *
-   * MEASURED before this existed: a mover hauling the 90 kg couch at the full 3.1 m/s tore
-   * the grip inside a metre — omega is 3.16, so 3.1 m/s implies about 0.98 m of lag against
-   * a 0.70 m tear threshold. The visible consequence was that DRAGGING NEVER WORKED, and
-   * worse, that the dolly appeared to do nothing: it removes an object's resistance but not
-   * its inertia, so the mover outran the couch either way. The fix is to walk at a speed the
-   * object can follow, which is what a person towing something heavy actually does.
+   * With the damping computed in the HAND's frame (step(), M10) the steady lag has NO
+   * velocity term at all: an object moving with the hand feels no damping, and the spring
+   * holds exactly the floor friction, s = F_f / k_eff. MEASURED (tools/_probe-drag.js): two
+   * movers towed the couch at 2.0 m/s with 0.35 m of stretch, a dolly at 2.6 m/s with 0.24 —
+   * speed adds nothing to the lag. What is left of the band after friction,
+   * margin = band - F_f / k_eff, is spent on TRANSIENTS, and the band therefore limits how
+   * fast the hand may ACCELERATE, not how fast it may go:
    *
-   * The result is §6.3's carry tiers expressed through the legs rather than through a
-   * number: a 9 kg box gives 3.85 m/s and never binds, a couch 1.22, a fridge 1.10.
+   *   ramp   — a hand accelerating at a holds the object m x a / k_eff behind its rest lag
+   *            (the critically damped system's steady offset under a constant drive), so
+   *            a_tow = margin x k_eff / m x GRIP.towAccelSafety. Handed to the legs as
+   *            PlayerController.towAccelLimit, which only ever slows SPEEDING UP: stopping
+   *            compresses the spring and cannot tear it.
+   *   step   — legs at full PLAYER.acceleration with the object at rest (a grab on the
+   *            move, a partner letting go): the lag they accumulate before the object,
+   *            at a_obj = (cap - F_f) / m, catches up is v^2 / 2 x (1 / a_obj - 1 / a_hand),
+   *            so v_hand = sqrt(2 x margin / (1 / a_obj - 1 / a_hand)) x GRIP.towSpeedSafety.
+   *            An object that out-accelerates the legs (a 9 kg box: 17 vs 28 m/s^2 only
+   *            0.023 s^2/m apart) is never speed-capped by it — measured, a box run at
+   *            5.4 m/s stretches 0.35 of the 0.70 band; the pure-step form v^2 / 2 a_obj
+   *            capped that box at 2.99 m/s, under walking pace, for nothing.
+   *
+   * Without the ramp cap the legs jump to walk speed in one step, the hand-frame term
+   * feeds the whole velocity gap forward, the force pins at the 750 N cap, the pull
+   * overshoots, and the couch inches along in a limit cycle at 0.25-0.5 m per 3 s with §5.2
+   * exertion draining the cap under friction (measured, first probe run). With it the force
+   * settles near 552 N and the couch follows.
+   *
+   * v_hand bounds the HAND, and the hand is the body minus the pull: §6.2's reaction hauls
+   * the mover back toward what they drag at (F_f x my share - traction) / (PLAYER.mass x
+   * CARRY.pullDamping) once the legs' budget is spent (CARRY.tractionN), so the walk the
+   * legs are allowed is v_hand plus that haul-back. Without the second term the cap sat
+   * under the pull and a lone mover stalled against the couch at any traction under 467 N.
+   *
+   * An object the hand cannot slide at all — floor friction beyond the band (the fridge:
+   * 745 N against 630) or beyond the cap (a tired mover's, §5.2) — has no tow speed; it
+   * gets GRIP.towSpeedFloor, a crawl. NOT zero (§2.1: the mover is never immobilised by what
+   * they hold) and not the old 1.10 m/s either: walking away from a 110 kg fridge that will
+   * not move hands it the full feed-forward at once, and the pull then stalls the mover at
+   * CARRY.tractionN + 250 N x walk. At 1.10 m/s that is 625 N at chest height, which tips
+   * the fridge over (M7 measured it, 1.24 m on its side); at the crawl it is ~390 N (450 N
+   * braced after 10 s), under the ~460 N that tipping it needs. m6 B6/B10b pin both halves.
    */
-  towSpeedLimit(brace = false) {
-    let limit = Infinity;
-    // The band the lag is measured against is wider braced (GRIP.braceStretchMult).
-    const band = GRIP.maxStretch * (brace ? GRIP.braceStretchMult : 1);
+  towLimits(brace = false) {
+    let speed = Infinity, accel = Infinity;
+    const seen = new Set();
     for (const hand of HANDS) {
       const grip = this.grips[hand];
-      if (!grip) continue;
+      if (!grip || seen.has(grip.entityId)) continue;
+      seen.add(grip.entityId);
       const entity = this.registry.get(grip.entityId);
       if (!entity) continue;
-      const hands = Math.max(1, entity.state.grips.length);
-      const omega = Math.sqrt((GRIP.spring * hands) / entity.def.mass);
-      const v = omega * band * GRIP.towSpeedSafety;
-      if (v < limit) limit = v;
+      const t = this.towFor(entity, brace);
+      if (t.speed < speed) speed = t.speed;
+      if (t.accel < accel) accel = t.accel;
     }
-    return limit;
+    return { speed, accel };
   }
 
+  /** Walk-speed cap only, for callers that predate towLimits(). */
+  towSpeedLimit(brace = false) { return this.towLimits(brace).speed; }
+
+  /** The derivation above for one held object (see towLimits). Exposed so a suite can
+   *  quote the numbers for an object; every intermediate is returned for the debug overlay. */
+  towFor(entity, brace = false) {
+    const G = this.tuning;
+    // The band the lag is measured against is wider braced (GRIP.braceStretchMult).
+    const band = G.maxStretch * (brace ? G.braceStretchMult : 1);
+    const hands = Math.max(1, this.handsOn(entity.id));
+    const allHands = Math.max(hands, entity.state.grips.length);
+    const mass = entity.def.mass;
+    const kEff = G.spring * allHands;
+    const frictionN = effectiveFloorFriction(entity, this.physics.R, G);
+    // Every hand on the object, at this mover's per-hand cap (a partner's is assumed equal).
+    const capTotal = this.capPerHand(entity, hands, brace) * allHands;
+    const margin = band - frictionN / kEff;
+    const towable = margin > 0 && capTotal > frictionN;
+    if (!towable) {
+      return { speed: G.towSpeedFloor, accel: Infinity, towable, frictionN, capTotal, margin, vHand: 0, haulBack: 0 };
+    }
+    const aObj = (capTotal - frictionN) / mass;
+    const inv = 1 / aObj - 1 / PLAYER.acceleration;
+    const vHand = inv > 0 ? Math.sqrt((2 * margin) / inv) * G.towSpeedSafety : Infinity;
+    const accel = ((margin * kEff) / mass) * G.towAccelSafety;
+    const traction = this.player ? this.player.tractionN(brace) : 0;
+    const myShare = frictionN * (hands / allHands);
+    const haulBack = Math.max(0, myShare - traction) / (PLAYER.mass * CARRY.pullDamping);
+    return { speed: vHand + haulBack, accel, towable, frictionN, capTotal, margin, vHand, haulBack };
+  }
+
+  /** How many hands (of this player) are on a given entity. §6.2's hand-count factor. */
   handsOn(entityId) {
     let n = 0;
     for (const h of HANDS) if (this.grips[h] && this.grips[h].entityId === entityId) n++;
@@ -353,7 +461,9 @@ export class GripSystem {
      * (grip.js below) never bound, because the tear at spring x maxStretch = 630 N came
      * first. Braced, the band widens (GRIP.braceStretchMult), and it is the band, not the
      * cap, that decides whether a heavy drag survives a bump. */
-    const tearAt = GRIP.maxStretch * (brace ? GRIP.braceStretchMult : 1);
+    const G = this.tuning;
+    const tearAt = G.maxStretch * (brace ? G.braceStretchMult : 1);
+    const dt = stepMs / 1000;
 
     for (const hand of HANDS) {
       const grip = this.grips[hand];
@@ -369,6 +479,46 @@ export class GripSystem {
       // what makes a two-handed hold resist twisting rather than merely doubling the force
       // (§6.2 "two hands improve control").
       const target = this.handTarget(grip, frame);
+
+      /* THE HAND'S OWN VELOCITY — Phase 11 M10, and the reason a solo couch drag travels.
+       *
+       * Until now the damping term was c * vp: the object's ABSOLUTE velocity. Correct for a
+       * held box swinging about a still hand, and wrong for towing, where the object is
+       * SUPPOSED to move: a couch following a hand at v carried a viscous brake of c * v
+       * against the world on top of its 552 N of floor friction, and with c = 569 N.s/m and
+       * 630 N in the band it could follow no faster than 0.137 m/s. M7 measured 0.00 m in
+       * 3 s and a traction budget could only tear the hold or topple the fridge. Damping the
+       * RELATIVE velocity (vp - vHand) is the spring a hand actually is — a damper between the
+       * hand and the object, not between the object and the floor. At rest vHand is zero and
+       * the maths is identical to before; towing, the brake is gone and the same term now
+       * pulls the object up to hand speed instead of holding it back.
+       *
+       * The velocity is a finite difference of the target over the step, and the target is
+       * noisy in two ways this guards against: a fresh grab (the rig is still settling —
+       * GRIP.handVelWarmupSteps), and a target JUMP (a fixture teleport, a violent whip of
+       * the mouse; M1 recorded a 0.46 m camera lag after a 40 m teleport). A jump larger
+       * than GRIP.handJumpReset zeroes the estimate and restarts the warm-up; anything smaller
+       * is clamped to GRIP.maxHandSpeed, so the most a flick can feed forward is c * that,
+       * which the §6.4 cap below bounds like any other demand. */
+      let vHand = ZERO;
+      const dx = grip.lastTarget ? target.x - grip.lastTarget.x : 0;
+      const dy = grip.lastTarget ? target.y - grip.lastTarget.y : 0;
+      const dz = grip.lastTarget ? target.z - grip.lastTarget.z : 0;
+      const jump = Math.hypot(dx, dy, dz);
+      if (!grip.lastTarget || jump > G.handJumpReset) {
+        // A REFERENCE step — the grab, or a jump. It and the next handVelWarmupSteps - 1
+        // steps read zero; the same window either way, so a fixture can count on it.
+        grip.handSteps = 0;
+      } else {
+        grip.handSteps++;
+        if (grip.handSteps >= G.handVelWarmupSteps) {
+          const speed = jump / dt;
+          const k = speed > G.maxHandSpeed ? G.maxHandSpeed / speed : 1;
+          vHand = { x: (dx / dt) * k, y: (dy / dt) * k, z: (dz / dt) * k };
+        }
+      }
+      grip.lastTarget = target;
+      grip.lastHandSpeed = Math.hypot(vHand.x, vHand.y, vHand.z);
 
       const err = { x: target.x - gripWorld.x, y: target.y - gripWorld.y, z: target.z - gripWorld.z };
       const stretch = Math.hypot(err.x, err.y, err.z);
@@ -408,32 +558,19 @@ export class GripSystem {
        * effective stiffness is N*k, so the critical coefficient is computed against that
        * and then split between the hands. */
       const mass = entity.def.mass;
-      const kEff = GRIP.spring * allHands;
-      const cPerHand = (2 * GRIP.dampingRatio * Math.sqrt(kEff * mass)) / allHands;
+      const kEff = G.spring * allHands;
+      const cPerHand = (2 * G.dampingRatio * Math.sqrt(kEff * mass)) / allHands;
 
-      let fx = GRIP.spring * err.x - cPerHand * vp.x;
-      let fy = GRIP.spring * err.y - cPerHand * vp.y;
-      let fz = GRIP.spring * err.z - cPerHand * vp.z;
+      // Damping in the HAND's frame (see vHand above). GRIP.handFrameDamping is 1 in
+      // production; 0 reproduces the Phase 2-10 world-frame term for a before/after probe.
+      const w = G.handFrameDamping;
+      let fx = G.spring * err.x - cPerHand * (vp.x - w * vHand.x);
+      let fy = G.spring * err.y - cPerHand * (vp.y - w * vHand.y);
+      let fz = G.spring * err.z - cPerHand * (vp.z - w * vHand.z);
 
-      // §6.2's factors, all as multipliers on STRENGTH — the bound §6.4 demands.
-      let strength = GRIP.forceCap * (entity.def.grip.forceMult || 1);
-      if (brace) strength *= GRIP.braceForceMult;
-      if (hands > 1) strength *= GRIP.twoHandForceMult;
-      if (entity.state.wet) strength *= GRIP.wetGripMult;
-      // §5.2: sustained overload "may reduce maximum force". Never to zero — exertion makes
-      // a hard hold harder to keep, which is what motivates a partner or a tool, and is
-      // explicitly not a stamina bar that forbids the attempt.
-      if (this.player) strength *= this.player.strengthFraction;
-
-      /* A hand is limited by how fast it can MOVE as well as how hard it can pull. Without
-       * the acceleration term, 750 N on a 9 kg box is 8.5 g and a dropped box leaves at
-       * 17 m/s. Brace and hand count buy strength, not hand speed, so they do not raise
-       * this half. See GRIP.maxAccel. */
-      let cap = Math.min(strength, mass * GRIP.maxAccel);
-
-      // Each hand may spend only its share, so two hands do not silently double the cap
-      // on top of the two-hand bonus.
-      cap /= Math.max(1, hands);
+      // §6.2's factors, all as multipliers on STRENGTH — the bound §6.4 demands — then the
+      // GRIP.maxAccel half of it, split between this mover's hands. See capPerHand().
+      const cap = this.capPerHand(entity, hands, brace);
 
       // DEMAND vs APPLIED. lastForce used to record the pre-clamp demand and was then
       // used to assert §6.4's bound — which is meaningless, since demand is unbounded by
@@ -450,9 +587,9 @@ export class GripSystem {
       // §6.2 "grip loss": demand pinned at the cap means the hand is losing it. Slipping
       // after a moment is the feedback §2.1 asks for — "show why an attempt struggles" —
       // instead of an object that simply refuses to move for no visible reason.
-      if (mag > cap * GRIP.slipThreshold) grip.overloadMs += stepMs;
+      if (mag > cap * G.slipThreshold) grip.overloadMs += stepMs;
       else grip.overloadMs = Math.max(0, grip.overloadMs - stepMs * 2);
-      if (grip.overloadMs > GRIP.slipMs) {
+      if (grip.overloadMs > G.slipMs) {
         this.release(hand, 'slipped', simTimeMs);
         continue;
       }
@@ -467,15 +604,30 @@ export class GripSystem {
       // tire your back in the way this models.
       if (fy > 0) supportedN += fy;
 
-      // §5.2: working near the cap is what "exertion" means.
-      if (this.player && grip.lastApplied > cap * CARRY.exertAt) this.player.noteExertion(stepMs);
+      /* §5.2: working near the cap is what "exertion" means — near the FRESH cap, not the
+       * tired one. Measured against the cap that exertion had already lowered, the rule fed
+       * back on itself: any hold above 75% of full strength dropped the reference, which put
+       * the same hold further over the line, which dropped it again — 3.3 s from rested to
+       * the 60% floor, whatever the load. For a solo couch (552 N against a 750 N cap, 74%)
+       * that meant the cap sank UNDER floor friction inside three seconds of towing and the
+       * tow cap fell to the crawl: measured 0.27 m in 3 s and 0.36 m in 10 s (M10 probe).
+       * Against the fresh cap the same tow never exerts and a genuine overload settles where
+       * the tired cap meets the line (strengthFraction 0.75), still "never to zero". The
+       * fresh cap is capPerHand(..., fresh) — the same min() with the penalty left out — not
+       * the tired cap divided back up, which is only the same thing when strength won the
+       * min (see capPerHand). */
+      if (this.player && grip.lastApplied > this.capPerHand(entity, hands, brace, true) * CARRY.exertAt) {
+        this.player.noteExertion(stepMs);
+      }
     }
 
     if (this.player) {
       // brace goes through: the legs anchor more of the reaction (CARRY.braceTractionN)
       // and the wider band raises what the mover may tow at (GRIP.braceStretchMult).
       this.player.applyCarry(supportedN / 9.81, reactionX, reactionZ, stepMs, brace);
-      this.player.towSpeedLimit = this.towSpeedLimit(brace);
+      const tow = this.towLimits(brace);
+      this.player.towSpeedLimit = tow.speed;
+      this.player.towAccelLimit = tow.accel;
     }
 
     // §7.3's caps apply to whatever the grips just did.
@@ -506,6 +658,7 @@ export class GripSystem {
         demand: Math.round(g.lastDemand),
         force: Math.round(g.lastApplied),
         stretch: +g.lastStretch.toFixed(3),
+        handSpeed: +(g.lastHandSpeed || 0).toFixed(2),
         slipping: g.overloadMs > 0,
       };
     };
@@ -559,6 +712,31 @@ export function velocityAtPoint(body, point) {
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function dot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+/** What the floor asks of a hand before `entity` slides, in newtons.
+ *
+ *  Rapier COMBINES the two colliders' coefficients, Average by default (registry.js keeps
+ *  it that way on purpose; the dolly switches its load to Min, tools.js), so an object's
+ *  declared friction is not what it experiences: the couch declares 0.35 and meets a 0.9
+ *  floor at (0.35 + 0.9) / 2 = 0.625 -> 552 N, and the same couch on a dolly at
+ *  min(0.04, 0.9) = 0.04 -> 35 N. This reads the collider's CURRENT coefficient and rule —
+ *  what the solver will actually apply — against GRIP.towFloorFriction, which mirrors the
+ *  ground collider PhysicsWorld.addGround builds (tools/m6-tests.js B11 pins the two equal).
+ *  Interior floors are 0.8 (addStaticFromColliders), so indoors this is 3-4% pessimistic,
+ *  which is the safe side of a tear. */
+export function effectiveFloorFriction(entity, R, tuning = GRIP) {
+  const col = entity.collider;
+  const mu = col.friction();
+  const floor = tuning.towFloorFriction;
+  const rules = R && R.CoefficientCombineRule;
+  const rule = rules && col.frictionCombineRule ? col.frictionCombineRule() : null;
+  let muEff;
+  if (rules && rule === rules.Min) muEff = Math.min(mu, floor);
+  else if (rules && rule === rules.Max) muEff = Math.max(mu, floor);
+  else if (rules && rule === rules.Multiply) muEff = mu * floor;
+  else muEff = (mu + floor) / 2;
+  return muEff * entity.def.mass * -SIM.gravity;
+}
 
 /* ── shared, mover-count-agnostic helpers ─────────────────────────────────────
  * These take the movers as an argument rather than living on one GripSystem, because a

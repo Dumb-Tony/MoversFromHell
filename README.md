@@ -130,6 +130,15 @@ stamp. If the clipboard is refused (plain http, an embedded pane) the report is 
 in the box under the button. The last six run records and your answers are kept in this browser
 only; **clear responses** deletes them.
 
+**Sound.** The game is synthesised from nothing — no audio files, no fetches. Sound starts on the
+first click or key (the START button counts). Impacts thud by material and speed, a heavy carry
+strains and climbs in pitch as you lose your balance, a dolly's wheels are louder the closer they
+are, the truck idles and drives, a loose load rattles in the back, straps click, ratchet, creak and
+snap, and the invoice has its sting. Every sound has a caption at the bottom of the screen with an
+arrow to where it happened; the caption works with the volume at 0. Master, interface and world
+volume and the captions switch are on the settings card and are kept between runs. `?audio=off`
+disables the layer entirely.
+
 ## Test it
 
 ```bash
@@ -193,7 +202,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**1437 assertions across eighteen suites, all passing** — plus a GPU-only suite that the
+**1615 assertions across nineteen suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -218,7 +227,12 @@ GDD §27.3's seven playtest questions on the settlement sheet (so an external gr
 arrives as data, never uploaded), and §7.1's own example built at last — the couch's legs come
 off for 60 s of labour, it starts behind the 34" door, and the standing open design question
 about the tight doors is resolved in KNOWN_ISSUES with the measured clearances. The eight are
-done; the plan's addendum names the next two (audio, hand-frame grip damping).
+done, and the plan's addendum went next: batch 4 added the sound layer (synthesised from nothing,
+every cue captioned with a direction arrow, volumes and captions on the settings card) and damped
+the grip spring in the hand's frame — the fix M7's numbers pointed at — so a solo couch drag now
+travels (0.34 m in 3 s where it was 0.00; the dolly haul 2.1 → 6.5 m; two movers 1.3 → 5.1 m; the
+fridge still 0.00 m unaided). Batch 5 (door leaves as removable objects; loose parts as real
+bodies) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -229,6 +243,8 @@ done; the plan's addendum names the next two (audio, hand-frame grip damping).
 ![The settlement sheet with the seven questions](docs/phase18-settlement.png)
 
 ![The couch with its legs off, behind the 34" door](docs/phase18-couch-legs.png)
+
+![A caption with its direction arrow](docs/phase19-caption.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 
@@ -363,17 +379,17 @@ mode is the same change seen from the other side.
 | Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs. |
 | Friction combine fix | `src/tools/tools.js` | An object's declared friction is averaged with the floor's. The dolly switches to `Min` so its 8.75× cut is not delivered as 1.3×. |
 
-**Measured:** couch hauled by one hand for 3 s — **0.00 m bare, 2.12 m on the dolly**. Fridge
-**0.00 m → 1.49 m**. A 1.5 m/s knock costs a bare TV 72 condition points and a wrapped one
+**Measured:** couch hauled by one hand for 3 s — **0.34 m bare, 6.52 m on the dolly** (Phase 11 M10; Phase 6 measured 0.00 / 2.12). Fridge
+**0.00 m → 5.37 m** (was 1.49). A 1.5 m/s knock costs a bare TV 72 condition points and a wrapped one
 **zero**. A 1.20 m deck face: **0.01 m reached without a ramp, 1.22 m with one**.
 
-**Phase 11 M7 re-measured it** with the same one-hand 3 s haul: bare couch **0.00 m unbraced,
-0.00 m braced** (the hold never tears; braced the band is 0.77 m and the tow cap 1.34 m/s),
-fridge **0.00 m braced**, and **two movers one hand each 1.34 m**. The traction budget behind
-`CARRY.tractionN` was swept 0–560 N and ships at **0**: the grip damps against the object's
-absolute velocity, capping a towed couch at 0.137 m/s unbraced / 0.248 m/s braced, and every
-budget that moved the couch tore the hold or toppled the fridge. The table is at
-`CARRY.tractionN` in `src/config.js`.
+**Phase 11 M10 damps the grip in the hand's frame**, and the same one-hand 3 s haul now travels:
+bare couch **0.34 m unbraced** (2.45 m in 10 s, held throughout), **0.02 m braced** (bracing
+anchors — braced legs walk 0.76 m/s against a 0.69 m/s haul-back, netting ~0.03), fridge **0.00 m
+and 0.0° of tilt** braced or not, **two movers one hand each 5.09 m**. M7's traction seam ships at
+350 N / 380 N braced; the tow cap knows the object's floor friction and caps the legs' acceleration
+at 0.74 m/s² for the couch. M7's sweep, which found 0.00 m at every budget, was measuring the
+world-frame damping term; its table stays beside `CARRY.tractionN` as the record.
 
 ![Phase 5](docs/phase5-house.png)
 
@@ -507,10 +523,14 @@ Names were kept so the lineage stays greppable.
   BRIEFING and settlement pauses the clock.
 
 - **Must be served over http.** ES modules are blocked on `file://`. Use `play.bat`.
-- **Solo couch drag moves but does not travel** — 0.00 m in 3 s, braced or not, against a
-  measured world-frame damping ceiling of 0.137 / 0.248 m/s (m6 B10a pins it). The
-  traction-budget seam is in and swept (0–560 N, `CARRY.tractionN`); hand-frame grip damping
-  is the fix and is its own increment. Two movers: 1.34 m; dolly: 2.12 m.
+- **Bracing does not make a solo drag faster** — braced towing is an anchor (0.02 m in 3 s vs
+  0.34 m unbraced; legs 0.76 m/s against a 0.69 m/s haul-back), and a braced budget high enough to
+  change that topples the fridge (420 N: over at 6.8 s). A lone mover who grabs the fridge HIGH
+  (1.2 m) can tip it over in 7 s — a §2.2 consequence, not prevented.
+- **Sound is synthesised from nothing** and starts on the first click or key; a controller-only
+  start arms it suspended until the first click or key, captions are timed on sim time and freeze
+  while paused, and `?audio=off` also removes the captions (use the Captions switch instead). No
+  music layer, no haptics.
 - **The ragdoll is a timed knockdown**, not a simulated jointed body. §5.1 asks for one;
   that is Unity-side work.
 - **Rapier forces persist and compound** until reset — the single most surprising thing

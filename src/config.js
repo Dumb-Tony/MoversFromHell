@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 18,
-  label: 'phase-18',
+  phase: 19,
+  label: 'phase-19',
   date: '2026-09-04',
 });
 
@@ -234,16 +234,37 @@ export const CARRY = Object.freeze({
    *  right; it needs the damping computed in the hand's frame (the next increment) and a
    *  tow cap that knows about friction before it can do anything but harm.
    *
-   *  Shipped at 0: identical to Phase 6 behaviour, seam kept. tools/m3-tests.js D5 pins the
-   *  subtraction itself; tools/m6-tests.js B8-B10 pin the ceilings. */
-  tractionN: 0,
+   *  Shipped at 0 by M7: identical to Phase 6 behaviour, seam kept. tools/m3-tests.js D5
+   *  pins the subtraction itself; tools/m6-tests.js B8-B10 pin the ceilings.
+   *
+   *  M10 (hand-frame damping, GRIP.handFrameDamping) removed the brake, re-swept, and set
+   *  it — the sweep table is in docs/CHANGELOG.md (Phase 11 M10). What the number does now:
+   *  the tow cap (grip.js towLimits) ADDS the haul-back (552 - tractionN) / 249.6 m/s to the
+   *  walk it allows, so the hand nets its safe speed whatever this is; what this decides is
+   *  how hard the couch is FELT to pull (0.81 m/s of haul-back at 350) and how hard a mover
+   *  can lean on the fridge before it hauls them (tractionN + 250 x GRIP.towSpeedFloor =
+   *  387 N nominal, 412 N measured after 10 s, under the ~460 N that tips it). Bounded above
+   *  by m3 D5c (< 400, D1/D2's fixture) and by the fridge. Solo couch, one hand, 3 s: 0.34 m
+   *  (0.000 at M7), 2.4 m in 10 s, held throughout. */
+  tractionN: 350,
   /** Braced (§6.2 "raises force cap and stability"), as an ABSOLUTE number, because the sweep
    *  needs the two to differ: unbraced must stay 0 (the dolly), braced 400 N is the one value
    *  that buys a solo braced quarter-metre — and a lone braced mover toppling the fridge
-   *  (tipping a 0.70 m deep, 110 kg fridge grabbed at 0.875 m needs 1079 x 0.35 / 0.875 = 432 N,
+   *  (tipping a 0.70 m deep, 110 kg fridge grabbed at 0.875 m needs 1079 x 0.35 / 0.875 = 432 N by the static estimate — measured, a 445-457 N braced stall at that grab tilts 0.0°, so the real threshold there is the ~460 N grip.js quotes, and 315 N at a 1.2 m grab,
    *  far under the 745 N sliding limit), which flips m6 B5/B6's "beyond one hand unaided".
-   *  That is a product decision (docs/KNOWN_ISSUES.md), so this ships at 0 too. */
-  braceTractionN: 0,
+   *  That is a product decision (docs/KNOWN_ISSUES.md), so M7 shipped this at 0 too.
+   *
+   *  M10: the fridge's stall force is now braceTractionN + 250 x GRIP.towSpeedFloor (the
+   *  crawl) plus creep, not + 250 x 1.10. MEASURED over 10 s of braced pulling at the crawl
+   *  (tools/_probe-drag.js "topple boundary", reproduced in the default run): 380 N ->
+   *  445-457 N and tilt 0.0°; 420 N -> topples at 6.8 s; 440 N -> 6.3 s; 380 N at a 0.25 m/s
+   *  crawl -> 6.5 s. So 380, one sweep step under the line; §5.1 "impulse resistance" is
+   *  why it exceeds tractionN at all. It does NOT make bracing the faster way to drag: a
+   *  braced mover's legs walk at 0.45x, ~0.72-0.76 m/s under this load (3.1 x 0.45 x
+   *  1/(1 + ~566/600); m6 B9 measures the legs' peak at 0.76), against a haul-back of
+   *  (552 - 380)/249.6 = 0.69 m/s, so the hand nets ~0.03 m/s and braced towing is an
+   *  ANCHOR (0.02 m in 3 s, 0.45 m in 10 s, never torn) — m6 B9/B9a say so on purpose. */
+  braceTractionN: 380,
 
   /** §5.1 stumbling. Imbalance is a 0..1+ measure, not a hit-point bar: it rises while
    *  overloaded or while being yanked sideways, and falls quickly once the load is
@@ -252,6 +273,10 @@ export const CARRY = Object.freeze({
   comfortableMass: 45,       // above this, imbalance starts to build
   imbalanceRise: 0.85,       // per second at twice the comfortable mass
   imbalanceFromPull: 0.55,   // per second per m/s of sideways pull
+  /** M10: "sideways" is measured against where the mover is TRYING to go. An intent this
+   *  small (|move| on the 0..1 stick/keys scale) is standing still, and standing still the
+   *  whole pull is a yank — you are simply being dragged (controller._updateBalance). */
+  imbalanceStandingIntent: 0.1,
   imbalanceFall: 1.5,        // per second when comfortable — §5.1 "recovery is fast"
   stumbleAt: 1.0,
   knockdownAt: 1.9,
@@ -428,10 +453,70 @@ export const GRIP = Object.freeze({
    *  forceCap x braceForceMult / spring = 1.5 m. tools/m6-tests.js B10 asserts both; m2 D4c
    *  compares the BASE band and is unchanged. */
   braceStretchMult: 1.10,
-  /** Fraction of the theoretical maximum tow speed a mover is allowed to use.
-   *  v_max = sqrt(k/m) * maxStretch would put the lag exactly ON the tear threshold, which
-   *  tears on the first bump. 0.55 leaves the steady lag at about half the budget. */
-  towSpeedSafety: 0.55,
+
+  /* ---- Phase 11 M10: damping in the HAND's frame, and a tow cap that knows about friction.
+   *
+   * The spring's damping term was c * v_object — the object's ABSOLUTE velocity. Right for a
+   * box swinging about a still hand, wrong for towing: a couch following a hand at v dragged
+   * a viscous brake of c * v against the WORLD on top of 552 N of floor friction, and with
+   * c = 2 * sqrt(900 * 90) = 569 N.s/m against 630 N in the band it could follow no faster
+   * than 0.137 m/s. M7 measured the consequence — 0.00 m in 3 s, and a traction budget that
+   * could only tear the hold or topple the fridge — and named this as the fix. The term is
+   * now c * (v_object - v_hand): a damper between the hand and the object. At rest the maths
+   * is identical (v_hand = 0); towing, the brake is gone. grip.js step() carries the
+   * derivation; the numbers it moved are in docs/CHANGELOG.md (Phase 11 M10). */
+
+  /** Weight of the hand's velocity in the damping term. 1 = hand frame (production);
+   *  0 = the Phase 2-10 world-frame term, kept only so a probe can measure before/after
+   *  in one run. Anything in between is a blend and not a tuned state. */
+  handFrameDamping: 1.0,
+  /** Ceiling on the finite-difference hand velocity, m/s — just above run speed (5.4), so
+   *  a real hand is never clamped and a mouse flick can feed forward at most c * this,
+   *  which the §6.4 cap then bounds like any other demand. */
+  maxHandSpeed: 6.0,
+  /** A hand-target move larger than this in one step is a JUMP (a fixture teleport, a
+   *  violent whip — 0.25 m in 16 ms is 15 m/s), not a velocity: the estimate is zeroed and
+   *  the warm-up restarts, so a teleport never becomes a c * 15 m/s shove. A fast run moves
+   *  the target 0.09 m per step; the clamp above covers everything up to here. */
+  handJumpReset: 0.25,
+  /** Steps after a grab (or a jump) before the hand velocity is trusted. The rig and the
+   *  fresh hold are still settling on the first step or two; M1 measured a 0.46 m camera
+   *  lag after a 40 m teleport. Zero velocity in the warm-up means world-frame damping —
+   *  the old behaviour, which is the safe one. */
+  handVelWarmupSteps: 2,
+
+  /** The ground collider's friction, as PhysicsWorld.addGround builds it — the "floor" in
+   *  the tow cap's effective-friction estimate (grip.js effectiveFloorFriction). Interior
+   *  floors are 0.8 (addStaticFromColliders' default), so indoors the estimate is 3-4%
+   *  pessimistic, which is the safe side of a tear. tools/m6-tests.js B11 asserts this
+   *  equals what the ground collider actually reports, so the two cannot drift. */
+  towFloorFriction: 0.9,
+  /** The band limits how fast a towed object may be brought up to speed, not how fast it
+   *  goes (grip.js towLimits carries the derivation and the measurement). Two budgets come
+   *  out of the same spare stretch, margin = band - F_f / k, and each gets a fraction of it:
+   *
+   *  towSpeedSafety — the VELOCITY-STEP budget: a hand already at v when the object is at
+   *  rest (a grab on the move, a partner letting go) costs v^2 / 2 a_obj of band, so the
+   *  walk cap is sqrt(2 a_obj x margin) x this, plus the pull's haul-back. 1.0 would put
+   *  the peak lag ON the tear threshold; 0.65 leaves the couch's hand at 0.42 m/s and its
+   *  legs at 1.23 (0.81 of that hauled straight back), a dolly at 2.5, two movers at 2.4
+   *  each (their walk binds first, at 2.1). At 0.55 the 3 s solo haul (m6 B8) measured
+   *  0.29 m — one centimetre under the §26.2 number; 0.65 measured 0.34 m, the dolly 6.5 m.
+   *  towAccelSafety — the RAMP budget: a ramp at a holds the object m x a / k behind its
+   *  rest lag, exactly (critically damped, no overshoot), so the legs' acceleration while
+   *  towing is margin x k / m x this. The couch gets 0.74 m/s^2, a dolly 5.6, a 9 kg box 53
+   *  (never binds against PLAYER.acceleration 28). Under ~0.7 the 3 s haul (m6 B8) spends
+   *  most of its time ramping; at 1.0 the transient force sits on the §5.2 exertion line. */
+  towSpeedSafety: 0.65,
+  towAccelSafety: 0.85,
+  /** Walk speed while holding something the hand cannot slide at all — floor friction past
+   *  the band (the fridge: 745 N vs 630) or past the cap. A CRAWL, not zero: §2.1 never
+   *  immobilises a mover for what they hold. Not the old 1.10 m/s either: walking away from
+   *  a fridge that will not follow hands it the full hand-frame feed-forward at once, and
+   *  the pull stalls the mover at tractionN + 250 N x walk — 625 N at chest height at
+   *  1.10 m/s, which tips a top-heavy 110 kg fridge (M7 measured 1.24 m on its side);
+   *  ~390 N at this crawl, under the ~460 N that tipping needs at the 0.875 m grab (432 N static estimate). m6 B6/B10b pin the binary. */
+  towSpeedFloor: 0.15,
 
   holdDistanceMin: 0.85,     // how close the hand target may be pulled
   holdDistanceMax: 2.0,      // …and how far it may be pushed
@@ -752,6 +837,60 @@ export const MANIFEST = Object.freeze({
   dwellMs: 1200,
 });
 
+/** §20.4 / §21.4 Hearing / §26.5 "subtitles exist" — the synthesised audio layer and its
+ *  captions (Phase 11 build-side M9, src/audio/audio.js). Every number the layer reads is
+ *  here; audio.js carries the cue RECIPES (a data table keyed by EVENTS name) and nothing
+ *  else numeric. The layer reads state and never writes it (§22.4; m18 A12). */
+export const AUDIO = Object.freeze({
+  /** Bus levels 0..1 at first boot; the settings card's three sliders (shell keys
+   *  audioMaster / audioUi / audioWorld) move them, and `foley` — the mover's own body: grabs,
+   *  ratchets, strain — sits UNDER the world bus so one slider covers everything in the world. */
+  master: 1,
+  buses: { ui: 0.85, world: 1, foley: 1 },
+  /** Metres. atten(d, range) is squared, so a dolly 2 m from one pair of ears and 20 m from
+   *  the other mixes ≥ 4× louder than the same dolly 20 m from both (m18 A6). */
+  ranges: { roll: 24, cue: 30 },
+  /** IMPACT loudness ∝ relVelocity above minVelocity (below it: silent — the settle-down of
+   *  a box put on the floor is not a thud). fullVelocity is where the curve reaches
+   *  floorGain + 1; maxGain caps a 14 m/s catastrophe. DAMAGE.fragile.impactSpeed is 1.1. */
+  impact: { minVelocity: 0.5, fullVelocity: 5.0, floorGain: 0.15, maxGain: 1.4 },
+  /** An attached dolly rolling faster than minSpeed is audible; fullSpeed is full gain. */
+  roll: { minSpeed: 0.3, fullSpeed: 1.6 },
+  /** §5.2 "strain audio": gain saturates as mass/(mass + massRef); pitch = 1 + pitchRise ×
+   *  imbalance; imbalanceGain lifts the gain a little as balance goes; exertion (§5.2, on
+   *  state) is a floor under it. */
+  strain: { massRef: 45, pitchRise: 0.8, imbalanceGain: 0.5, exertionGain: 0.6 },
+  /** In transit, cargo rattles ∝ (1 − packQuality) once quality (1 − unsecured fraction)
+   *  falls below qualityBelow. A secure pack is silent in the back. */
+  rattle: { qualityBelow: 0.9 },
+  /** The truck: idle gain in TRANSIT, accelerating over the first rampFrac of the route and
+   *  slowing over the last; pitch = pitchBase + pitchSpan × speed fraction. */
+  engine: { idle: 0.35, rampFrac: 0.12, pitchBase: 0.6, pitchSpan: 1.9 },
+  /** ROAD_FORCE whoomp: floorGain + severity × (1 − floorGain). */
+  road: { floorGain: 0.4 },
+  /** Simultaneous one-shot partials; a cue that would exceed it is dropped, never queued.
+   *  Also the bound on the bus→render-frame cue queue (m18 A9). */
+  maxVoices: 24,
+  /** Captions (§21.4 Hearing, §26.5): how long the last cue's caption stays on the HUD, in
+   *  sim milliseconds; a cue with a position gets a direction glyph unless it is within
+   *  captionNearM of the listener (then it is at your feet); "ahead"/"behind" is ±aheadDeg. */
+  captionMs: 2600,
+  captionNearM: 0.75,
+  captionAheadDeg: 40,
+  /** The plumbing's constants: per-layer output levels, oscillator base pitches, envelope
+   *  and ramp times, the master compressor. Nothing in audio.js is a bare literal. */
+  synth: {
+    levels: { engine: 0.10, roll: 0.12, strain: 0.09, rattle: 0.11, wind: 0.05 },
+    hz: { engine: 42, roll: 220, strain: 96, rattle: 1800, wind: 380 },
+    /** Loop filters: lowpass cutoff as a multiple of the loop's hz, bandpass Q (review minor, M9). */
+    filters: { engineLpMul: 10, rollQ: 1.4, strainLpMul: 3, rattleQ: 0.9 },
+    attackS: 0.004, rampS: 0.06, pitchRampS: 0.08, strainRampS: 0.18,
+    tailS: 0.05,
+    noiseSeconds: 2,
+    compressor: { threshold: -14, ratio: 6, attack: 0.004, release: 0.2 },
+  },
+});
+
 /** §21.4 settings panel + §26.6 versioned, device-local save (Phase 11 build-side M4).
  *
  *  The input keys and their defaults live with their consumer (input.js DEFAULT_SETTINGS);
@@ -777,9 +916,18 @@ export const SETTINGS = Object.freeze({
     uiScale:            { min: 0.8, max: 1.6, step: 0.1 },
     /** The boom, in metres, inside the rig's own clamp (RENDER.camera.distanceMin/Max). */
     cameraDistance:     { min: RENDER.camera.distanceMin, max: RENDER.camera.distanceMax, step: 0.1 },
+    /** The three volume sliders (M9): bus gains 0..1, consumed by audio.setMaster/setBus. */
+    audioMaster:        { min: 0, max: 1, step: 0.05 },
+    audioUi:            { min: 0, max: 1, step: 0.05 },
+    audioWorld:         { min: 0, max: 1, step: 0.05 },
   },
-  /** Settings that are the SHELL's, not the input layer's. Persisted beside the input keys. */
-  shellDefaults: { uiScale: 1, cameraDistance: RENDER.camera.distance, tier: 'auto' },
+  /** Settings that are the SHELL's, not the input layer's. Persisted beside the input keys.
+   *  The audio keys and `captions` (§21.4 Hearing) live here too — M9 — so the save's
+   *  top-level key set is unchanged (m16 V4c). */
+  shellDefaults: {
+    uiScale: 1, cameraDistance: RENDER.camera.distance, tier: 'auto',
+    audioMaster: AUDIO.master, audioUi: AUDIO.buses.ui, audioWorld: AUDIO.buses.world, captions: true,
+  },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
   tiers: ['auto', 'gpu', 'software'],

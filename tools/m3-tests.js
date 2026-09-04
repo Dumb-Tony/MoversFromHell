@@ -58,6 +58,10 @@ const G = 9.81;
 
 function step(n = 1, opts = {}) {
   for (let i = 0; i < n; i++) {
+    // Phase 11 M10: clearForces FIRST, as main.js does. Rapier forces persist and compound
+    // until reset, and this harness never reset them — see tools/m2-tests.js step() for the
+    // measurement (a dropped box gaining 1.0 m/s per step from a stale accumulator).
+    physics.clearForces();
     const yaw = opts.yaw !== undefined ? opts.yaw : rig.yaw;
     rig.yaw = yaw;
     if (opts.pitch !== undefined) rig.pitch = opts.pitch;
@@ -245,10 +249,11 @@ lines.push('--- D. the object pulls back (GDD §6.2) ---');
 
   /* THE TRACTION SEAM (Phase 11, M7): a grounded mover's legs anchor CARRY.tractionN of
    * horizontal reaction before any of it becomes pull. The MECHANISM is pinned here with an
-   * instance override, because the shipped budget is 0 N — the sweep in config.js found no
-   * value that made a solo couch drag travel, and every value above 100 N tore the dolly
-   * haul. When that number comes off zero (with hand-frame damping), D1-D4 above still hold
-   * because 400 N > CARRY.tractionN, and these say what the subtraction does. */
+   * instance override, so the assertions do not move with the shipped budget: M7 shipped it
+   * at 0 N (the sweep in config.js found no value that made a solo couch travel while the
+   * damping was world-frame), M10 set it to 350 N / 380 N braced with hand-frame damping.
+   * D1-D4 above still hold because 400 N > CARRY.tractionN (D5c keeps it so), and these say
+   * what the subtraction does. */
   const dt = STEP / 1000;
   const savedTraction = player.tractionN;
   player.tractionN = () => 300;
@@ -273,12 +278,13 @@ lines.push('--- D. the object pulls back (GDD §6.2) ---');
   ok('D5c the shipped budget keeps D1/D2\'s 400 N fixture live and never exceeds the braced one',
      CARRY.tractionN >= 0 && CARRY.tractionN < 400 && CARRY.braceTractionN >= CARRY.tractionN,
      `tractionN ${CARRY.tractionN}, braceTractionN ${CARRY.braceTractionN}`);
-  // The M7 brief's closed form — steady pull at the couch's 552 N must sit under the 1.22 m/s
-  // tow cap — REPORTED, not asserted: at the shipped 0 N it is 2.21 vs 1.22 m/s, i.e. the stall,
-  // kept on purpose because every budget that satisfied it tore the hold (CARRY.tractionN).
+  // The steady haul-back at the couch's 552 N, REPORTED: M7's closed form compared it with a
+  // fixed 1.22 m/s tow cap (2.21 vs 1.22 at 0 N: the stall). Since M10 the tow cap ADDS this
+  // haul-back to the walk it allows (grip.js towLimits), so the comparison is moot by
+  // construction and the number is what the couch is felt to pull at.
   const pullSteady = (b) => (552 - b) / (PLAYER.mass * CARRY.pullDamping);
-  lines.push(`      steady pull at 552 N: unbraced (552 - ${CARRY.tractionN}) / ${(PLAYER.mass * CARRY.pullDamping).toFixed(1)} = ` +
-             `${pullSteady(CARRY.tractionN).toFixed(2)} m/s, braced ${pullSteady(CARRY.braceTractionN).toFixed(2)} m/s, vs the 1.22 m/s tow cap`);
+  lines.push(`      steady haul-back at 552 N: unbraced (552 - ${CARRY.tractionN}) / ${(PLAYER.mass * CARRY.pullDamping).toFixed(1)} = ` +
+             `${pullSteady(CARRY.tractionN).toFixed(2)} m/s, braced ${pullSteady(CARRY.braceTractionN).toFixed(2)} m/s (was 2.21 at M7's 0 N)`);
 }
 emit('running...');
 
@@ -348,6 +354,9 @@ lines.push('--- E. no hard denial (GDD §2.1, §6.3, gate) ---');
        * "one drags or pivots" is therefore only half true today. That is a real shortfall,
        * it is written up in docs/KNOWN_ISSUES.md with these numbers, and it is deliberately
        * not papered over with a threshold low enough to pass. */
+      // M10: reported unconditionally — these are the numbers the before/after table quotes.
+      lines.push(`      solo drag (240 steps, exits at 0.8 m): couch net ${dragged.toFixed(3)} m, peak ${peakCouchSpeed.toFixed(2)} m/s, ` +
+                 `mover ${playerMoved.toFixed(2)} m, grip lost at step ${lostAt}, peak F ${peakF.toFixed(0)} N, peak stretch ${peakS.toFixed(3)}`);
       ok('E3 a lone mover can put 90 kg into motion at all — no hard denial (§2.1)',
          peakCouchSpeed > 0.3,
          `couch peak ${peakCouchSpeed.toFixed(2)} m/s, net ${dragged.toFixed(3)} m; ` +

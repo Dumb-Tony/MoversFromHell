@@ -66,6 +66,15 @@ function placePlayer(x, z, y = 0.2, settle = 60) {
 /** One or more full sim steps in the same order main.js registers them. */
 function step(n = 1, opts = {}) {
   for (let i = 0; i < n; i++) {
+    /* Phase 11 M10: clearForces FIRST, as main.js (and the m4/m6 harnesses) do. Rapier forces
+     * persist and compound until reset (PhysicsWorld.clearForces), and this harness never
+     * reset them — every grip force it applied was added to a running total. World-frame
+     * damping hid that: the c * v term reacts to the object's own speed, so the accumulator
+     * self-cancelled. Damped in the hand's frame it does not, and the tell was F8a: a box
+     * dropped after a run gained exactly 1.0 m/s per step with no contact (540 N of stale
+     * accumulator on 9 kg) until the 40 m/s clamp. Every number in this file is now the
+     * spring's, not the accumulator's. */
+    physics.clearForces();
     const yaw = opts.yaw !== undefined ? opts.yaw : rig.yaw;
     rig.yaw = yaw;
     if (opts.pitch !== undefined) rig.pitch = opts.pitch;
@@ -613,6 +622,134 @@ lines.push('--- F. two hands, slip, drop (GDD §6.2) ---');
     ok('F10 …and reports settled (§12.3)', e.state.settled,
        `settled=${e.state.settled} speed=${speed.toFixed(4)} spin=${spin.toFixed(4)} ` +
        `sleeping=${e.body.isSleeping()} held=${e.state.held} y=${posOf(e).y.toFixed(3)}`);
+  }
+}
+emit('running...');
+
+/* ── H. hand-frame damping (Phase 11 M10: §6.1 spring, §26.2 "without sustained jitter") ── */
+lines.push('--- H. hand-frame damping (M10: GDD §6.1, §26.2, §7.3) ---');
+{
+  /* The damping term is now c x (v_object - v_hand) (grip.js step). Four things must hold:
+   * at rest the maths is identical (no new oscillation), a hand driven at GRIP.maxHandSpeed
+   * into a wall never pushes the box through (the §25.2 gate at the clamp's own speed), a
+   * target JUMP is never turned into a velocity (GRIP.handJumpReset), and a fast move is
+   * clamped to GRIP.maxHandSpeed rather than fed forward raw. */
+  const dt = STEP / 1000;
+
+  // H1 — a held box at rest: 600 steps, hand-object distance variance.
+  const rest = spawnBoxAt('box_small_01', 80, 0.3, 80);
+  cleanup.push(rest.id);
+  placePlayer(80, 81.3);
+  step(20);
+  const gRest = aimAtAndGrab('right', posOf(rest));
+  if (gRest) {
+    step(60);
+    const samples = [];
+    for (let i = 0; i < 600 && grips.grips.right; i++) { step(1); samples.push(grips.grips.right.lastStretch); }
+    const mean = samples.reduce((a, b) => a + b, 0) / Math.max(1, samples.length);
+    const variance = samples.reduce((a, b) => a + (b - mean) * (b - mean), 0) / Math.max(1, samples.length);
+    ok('H1 a held 9 kg box at rest is still: 600 steps, hand-object distance variance < 1e-4 m^2 (no new oscillation)',
+       samples.length === 600 && variance < 1e-4,
+       `${samples.length} samples, mean ${mean.toFixed(4)} m, variance ${variance.toExponential(2)} m^2`);
+    // Not exactly zero: the kinematic capsule's ground snap bobs the shoulder by ~0.1 mm a
+    // step (measured 0.006 m/s), which is 1 N of feed-forward on a 9 kg box. A floor, then.
+    ok('H1a …and the hand velocity estimate is jitter-only while nothing moves (< 0.02 m/s)',
+       !!grips.grips.right && grips.grips.right.lastHandSpeed < 0.02,
+       `handSpeed ${grips.grips.right ? grips.grips.right.lastHandSpeed.toFixed(4) : 'released'} m/s`);
+
+    // H3 — a target JUMP (a teleport, a violent whip) is not a velocity: no feed-forward.
+    const g = grips.grips.right;
+    const f0 = g.holdLocal.f;
+    const jump = GRIP.handJumpReset + 0.05;
+    g.holdLocal.f = f0 + jump;                 // the target leaps 0.30 m in one step
+    step(1);
+    const afterJump = grips.grips.right;
+    ok('H3 a target jump past GRIP.handJumpReset zeroes the hand velocity and feeds nothing forward',
+       !!afterJump && afterJump.lastHandSpeed === 0 && afterJump.lastDemand < GRIP.spring * (jump + 0.05),
+       afterJump ? `handSpeed ${afterJump.lastHandSpeed}, demand ${afterJump.lastDemand.toFixed(0)} N vs spring alone ${(GRIP.spring * jump).toFixed(0)} N ` +
+                   `(unclamped feed-forward would add ${(2 * Math.sqrt(GRIP.spring * rest.def.mass) * jump / dt).toFixed(0)} N)` : 'released');
+    // …and the warm-up after a jump: the jump step was the reference, so the next
+    // GRIP.handVelWarmupSteps - 1 steps also read zero, and the one after does not.
+    const afterWindow = [];
+    for (let i = 0; i < GRIP.handVelWarmupSteps && grips.grips.right; i++) {
+      grips.grips.right.holdLocal.f += 0.02;               // 1.2 m/s of target motion
+      step(1);
+      afterWindow.push(grips.grips.right ? grips.grips.right.lastHandSpeed : -1);
+    }
+    ok('H3a …and the estimate stays zero through the warm-up that follows, then returns',
+       afterWindow.length === GRIP.handVelWarmupSteps &&
+       afterWindow.slice(0, GRIP.handVelWarmupSteps - 1).every((v) => v === 0) &&
+       afterWindow[GRIP.handVelWarmupSteps - 1] > 0,
+       `hand speeds after the jump: [${afterWindow.map((v) => v.toFixed(2)).join(', ')}]`);
+    if (grips.grips.right) grips.grips.right.holdLocal.f = f0;
+    step(30);
+
+    // H3b — a fast but plausible move is CLAMPED to GRIP.maxHandSpeed, not fed forward raw.
+    if (grips.grips.right) {
+      const gc = grips.grips.right;
+      const fBefore = gc.holdLocal.f;
+      const move = (GRIP.maxHandSpeed * dt) * 1.5;   // 0.15 m in a step: over the clamp, under the jump
+      ok('H3b (fixture) the clamp case sits between the clamp and the jump threshold',
+         move > GRIP.maxHandSpeed * dt && move < GRIP.handJumpReset, `${move.toFixed(3)} m`);
+      gc.holdLocal.f = fBefore + move;
+      step(1);
+      const gcl = grips.grips.right;
+      ok('H3b a 9 m/s target move reports exactly GRIP.maxHandSpeed', !!gcl && Math.abs(gcl.lastHandSpeed - GRIP.maxHandSpeed) < 1e-6,
+         gcl ? `handSpeed ${gcl.lastHandSpeed.toFixed(3)} vs ${GRIP.maxHandSpeed}` : 'released');
+      if (grips.grips.right) grips.grips.right.holdLocal.f = fBefore;
+    }
+    grips.releaseAll('test');
+  } else {
+    ok('H1 a held 9 kg box at rest is still', false, 'no grip');
+  }
+
+  // H2 — the E2 geometry, but the HAND is driven at GRIP.maxHandSpeed into the wall.
+  const e2 = spawnBoxAt('box_small_01', -1.6, 0.3, 0.2);
+  cleanup.push(e2.id);
+  placePlayer(-1.6, 1.5);
+  step(20);
+  const gWall = aimAtAndGrab('right', posOf(e2));
+  if (gWall) {
+    step(45);
+    let minZ = Infinity, why = null, peakHand = 0;
+    const offEnd = game.bus.on(EVENTS.GRIP_ENDED, (ev) => { why = ev.reason; });
+    for (let i = 0; i < 120; i++) {
+      const g = grips.grips.right;
+      if (g) { g.holdLocal.f += GRIP.maxHandSpeed * dt; }   // the target races through the wall
+      step(1);
+      if (grips.grips.right) peakHand = Math.max(peakHand, grips.grips.right.lastHandSpeed);
+      minZ = Math.min(minZ, posOf(e2).z);
+    }
+    offEnd();
+    ok('H2 a hand driven at GRIP.maxHandSpeed into the wall never pushes the box through it (E2 at the clamp\'s speed)',
+       minZ > -2.3, `deepest z ${minZ.toFixed(3)} (wall face at -2.09), hand ${peakHand.toFixed(2)} m/s, ${grips.grips.right ? 'still held' : 'released: ' + why}`);
+    ok('H2a …the hand estimate never exceeded the clamp, and if the hold gave way it said why (§2.1)',
+       peakHand <= GRIP.maxHandSpeed + 1e-6 && (grips.grips.right || why === 'pulled out of reach' || why === 'slipped'),
+       `hand ${peakHand.toFixed(2)} m/s, ${grips.grips.right ? 'held' : why}`);
+    grips.releaseAll('test');
+  } else {
+    ok('H2 a hand driven at GRIP.maxHandSpeed into the wall never pushes the box through it', false, 'no grip');
+  }
+
+  // H4 — the warm-up after a FRESH grab: the first GRIP.handVelWarmupSteps steps trust no velocity.
+  const fresh = spawnBoxAt('box_small_01', 84, 0.3, 84);
+  cleanup.push(fresh.id);
+  placePlayer(84, 85.3);
+  step(20);
+  const gFresh = aimAtAndGrab('right', posOf(fresh));
+  if (gFresh) {
+    const seen = [];
+    for (let i = 0; i < GRIP.handVelWarmupSteps + 1 && grips.grips.right; i++) {
+      grips.grips.right.holdLocal.f += 0.03;               // 1.8 m/s of target motion every step
+      step(1);
+      seen.push(grips.grips.right ? grips.grips.right.lastHandSpeed : -1);
+    }
+    ok('H4 a fresh grab reports zero hand velocity through GRIP.handVelWarmupSteps, then a real one',
+       seen.length === GRIP.handVelWarmupSteps + 1 && seen.slice(0, GRIP.handVelWarmupSteps).every((v) => v === 0) && seen[GRIP.handVelWarmupSteps] > 0,
+       `hand speeds by step: [${seen.map((v) => v.toFixed(2)).join(', ')}]`);
+    grips.releaseAll('test');
+  } else {
+    ok('H4 a fresh grab reports zero hand velocity through the warm-up', false, 'no grip');
   }
 }
 emit('running...');

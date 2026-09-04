@@ -106,8 +106,9 @@ IS true, and what m3 E3 asserts, is that a lone mover can put 90 kg into motion 
 which is the no-hard-denial claim the gate actually makes. Candidate levers: `GRIP.maxStretch` against `GRIP.spring` — a braced band of 0.77 m was tried
 in Phase 11 M7 and bought nothing (0.00 m); a traction budget before the pull was tried in the
 same milestone and bought nothing usable (see the Phase 16 open items); `CARRY.dragForceRef`
-and a kinetic < static friction remain untried. The binding limit is the world-frame damping
-term, not the spring.
+and a kinetic < static friction remain untried. The world-frame damping term was the
+binding limit; M10 damps in the hand's frame and the solo drag travels (0.34 m in 3 s).
+`CARRY.dragForceRef` remains the only untried lever.
 
 **The ragdoll is a timed knockdown, not a simulated body.** §5.1 asks for "physical body;
 limited crawl/grab" during ragdoll. What exists is: the mover is dropped, immobilised for
@@ -211,21 +212,22 @@ are now corrected in place. **The Unity rebuild should set `Min` from the start 
 against it.** Until then, treat every friction number in `definitions.js` as a coefficient to
 be averaged, not as a force.
 
-**Solo couch drag does not travel, and a traction budget alone cannot make it (Phase 11 M7,
-measured).** One hand, unbraced, 3 s: 0.00 m, held throughout; braced: 0.00 m, held throughout;
-on the dolly 2.12 m; two movers one hand each 1.34 m. The cause is now known and pinned rather
-than guessed: the grip damps against the object's absolute velocity, so a towed couch can follow
-no faster than (spring × band − 552 N) / 569 N·s/m = 0.137 m/s unbraced, 0.248 m/s braced (m6
-B10a pins both under 0.30 m/s on purpose). The legs-anchor-the-reaction seam is in
-(`CARRY.tractionN` / `braceTractionN`, `PlayerController.applyCarry`, m3 D5) and was swept
-0–560 N: budget 0 stalls (0.00 m, held); 200 N buys 5 cm and tears the dolly haul; 330–350 N
-tears the couch hold in 0.6 s and the mover strolls 7.8 m; braced 400 N buys 0.25 m — and
-topples the fridge (1.24 m, on its side), which flips m6 B5/B6's "beyond one hand unaided". Both
-ship at 0. The next lever is hand-frame damping (grip.js `cPerHand * vp` → `cPerHand * (vp −
-vHand)` with a cached hand target), a corrected `towSpeedLimit` derivation and a friction-aware
-tow cap; it shifts every quoted lift/dolly number (m4 C4's 11 mm, m6 B4/B6) and is its own
-increment. Bracing while towing two-up measured 0.05 m vs 1.34 m unbraced — the same limit
-cycle, worth knowing before a co-op playtest.
+**Solo couch drag travels, slowly and by design (Phase 11 M10, measured).** One hand, unbraced, 3 s:
+0.34 m, held throughout (2.45 m in 10 s, force ~620–680 N against 552 N of floor friction, no
+stumble); on the dolly 6.52 m; two movers one hand each 5.09 m. The grip now damps in the hand's
+frame (`c · (v_object − v_hand)`), the tow cap knows the object's effective floor friction and adds
+the pull's haul-back (`CARRY.tractionN` 350 / `braceTractionN` 380), and the band caps the legs'
+ACCELERATION at 0.74 m/s² for the couch — most of the first three seconds is the ramp. Two things a
+tester will notice: (1) **bracing while towing is an anchor, not a faster drag** — +0.02 m along the
+haul in 3 s, 0.45 m in 10 s, never torn: a braced mover's legs walk at 0.76 m/s against a 0.69 m/s
+haul-back, netting ~0.03 m/s. Making braced the faster technique needs ≥ 430–450 N of braced
+traction and that topples the fridge (420 N: on its side at 6.8 s; the rows are in
+`tools/_probe-drag.js`'s default run). (2) **The fridge can be toppled by one mover who grabs it
+high.** At the harness's 0.875 m grab it never tips in 10 s (445–457 N stall, tilt 0.0°); grabbed
+at 1.2 m — where a player looking at it aims — the tipping force is 315 N, and a lone unbraced pull
+tilts it 5.9° in 3 s and topples it at 6.9 s. It still cannot be dragged (745 N of friction, on its
+side too), so "beyond one hand unaided" survives as a §2.2 consequence rather than a denial; not
+prevented, on purpose.
 
 **Tools have no interaction verb yet.** §9.2 requires deploy/attach/tension/fold/retrieve
 "through the common interaction system", and the `interact` binding (E / pad X) already
@@ -588,7 +590,22 @@ file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to
 
 REPLACE the Phase 6 paragraph 'Solo couch dragging got harder, not easier' (KNOWN_ISSUES.md ~237-243) with:
 
-**Solo couch drag does not travel, and a traction budget alone cannot make it (Phase 11 M7, measured).** One hand, unbraced, 3 s: 0.00 m, held throughout; braced: 0.00 m, held throughout; on the dolly 2.12 m; two movers one hand each 1.34 m. The cause is now known and pinned rather than guessed: the grip damps against the object's absolute velocity, so a towed couch can follow no faster than (spring × band − 552 N)/569 N·s/m = 0.137 m/s unbraced, 0.248 m/s braced (m6 B10a pins both under 0.30 m/s on purpose). The legs-anchor-the-reaction seam is in (`CARRY.tractionN` / `braceTractionN`, `PlayerController.applyCarry`, m3 D5) and was swept 0–560 N: budget 0 stalls (0.00 m, held); 200 N buys 5 cm and tears the dolly haul; 330–350 N tears the couch hold in 0.6 s and the mover strolls 7.8 m; braced 400 N buys 0.25 m — and topples the fridge (1.24 m, on its side), which flips m6 B5/B6's 'beyond one hand unaided'. Both ship at 0. The next lever is hand-frame damping (grip.js `cPerHand * vp` → `cPerHand * (vp − vHand)` with a cached hand target), a corrected `towSpeedLimit` derivation (lag = F_f/k + 2ζv/ω) and a friction-aware tow cap; it shifts every quoted lift/dolly number (m4 C4's 11 mm, m6 B4/B6) and is its own increment. Bracing while towing two-up measured 0.05 m vs 1.34 m unbraced — the same limit cycle, worth knowing before a co-op playtest.
+**Solo couch drag travels, slowly and by design (Phase 11 M10, measured).** One hand, unbraced, 3 s:
+0.34 m, held throughout (2.45 m in 10 s, force ~620–680 N against 552 N of floor friction, no
+stumble); on the dolly 6.52 m; two movers one hand each 5.09 m. The grip now damps in the hand's
+frame (`c · (v_object − v_hand)`), the tow cap knows the object's effective floor friction and adds
+the pull's haul-back (`CARRY.tractionN` 350 / `braceTractionN` 380), and the band caps the legs'
+ACCELERATION at 0.74 m/s² for the couch — most of the first three seconds is the ramp. Two things a
+tester will notice: (1) **bracing while towing is an anchor, not a faster drag** — +0.02 m along the
+haul in 3 s, 0.45 m in 10 s, never torn: a braced mover's legs walk at 0.76 m/s against a 0.69 m/s
+haul-back, netting ~0.03 m/s. Making braced the faster technique needs ≥ 430–450 N of braced
+traction and that topples the fridge (420 N: on its side at 6.8 s; the rows are in
+`tools/_probe-drag.js`'s default run). (2) **The fridge can be toppled by one mover who grabs it
+high.** At the harness's 0.875 m grab it never tips in 10 s (445–457 N stall, tilt 0.0°); grabbed
+at 1.2 m — where a player looking at it aims — the tipping force is 315 N, and a lone unbraced pull
+tilts it 5.9° in 3 s and topples it at 6.9 s. It still cannot be dragged (745 N of friction, on its
+side too), so "beyond one hand unaided" survives as a §2.2 consequence rather than a denial; not
+prevented, on purpose.
 
 AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in anger:' to: 'Candidate levers: `GRIP.maxStretch` against `GRIP.spring` — a braced band of 0.77 m was tried in Phase 11 M7 and bought nothing (0.00 m); a traction budget before the pull was tried in the same milestone and bought nothing usable (see Phase 11 open items); `CARRY.dragForceRef` and a kinetic < static friction remain untried. The binding limit is the world-frame damping term, not the spring.'
 
@@ -653,4 +670,25 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 **Loose parts are still a string.** `state.removedParts` records 'legs'; no 12.6 kg of leg bodies appear (`TOOLS.screwdriver.partMassFraction` still has no consumer). Unchanged from Phase 6.
 
 **The archival screenshot scripts reference the old couch position.** tools/_shot-phase5.js and later still stage the couch in the living room; they are documented as not re-shot. tools/_shot-couch-legs.js is the M8 shot.
+
+
+## Phase 19 open items
+
+### M9
+
+- **No music layer.** §20.4's sixth layer ("light adaptive work rhythm") is deliberately absent; the five others are in. Not planned before the external playtest.
+- **No haptics.** §8.4's "optional haptic pulse" has no consumer; the Gamepad vibration API is a seam for later.
+- **A pad-only start arms a suspended context.** A gamepad press is not a user activation under Chrome's autoplay policy, so title.start() from pad A creates the AudioContext suspended; the next mouse click or key press resumes it (every arm() call resumes). Until then the game is captioned but silent.
+- **The caption lands one render frame after its cue** — feedHuds reads the last caption before audio.update drains the queue on the same frame (16 ms; invisible, but a suite must call audioFrame() before feedHuds()).
+- **Captions run on sim time.** They freeze while paused (the pause card covers them) and expire 2.6 s of sim time after the cue, not 2.6 s of wall time. The boot's 'the job starts' caption is drained under the title card and can still be on screen for up to 2.6 s of sim time after START if the world ran less than that under the card.
+- **`?audio=off` silences the captions too** (the layer's update is a no-op); the accessibility control is the Captions switch on the settings card, which keeps the captions with the volume at 0.
+- **Road events are not positional and co-op pan follows seat 0's facing** (one pair of speakers per screen); each seat's caption arrow is its own.
+- **'Outdoors' means 'no roof zone'.** The wind bed judges outdoors by the house/destination room zones (maxY = wall height), so the porch and the truck bed count as outdoors.
+- **A cue while the context is suspended or interrupted is dropped, not queued** — by design (a suspended clock never ends a voice), so the first ~50 ms after arming can lose a cue.
+- **minGapMs is per cue TYPE, on sim time**: two different objects landing within 90 ms are one thud (the caption names the first).
+
+### M10
+
+- **m2 and m3 measured with a compounding accumulator until M10** — their harnesses never called `physics.clearForces()` (main.js, m4 and m6 do), so every Phase 2/3 grip number they recorded (sag, lift forces, the 8 mm / 0.91 m/s drag) included Rapier's persisting force sum; world-frame damping self-cancelled it, which is why nothing failed. Both suites pass unchanged assertions with the fix in; the recorded numbers are historical.
+- **m6 B8's margin is 4 cm** — the brief's 0.30 m line is met at 0.34 m only because GRIP.towSpeedSafety moved 0.55 → 0.65 (0.304 m at 0.55). A later change to the couch's friction, mass or CARRY.pullDamping will move B8 first; the safety sweep in `tools/_probe-drag.js` is the place to re-tune.
 

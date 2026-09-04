@@ -496,6 +496,49 @@ lines.push('--- E. opposite-end grips stabilise (GDD §6.4) ---');
          bothEnds.peakTilt < sameEnd.peakTilt * 0.7,
          `same end [${detail(sameEnd)}] vs opposite ends [${detail(bothEnds)}]`);
     }
+
+    /* ── E4 (Phase 11 M10): two movers DRAGGING beat one — the comparison this section's
+     * exploration note (attempt 2 and 3 above) could only record as a comment while a lone
+     * mover could not shift the couch at all. With the grip damped in the hand's frame a
+     * solo drag travels (m6 B8), so the §26.2 "materially better with another grip" claim
+     * can be made in this file too, on this file's harness: same couch, same 180 steps of
+     * walking backward, one hand each, side by side on the front face. */
+    const dragWith = (n) => {
+      releaseAll();
+      const dcx = 64, dcz = 64;
+      parkAt(couch, dcx, 0.44, dcz);
+      const d = couch.def.dimensions;
+      const zStand = dcz + d.z / 2 + 0.95, SIDE = n === 2 ? 0.6 : 0;
+      placeMover(movers[0], dcx - SIDE, zStand);
+      if (n === 2) placeMover(movers[1], dcx + SIDE, zStand); else placeMover(movers[1], dcx + 12, dcz + 12);
+      step(30);
+      const gy = Math.min(d.y / 2, 1.2);
+      const g0 = grabWith(movers[0], 'right', { x: dcx - SIDE, y: gy, z: dcz + d.z / 2 });
+      const g1 = n === 2 ? grabWith(movers[1], 'right', { x: dcx + SIDE, y: gy, z: dcz + d.z / 2 }) : true;
+      if (!g0 || !g1) { releaseAll(); return null; }
+      const from = posOf(couch);
+      const it = { move: { x: 0, y: -1 }, yaw: 0 };
+      const intents = n === 2 ? { [movers[0].id]: it, [movers[1].id]: it } : { [movers[0].id]: it };
+      let held = 0;
+      for (let k = 0; k < 180; k++) {
+        step(1, intents);
+        if ((n === 2 ? movers : [movers[0]]).every((m) => m.grips.grips.right)) held++;
+      }
+      const to = posOf(couch);
+      releaseAll();
+      return { moved: Math.hypot(to.x - from.x, to.z - from.z), held };
+    };
+    const dragOne = dragWith(1), dragTwo = dragWith(2);
+    ok('E4 (M10) both drag measurements ran', !!dragOne && !!dragTwo,
+       `one=${dragOne ? 'ok' : 'no grip'} two=${dragTwo ? 'ok' : 'no grip'}`);
+    if (dragOne && dragTwo) {
+      lines.push(`      dragging 3 s: one mover ${dragOne.moved.toFixed(2)} m (held ${dragOne.held}/180), two movers ${dragTwo.moved.toFixed(2)} m (held ${dragTwo.held}/180)`);
+      ok('E4a a lone mover drags the couch at all — it travels (§26.2 "dragged solo")', dragOne.moved >= 0.30 && dragOne.held >= 150,
+         `${dragOne.moved.toFixed(2)} m, held ${dragOne.held}/180`);
+      ok('E5 …and two movers dragging travel >= 1.5x one, both holding throughout (§26.2 "materially better with another grip")',
+         dragTwo.moved >= dragOne.moved * 1.5 && dragTwo.held === 180,
+         `two ${dragTwo.moved.toFixed(2)} m vs one ${dragOne.moved.toFixed(2)} m`);
+    }
   }
 }
 emit('running...');

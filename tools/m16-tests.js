@@ -131,7 +131,8 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
 
   const x = {
     settings: { ...DEFAULT_SETTINGS, mouseSensitivity: 1.7, gripMode: 'toggle', invertLookY: true, stickDeadzone: 0.3 },
-    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu' },
+    // M9 (Phase 11 build-side): the shell carries the three bus levels and the captions switch.
+    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
   };
@@ -413,6 +414,12 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     uiScale:            () => tsNow(),                             // every font-size (U1)
     cameraDistance:     () => M.rig.distance,                      // the boom (U3)
     tier:               () => load().shell.tier,                   // the NEXT boot's detectRenderTier
+    // M9 (Phase 11 build-side): the Sound group, at its consumers — the audio layer's bus
+    // levels (audio.setMaster / setBus; m18 A11 spies the calls) and the HUD caption line.
+    audioMaster:        () => M.audio.levels.master,
+    audioUi:            () => M.audio.levels.ui,
+    audioWorld:         () => M.audio.levels.world,
+    captions:           () => huds[0].captionsEnabled,
   };
   const keys = M.settingsPanel.keys();
   eq('U2 the card has exactly one control per consumer', keys.slice().sort().join(','), Object.keys(consumers).sort().join(','));

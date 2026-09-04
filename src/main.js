@@ -34,7 +34,7 @@ import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
-import { overlappingZones, zoneAt } from './world/house.js';
+import { overlappingZones, zoneAt, ZONES, ROOM as HOUSE_ROOM } from './world/house.js';
 import { ToolSystem, reassemble } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
@@ -53,6 +53,7 @@ import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
 import { load as loadSave, save as writeSave, SHELL_DEFAULTS } from './core/save.js';
 import { RunRecorder, buildRunSummary, compactRun } from './telemetry/runLog.js';
+import { GameAudio, audioEnabledFrom, directionGlyph } from './audio/audio.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -139,6 +140,17 @@ async function boot() {
    * here, beside seatCount, and never in game.state. */
   const shell = { ...SHELL_DEFAULTS, ...saved.shell };
   document.documentElement.style.setProperty('--ts', String(shell.uiScale));
+
+  /* ---- audio (Phase 11 build-side M9; §20.4, §21.4 Hearing, §26.5) ------------------------
+   * Synthesised, zero files (audio.js). Subscribed to the bus by cue name — a bounded O(1)
+   * push inside the step, drained on the RENDER frame below (never in a system). Inert until
+   * arm() runs inside a user gesture (the title's START, a canvas click, a key), and a browser
+   * that refuses a context leaves the game identical (m18 A7/A12). `?audio=off` builds it
+   * disabled. The saved bus levels land now and apply when the graph is built. */
+  const audio = new GameAudio(bus, { enabled: audioEnabledFrom(location.search) });
+  audio.setMaster(shell.audioMaster);
+  audio.setBus('ui', shell.audioUi);
+  audio.setBus('world', shell.audioWorld);
 
   /* ---- the contract's objects (Phase 5) -------------------------------------------------
    * PHASE5_SPAWNS replaces the Phase 2 and Phase 3 spawn lists outright. Those were four
@@ -655,6 +667,7 @@ async function boot() {
      * always drawn — so an unhidden seat-1 HUD puts a second crosshair in the middle of a
      * solo player's screen until the render loop gets round to hiding it. */
     h.el.hidden = s > 0;
+    h.setCaptionsEnabled(shell.captions);   // §21.4 Hearing (M9): the saved captions switch
     huds.push(h);
   }
   const hud = huds[0];                       // the solo alias, kept honest: the same object
@@ -693,6 +706,9 @@ async function boot() {
    * a title that gated the simulation would hang all fourteen of them. */
   const title = new TitleScreen(ui);
   title.onStart = () => {
+    // The START press is the first real gesture: the AudioContext is born here (M9). A suite
+    // or a pad calling start() arms it suspended, and the next click or key resumes it.
+    audio.arm();
     if (!game.state.paused) input.requestPointerLock();
     // A blur under the title paused the world; now that the card is gone, say so.
     pauseScreen.refresh();
@@ -710,6 +726,7 @@ async function boot() {
     suppressed: () => title.visible || invoiceScreen.visible,
   });
   pauseScreen.onResume = () => {
+    audio.arm();   // a click on the card: arm, or resume a suspended context (M9)
     game.setPaused(false);
     /* A click on the card is a real user gesture, so this lock request is honoured — the one
      * route back to mouse-look that does not need a second click on the canvas. (Escape is
@@ -796,6 +813,20 @@ async function boot() {
       }
       if (Object.prototype.hasOwnProperty.call(shellPatch, 'tier') && SETTINGS.tiers.includes(shellPatch.tier)) {
         shell.tier = shellPatch.tier;   // consumed by the NEXT boot (see the top of boot())
+      }
+      /* §21.4 Hearing (M9): the three volume categories go straight to the bus gains, the
+       * captions switch to every seat's caption line. Clamped to the same ranges save.js does. */
+      for (const [k, busName] of [['audioMaster', null], ['audioUi', 'ui'], ['audioWorld', 'world']]) {
+        if (!Object.prototype.hasOwnProperty.call(shellPatch, k)) continue;
+        const r = SETTINGS.ranges[k];
+        const v = Number(shellPatch[k]);
+        if (!Number.isFinite(v)) continue;
+        shell[k] = Math.min(r.max, Math.max(r.min, v));
+        if (busName) audio.setBus(busName, shell[k]); else audio.setMaster(shell[k]);
+      }
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'captions')) {
+        shell.captions = !!shellPatch.captions;
+        for (const h of huds) h.setCaptionsEnabled(shell.captions);
       }
       persist();
     },
@@ -1145,6 +1176,7 @@ async function boot() {
     game.setPaused(true);
   };
   canvas.addEventListener('click', () => {
+    audio.arm();   // the pointer-lock click is a gesture: arm or resume (M9)
     // While the card is up it owns the clicks; grabbing the pointer behind it would leave
     // the player unable to press the one button on screen.
     if (title.visible) return;
@@ -1155,6 +1187,7 @@ async function boot() {
   // Escape is NOT read here any more: 'pause' is an ACTION (Escape + PAD.MENU, input.js),
   // consumed once per frame by the shell observer below, so a controller can pause too.
   window.addEventListener('keydown', (e) => {
+    audio.arm();   // any key is a gesture: arm or resume (M9)
     if (e.code === 'F3') {
       e.preventDefault();
       const on = overlay.toggle();
@@ -1238,6 +1271,56 @@ async function boot() {
    * (m11 O, m12 K) need the HUD fed exactly as the loop feeds it, not by a hand-built
    * approximation. READS state and never writes it (§22.2).
    */
+  /* ---- what the audio layer hears (M9) --------------------------------------------------
+   * §22.4 keeps the route, the pack quality, the carried mass and a dolly's speed OUT of
+   * game.state, so the pure mix gets them as a read-only VIEW of plain numbers built here
+   * each render frame, plus one listener per seat: feet position, the rig's flat facing (for
+   * the caption's arrow and the pan) and whether those ears are outdoors (no roof zone at
+   * either site — the kerbside aprons are zones too, so "in a zone" is not "indoors"). */
+  const indoorAt = (p) => {
+    const z = zoneAt(p, ZONES) || zoneAt(p, DEST_ZONES);
+    return !!(z && z.maxY !== undefined && Math.abs(z.maxY - HOUSE_ROOM.wallH) < 1e-6);
+  };
+  function audioListeners() {
+    const out = [];
+    for (let s = 0; s < seatCount; s++) {
+      const m = moverOfSeat(s);
+      const p = m.controller.position;
+      const f = m.rig.forwardFlat();
+      out.push({ seat: s, x: p.x, y: p.y, z: p.z, fx: f.x, fz: f.z, outdoors: !indoorAt(p) });
+    }
+    return out;
+  }
+  function audioWorld() {
+    const dollies = [];
+    for (const t of tools.tools.values()) {
+      if (t.def.effect !== 'friction' || !t.state.attachedTo) continue;
+      const e = registry.get(t.state.attachedTo);
+      if (!e) continue;
+      const v = e.body.linvel(), p = e.body.translation();
+      dollies.push({ id: e.id, x: p.x, y: p.y, z: p.z, speed: Math.hypot(v.x, v.z) });
+    }
+    return {
+      nowMs: game.clock.simTimeMs,
+      route: route.status(),
+      pack: cargo.packQuality(),
+      carries: movers.map((m) => ({ id: m.id, mass: m.controller.carriedMass, imbalance: m.controller.imbalance })),
+      dollies,
+      /** Where an entity, a tool or a mover is right now — for a cue that names one. */
+      positionOf: (id) => {
+        const e = registry.get(id);
+        if (e) { const t = e.body.translation(); return { x: t.x, y: t.y, z: t.z }; }
+        const tool = tools.get(id);
+        if (tool && tool.body) { const t = tool.body.translation(); return { x: t.x, y: t.y, z: t.z }; }
+        const m = movers.find((mv) => mv.id === id);
+        if (m) { const p = m.controller.position; return { x: p.x, y: p.y, z: p.z }; }
+        return null;
+      },
+    };
+  }
+  /** The render loop's audio call, in one place so a suite can make it too (m18 A8/A12). */
+  function audioFrame(dt = 1 / 60) { return audio.update(game.state, audioWorld(), audioListeners(), dt); }
+
   function feedHuds(rects = layoutFor(seatCount, canvas.clientWidth || 0, canvas.clientHeight || 0)) {
     settleDevices();
     const summary = manifestSummary(game.state.manifest);
@@ -1245,6 +1328,8 @@ async function boot() {
     const routeStatus = route.status();
     const contractPanel = contractFacts(summary);
     const objective = objectiveFor(contractPanel, routeStatus);
+    // §21.4 Hearing: the last cue's caption, per seat with that seat's own direction arrow.
+    const caption = audio.lastCaption(game.clock.simTimeMs);
 
     for (let s = 0; s < seatCount; s++) {
       const me = moverOfSeat(s);
@@ -1278,6 +1363,13 @@ async function boot() {
       h.setObjective(objective);
       h.setCargo(packQuality);
       h.setRoute(routeStatus);
+      if (caption) {
+        const p = me.controller.position, f = me.rig.forwardFlat();
+        h.setCaption(caption.text, caption.position
+          ? directionGlyph({ x: p.x, z: p.z, fx: f.x, fz: f.z }, caption.position) : '');
+      } else {
+        h.setCaption('');
+      }
     }
   }
 
@@ -1322,6 +1414,9 @@ async function boot() {
     // the suites can call too (feedHuds, above). Cameras first, so the prompt reads this
     // frame's aim.
     feedHuds(rects);
+    // The audio layer, on the render frame after the HUD feed (M9): drains the cue queue,
+    // ramps the beds. READS state, world and listeners; writes only to audio nodes.
+    audioFrame(dt);
     divider.update(rects);
 
     while (pendingNotices.length) {
@@ -1409,6 +1504,9 @@ async function boot() {
     /* §27.4 instrumentation (M6): the run recorder, the run summary the Copy button exports,
      * the §27.3 questionnaire and the kept runs the save holds. */
     recorder, runSummary, buildRunSummary,
+    /* §20.4 / §21.4 Hearing (M9): the audio layer, the render loop's call to it and the two
+     * views it reads — so a suite can drive one frame of it headlessly (m18). */
+    audio, audioFrame, audioWorld, audioListeners,
     get questionnaire() { return invoiceScreen.questionnaire; },
     get keptRuns() { return keptRuns.slice(); },
     clearRuns,

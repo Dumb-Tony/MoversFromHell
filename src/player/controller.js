@@ -104,6 +104,12 @@ export class PlayerController {
     /** Fastest this mover may walk while towing, m/s. Set each step by the grip system from
      *  the mass and stiffness of what is actually held; Infinity when nothing is. */
     this.towSpeedLimit = Infinity;
+    /** …and how fast they may SPEED UP while towing, m/s^2 (Phase 11 M10). A hand is a
+     *  spring: the lag a ramp puts into it is m x a / k, so a heavy object bounds the
+     *  acceleration of the legs pulling it, not only their speed. Set each step by the grip
+     *  system from the held object's spare stretch band; Infinity when nothing is held.
+     *  Slowing down is never limited — that compresses the spring and cannot tear it. */
+    this.towAccelLimit = Infinity;
     /** Set by the grip system when it wants the mover to let go (knocked down). */
     this.onForcedRelease = null;
   }
@@ -142,7 +148,8 @@ export class PlayerController {
 
   /** Horizontal force this mover's legs anchor before what they hold starts moving them
    *  (CARRY.tractionN, or CARRY.braceTractionN braced). Zero with the feet off the floor:
-   *  airborne, or knocked down. Both ship at 0 — see the measurement at CARRY.tractionN. */
+   *  airborne, or knocked down. Shipped at 0 by M7; Phase 11 M10 set them to 350 / 380 N
+   *  with hand-frame grip damping — see the measurements at CARRY.tractionN. */
   tractionN(brace = false) {
     if (!this.grounded || this._downMs > 0) return 0;
     return brace ? CARRY.braceTractionN : CARRY.tractionN;
@@ -236,6 +243,7 @@ export class PlayerController {
     this.imbalance = 0; this.exertion = 0;
     this.carriedMass = 0; this.resistedForce = 0;
     this.towSpeedLimit = Infinity;
+    this.towAccelLimit = Infinity;
     this.state = LOCOMOTION.GROUNDED;
     if (spawn) {
       this.lastStable = { x: spawn.x, y: spawn.y, z: spawn.z };
@@ -321,6 +329,21 @@ export class PlayerController {
     // helicopter control over a fall.
     let accelPerSec = this.grounded ? PLAYER.acceleration : PLAYER.airAcceleration;
     if (this.stumbling) accelPerSec *= CARRY.stumbleAccelMult;
+    /* …AND NO FASTER THAN WHAT YOU ARE TOWING CAN BE BROUGHT UP TO SPEED (Phase 11 M10).
+     *
+     * The tow SPEED cap above is not enough on its own. The legs reach walking pace in one
+     * or two steps, and with the grip damped in the hand's frame the whole velocity gap is
+     * fed forward into the object at once: the force pins at the 750 N cap, the pull
+     * overshoots, and a lone mover and a couch settle into a limit cycle that inches along
+     * (measured 0.25-0.5 m in 3 s with the force at the cap throughout, and §5.2 exertion
+     * draining the cap under floor friction). A ramp costs the spring m x a / k of lag, so
+     * the grip system hands the legs the acceleration the band can absorb, and this applies
+     * it only while SPEEDING UP: stopping compresses the spring, and a mover must always be
+     * able to stop dead (§5.1 "should not wrestle the avatar"). */
+    if (Number.isFinite(this.towAccelLimit) && this.towAccelLimit < accelPerSec &&
+        Math.hypot(targetVx, targetVz) > this.horizontalSpeed + 1e-6) {
+      accelPerSec = this.towAccelLimit;
+    }
     const accel = accelPerSec * dt;
     this._vel.x = approach(this._vel.x, targetVx, accel);
     this._vel.z = approach(this._vel.z, targetVz, accel);
@@ -405,7 +428,24 @@ export class PlayerController {
       // Linear in how far past comfortable the load is: at twice comfortable, the full rate.
       rise += (this.carriedMass / CARRY.comfortableMass - 1) * CARRY.imbalanceRise;
     }
-    rise += Math.hypot(this.pull.x, this.pull.z) * CARRY.imbalanceFromPull;
+    /* The SIDEWAYS pull (CARRY.imbalanceFromPull is "per m/s of sideways pull"): the part
+     * of the haul that crosses where the mover is trying to go. Phase 11 M10 made towing a
+     * sustained haul-back by design — the tow cap lets the legs walk the haul-back off, so
+     * a lone mover towing the couch is pulled toward it at ~0.8 m/s for as long as they
+     * tow — and charging the whole magnitude turned that lean into a stumble at 2.5 s and a
+     * knockdown at 7 s (measured, 600-step solo haul: "overloaded"). A tug of war along the
+     * line you are walking is a lean, and a lean is stable; a partner's grip yanking you
+     * ACROSS your path is not. Standing still, all of it counts — you are simply being
+     * dragged. */
+    const pullMag = Math.hypot(this.pull.x, this.pull.z);
+    let yank = pullMag;
+    if (intent && intent.move && intent.forward && intent.right && pullMag > 0) {
+      const wx = intent.forward.x * intent.move.y + intent.right.x * intent.move.x;
+      const wz = intent.forward.z * intent.move.y + intent.right.z * intent.move.x;
+      const wlen = Math.hypot(wx, wz);
+      if (wlen > CARRY.imbalanceStandingIntent) yank = Math.abs(this.pull.x * (wz / wlen) - this.pull.z * (wx / wlen));
+    }
+    rise += yank * CARRY.imbalanceFromPull;
 
     // §5.1: braced is explicitly "higher grip and impulse resistance", so bracing is the
     // answer to being unbalanced — it halves what builds up.

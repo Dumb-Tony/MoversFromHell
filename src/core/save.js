@@ -144,6 +144,12 @@ export function sanitiseShell(obj) {
   const cd = Number(obj.cameraDistance);
   if (Number.isFinite(cd)) out.cameraDistance = clamp(cd, r.cameraDistance);
   if (SETTINGS.tiers.includes(obj.tier)) out.tier = obj.tier;
+  // M9: the three bus levels clamp to their slider ranges; captions is a boolean or the default.
+  for (const k of ['audioMaster', 'audioUi', 'audioWorld']) {
+    const v = Number(obj[k]);
+    if (Number.isFinite(v) && r[k]) out[k] = clamp(v, r[k]);
+  }
+  if (typeof obj.captions === 'boolean') out.captions = obj.captions;
   return out;
 }
 

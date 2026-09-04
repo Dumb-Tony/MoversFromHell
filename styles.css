@@ -283,6 +283,34 @@ html, body {
 }
 .route-bar .label.event { color: var(--amber); opacity: 1; font-weight: 700; }
 
+/* §21.4 Hearing — the sound caption (Phase 11 build-side M9). Bottom-centre, above the route
+   bar and the help line, out of the working area (§21.1). One line; the direction glyph is a
+   separate chip so the words stay the words. `[hidden]` must be restated because the rule
+   below sets display, and an author `display` beats the UA stylesheet's `[hidden]`. */
+.caption {
+  position: absolute;
+  left: 50%; bottom: 72px;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px;
+  background: rgba(23,21,34,.86);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: calc(12px * var(--ts))/1.45 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.caption:empty, .caption[hidden] { display: none; }
+.caption .dir {
+  display: inline-block;
+  min-width: 16px; padding: 0 4px;
+  background: var(--amber); color: #1a1408;
+  border-radius: 3px;
+  font: 700 calc(11px * var(--ts))/1.5 ui-monospace, Consolas, monospace;
+  text-align: center;
+}
+
 /* §8.4's "one small cost notice" at impact. Transient, stacked, bottom-right. */
 .notices {
   position: absolute;
