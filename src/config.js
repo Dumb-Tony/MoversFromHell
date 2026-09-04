@@ -63,6 +63,49 @@ export const RENDER = Object.freeze({
     occludeLerpIn: 30,       // pull in fast (§4.1 "rather than cut unpredictably")
     occludeLerpOut: 4,       //  ...ease back out slowly
   },
+
+  /* ---- Phase 15: the Overcooked look ------------------------------------------------------
+   * Chosen 2026-09-02 from a four-proposal design panel judged from three lenses (art,
+   * engine, constraints); the spec is in docs/CHANGELOG.md. Every number a shader, material
+   * or light reads comes from HERE — §25.1: no bare literal in a system. */
+
+  /** The post chain over the BACKBUFFER: scene renders to the canvas exactly as today (MSAA
+   *  kept for free), copyFramebufferToTexture captures it, then bright+downsample, blur H,
+   *  blur V, composite. No render target ever receives the scene, so r128's viewport-reset,
+   *  16-bit-depth and CSS-vs-drawing-buffer traps never apply. gpu tier only. */
+  post: {
+    enabled: true,
+    bloom: { threshold: 0.86, knee: 0.10, strength: 0.28, sigmaQuarterPx: 3.0 },
+    grade: { warm: [1.02, 1.00, 0.97], gain: 0.965, lift: [0.035, 0.028, 0.026], saturation: 1.10 },
+    vignette: { amount: 0.15, inner: 0.125, outer: 0.50 },
+    dither: true,
+    /** Must equal scene.js HORIZON and the sky's horizon stop: the 2 px split-screen gap
+     *  is painted this colour under the DOM divider. */
+    divider: 0xdfe9ee,
+  },
+
+  /** Material, occlusion and rig constants shared by textures.js, materials.js, prefabs.js,
+   *  scene.js, lighting.js and contactBlobs.js. */
+  look: {
+    /** One texture repeat per this many metres on 'tile'-UV parts, so texel density is
+     *  constant across prefab sizes (a 2.1 m couch and a 0.5 m box share one grain scale). */
+    texelMetres: 0.5,
+    plankMetres: 1.0,
+    /** ACES exposure. Derived so a lit white face lands ~0.93 sRGB, unclipped, under the
+     *  bloom threshold; the shadowed side of a mid albedo sits at ~0.5× the lit side. */
+    exposure: 1.05,
+    fog: { near: 30, far: 120 },
+    /** 'vsm' (soft, gpu only; ?shadows=pcf overrides) | 'pcfsoft'. */
+    shadows: 'vsm',
+    /** Vertex-baked occlusion: a darkening band up from each part's base. */
+    ao: { strength: 0.30, bandMax: 0.25 },
+    /** Multiply-blended contact strips along every wall base. */
+    skirt: { width: 0.30, strength: 0.38 },
+    /** Ground-following contact blobs under every entity, tool and mover (gpu only). */
+    blob: { strength: 0.45, fadeLift: 0.60, maxDist: 20, rayMax: 2.5 },
+    /** Fresnel rim, masked toward world-up, shared onBeforeCompile across surface() materials. */
+    rim: { sky: 0xdceaff, power: 3.0 },
+  },
 });
 
 /* ------------------------------------------------------------------------------------
