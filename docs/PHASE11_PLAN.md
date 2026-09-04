@@ -254,3 +254,74 @@ Produced 2026-09-04 by a six-mapper read of the codebase against GDD §25.2 Phas
 - Briefing card + animated invoice reveal (§21.2) — moving PICKUP into title.onStart changes boot behaviour every suite depends on (titleScreen.js:9-14; KNOWN_ISSUES.md:539-542) and the reveal is polish; after instrumentation shows whether the invoice reads.
 - Multi-trip contracts (state.tripCount never written, cargo.js:45 tripCount fixed at 1) — content while the replay gate is untested; M6 records trips as 1 honestly.
 - Opt-in telemetry upload (§27.4) — ruled out by the project's 'Zero external requests' rule (CLAUDE.md:51); local copy/export in M6 is the whole of it.
+
+## Batch 4 addendum — after the eight (added 2026-09-04)
+
+Two items the architect listed under "deliberately not now" moved up once batches 1-3 landed: the audio layer (§26.5 "subtitles exist" has nothing to caption without cues, and the settings card already reserves the volume slots) and hand-frame grip damping (M7 measured the world-frame damping term as the whole reason solo drag does not travel; the seam and harnesses it needs are in).
+
+### M9 — Synthesised audio layer with captions — WebAudio, zero files
+
+*GDD:* §22.2 (UI/Audio presentation); §2.2 / §12 consequential chaos needs to be HEARD; §26.5 'subtitles … exist' and colour-independent cues; §21.4 Hearing (subtitles with direction, visual alerts, volume categories); §26.6 no unbounded growth; §22.4 audio reads state and never writes it  
+*Size:* ~9 h · *depends on:* M4, M5
+
+**Why.** There is no sound at all (grep AudioContext/Audio/oscillator in src → 0). Impacts, drops, strap failures, road bumps and the invoice sting are silent, and §26.5's 'subtitles exist' cannot be true without cues to caption. Dev/INDEX.md → Audio records the synth written four times already: COPY tone/makeNoise/atten, the pure mixFor(state) seam, the CUES data table and cueFor/cueVolume from C:/Dev/SmallTownEmergencyServices/src/audio/audio.js (540 lines). The M4 settings card already has master/UI/world volume slots reserved (shell settings) — wire them.
+
+**Scope.** NEW src/audio/audio.js: exports mixFor(state, listeners) (PURE — no WebAudio import; continuous layers engine{gain,pitch} in transit from route speed, roll for an attached dolly moving > AUDIO.roll.minSpeed, strain from carriedMass/imbalance with pitch rising on imbalance, rattle in transit ∝ (1 − packQuality) below AUDIO.rattle.qualityBelow, wind outdoors; nearest-listener attenuation with atten(d, range) squared), RANGE, CUES keyed by EVENTS names (IMPACT thud by materials[] tag with volume ∝ relVelocity above AUDIO.impact.minVelocity; DAMAGE_APPLIED crack; GRIP_STARTED/ENDED soft grab/release, reason 'overstretched' = snap; STRAP_CHANGED ratchet click per state, 'failed' twang; TOOL_STATE clack/rustle/clunk; PART_CHANGED ratchet; CARGO_STATE chime/low note; ROAD_FORCE whoomp ∝ severity; RECOVERY pop; CONTRACT_PHASE sting; SILENT_EVENTS for SIM_PAUSED/RESUMED/RESET, INPUT_CONTEXT, ZONE_CHANGED), every cue row with minGapMs and a `caption` string; class GameAudio { constructor(bus); arm() (lazy AudioContext on first user gesture, returns false when refused — silent non-fatal layer); setMaster/setBus(name, v); update(state, world, listeners, dt) on the RENDER frame; lastCaption(nowMs) for the HUD; info() {voices, queued}; dispose() }; tone, makeNoise. Voice cap AUDIO.maxVoices. src/config.js: frozen AUDIO block (master, buses ui/world/foley, ranges, impact.minVelocity, roll.minSpeed/fullSpeed, rattle.qualityBelow, maxVoices, captionMs) — never a bare literal in audio.js. src/main.js (surgical hunks): construct after boot, arm on the first pointer-lock click / keydown / pad press, update in the render loop after the HUD feed, expose api.audio; `?audio=off` → audio.enabled false and update() a no-op. src/ui/hud.js: a caption line (`.caption`, bottom-centre above the help line) showing the last cue's caption for AUDIO.captionMs with a direction glyph ← → ↑ from listener bearing when the cue has a position; hidden when settings.captions is false. Settings: master/UI/world volume sliders and captions on/off on the M4 card (settingsStore routes them to audio.setMaster/setBus and the HUD; persisted in the shell key). NEW tools/_probe-audio.js printing mixFor for the boot pose, a carry, a dolly roll and transit.
+
+**Files:** src/main.js, src/config.js, src/ui/hud.js, src/ui/settings.js, src/core/save.js, styles.css, tools/m16-tests.js · **new:** src/audio/audio.js, tools/m18-tests.js, tools/_probe-audio.js
+
+**Reuse.** C:/Dev/SmallTownEmergencyServices/src/audio/audio.js — copy tone, makeNoise, atten, the mixFor(state) seam, CUES/cueFor/cueVolume/SILENT_EVENTS, the arm()/resume-on-gesture pattern and the caption idea; keep the function names (Dev/INDEX.md → Audio: 'now written three times — copy, do not rewrite'). Positional pan by camera bearing from Chameleon toneP (INDEX row 486).
+
+**Acceptance tests.**
+- m18 A1: every key of CUES is a name in EVENTS, and every EVENTS name is a CUES key OR listed in SILENT_EVENTS (nothing the game emits is unaccounted for).
+- m18 A2: mixFor is pure — called twice on the same state it deep-equals; on a bare {} state it returns all-zero gains and throws nothing.
+- m18 A3: engine gain is 0 in PICKUP and DELIVERY and > 0 in TRANSIT (drive the phase through interact's cab seam as m11 E4b does, or api.game.setPhase).
+- m18 A4: strain gain rises monotonically across three carriedMass samples at fixed imbalance (0 → 30 → 90 kg), and pitch rises with imbalance at fixed mass (0 → 0.5 → 1.0).
+- m18 A5: cueVolume('IMPACT', {relVelocity: 4}) > cueVolume('IMPACT', {relVelocity: 1}) and cueVolume('IMPACT', {relVelocity: AUDIO.impact.minVelocity − 0.01}) === 0.
+- m18 A6: nearest-listener attenuation — a rolling dolly 2 m from seat 1 and 20 m from seat 0 mixes louder than the same dolly 20 m from both, by ≥ 4× (atten is squared).
+- m18 A7: with no AudioContext available (stub window.AudioContext = undefined) new GameAudio(bus) + arm() returns false, update() 300 times never throws, info().voices === 0.
+- m18 A8: after bus.emit(IMPACT, {relVelocity: 3, materials: ['wood']}) the HUD caption text equals that cue's caption; after AUDIO.captionMs + 100 of driven sim frames it is empty; with settings captions off it never appears.
+- m18 A9: bounded — 1000 IMPACT events in one frame leave info().voices ≤ AUDIO.maxVoices and info().queued ≤ AUDIO.maxVoices; the internal cue timestamp map has ≤ Object.keys(CUES).length entries.
+- m18 A10: with ?audio=off (location stub or api flag) api.audio.enabled === false and update() returns without touching info().
+- m18 A11: the settings card's master/UI/world sliders and captions checkbox each move their consumer (audio.setMaster / setBus spy, HUD caption visibility) — zero inert controls (extend m16 U2's walk; m16 V4c's key set grows by the audio keys under shell).
+- m18 A12: audio never writes state — game.state JSON before and after 300 frames with the layer attached deep-equals the run without it (same seed, same scripted inputs), as m17 R6 does for the recorder.
+- Regression: m0 E8 (state serializable), m11 F-section (HUD), m16 all, m15 all; every other suite unchanged. Suite total rises by m18's count only.
+
+**Risks.**
+- Autoplay policy: the context must be created inside a user gesture handler; the pointer-lock click in main.js is the natural one. A refused context must leave the game identical (A7).
+- The render loop is where update() belongs (not the fixed step): cues from the bus arrive synchronously inside the step — queue them (bounded) and drain on the render frame.
+- IMPACT payload has relVelocity and materials[] (surfaceTags), not speed/mass — read damage.js:111. GRIP_ENDED.reason values come from grip.js release(); check the actual strings.
+- Settings card: M4 owns src/ui/settings.js and the shell payload; add controls as data rows so m16 U2's walk finds them, and extend m16 V4c's key list rather than breaking it.
+- Headless Chrome has no audio device but DOES construct an AudioContext; A7 must stub it away explicitly.
+
+### M10 — Hand-frame grip damping — the solo couch drag actually travels
+
+*GDD:* §26.2 'A couch-equivalent can be dragged solo and handled materially better with another grip'; §2.1 'allow awkward solo dragging'; §6.3 heavy tier 'one drags or pivots'; §3.3 at least two approaches; §25.2 Phase 3 gate 'weight legible without hard denial'  
+*Size:* ~8 h · *depends on:* M7
+
+**Why.** M7 (Phase 16) measured the cause to the number: the grip damps against the object's ABSOLUTE velocity (grip.js c·vp, c = 2√(k·m) = 569 N·s/m for the couch), so a towed couch can follow a hand no faster than (k·band − F_friction)/c = 0.137 m/s unbraced / 0.248 m/s braced, and the traction budget could only tear the hold or topple the fridge. Damping in the HAND's frame (vp − vHand) removes the viscous brake against the world while keeping the spring stable; a friction-aware tow cap and a corrected towSpeedLimit derivation (lag = F_f/k + 2ζv/ω) then let the mover walk at a speed the couch can follow. This is the increment M7 and PHASE11_PLAN's 'Deliberately not now' both name, with the largest blast radius on measured numbers — which is why it gets its own milestone and full re-measurement.
+
+**Scope.** src/player/grip.js: cache each grip's hand target position per step (already computed for the spring); damping term becomes cPerHand·(vp − vHand) where vHand is the hand target's velocity (finite difference over the step, clamped to GRIP.maxHandSpeed); towSpeedLimit(brace) re-derived from the corrected lag formula and made friction-aware (reads the held object's effective floor friction from registry/def, as m6's effectiveFriction does) — every constant in config.js GRIP (zeta, maxHandSpeed, towFrictionRef …), never a bare literal. src/player/controller.js only if the tow cap plumbing needs it. Keep CARRY.tractionN at 0 (M7's seam stays inert) unless the sweep with hand-frame damping shows a non-zero value that helps WITHOUT toppling the fridge — if so, set it and show the table. Re-measure every quoted number with the project's own harnesses (m6 haulDistance/haulTogether, m4 liftTogether, m2 D/E, m3 E) and update the assertions to the new measured values with the same ids; docsNotes must carry the before/after table.
+
+**Files:** src/player/grip.js, src/player/controller.js, src/config.js, tools/m2-tests.js, tools/m3-tests.js, tools/m4-tests.js, tools/m6-tests.js · **new:** tools/_probe-drag.js
+
+**Reuse.** This project's own grip spring is the reference implementation; the harnesses haulDistance/haulTogether (tools/m6-tests.js), liftTogether (tools/m4-tests.js) and the instance-override pattern (m3 D5) are all in place from M7. The traction sweep probe pattern (tools/_m7-probe.js, deleted) is described in C:/Dev/INDEX.md → 'A traction budget cannot fix a world-frame-damped tow'.
+
+**Acceptance tests.**
+- m6 B8: solo, one hand, unbraced, flat floor, bare couch, haulDistance 180 steps → moved ≥ 0.30 m (M7 measured 0.000 with world-frame damping), held ≥ 150/180, mover < 2.5 m — the §26.2 claim as a number.
+- m6 B9: same braced → moved ≥ 0.60 m, held 180/180, braced.moved > unbraced.moved × 1.3.
+- m6 B10c: two movers one hand each ≥ solo + 0.5 m and ≥ 1.5× solo (still 'materially better with another grip').
+- m6 B10b / B6: a lone braced mover still cannot shift the fridge ≥ 0.35 m in 3 s and never topples it (tilt < 20°) — the 'beyond one hand unaided' binary survives.
+- m6 B4: dolly couch still ≥ 1.0 m and ≥ bare + 0.5 m (the dolly remains the better answer).
+- m6 B10a rewritten: the hand-frame ceiling is reported, not pinned under 0.30 m/s any more; assert instead that the towed couch's peak speed ≤ the mover's walk speed (no object outrunning its hand).
+- m4 C2-C5 lift binary unchanged within tolerance (one hand clear < 0.02 m; two hands > 0.005 m) — re-measure and quote; m4 E two-mover drag ≥ 1.5× solo.
+- m2 D4c, D6, E2 (no wall ghosting, braced and unbraced), E4/E5 (retreat) unchanged; m3 E3/E3a/E4 (peak > 0.3 m/s, mover < 3.0 m, couch < 6.0 m) and F4 stumble unchanged; m3 D5-D5c (traction subtraction) unchanged.
+- Stability: 600 steps holding a 9 kg box at rest → hand-object distance variance < 1e-4 m² (no new oscillation from the hand-frame term); a hand moving at GRIP.maxHandSpeed toward a wall never pushes the box through it (m2 E2 pattern at speed).
+- Suites m2, m3, m4, m6 ALL-PASS; every changed number quoted in docsNotes with before → after.
+
+**Risks.**
+- Every measured lift/dolly/drag number in README, KNOWN_ISSUES and the m2/m3/m4/m6 suites moves — re-measure, never hand-edit; the reviewer must reproduce the table.
+- A hand velocity estimated by finite difference is noisy at the first step of a grab and after a teleport in fixtures (M1 recorded a 0.46 m camera lag after a 40 m teleport): clamp and warm up over GRIP.handVelWarmupSteps.
+- Removing the world-frame brake can let a light box overshoot its hand — the stability assertion above exists for that; tune zeta before touching the spring.
+- Co-op sideways yank (PLAYTEST_NOTES Phase 12) may change feel; measure two-mover haul both braced and unbraced and record it.
+

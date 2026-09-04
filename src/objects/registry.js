@@ -18,16 +18,26 @@
 
 import { OBJECT_DEFS, validateDef } from './definitions.js';
 import { GROUP_PRESETS } from '../physics/world.js';
-import { RECOVERY, SIM } from '../config.js';
+import { RECOVERY, SIM, ECONOMY } from '../config.js';
+import { EVENTS } from '../core/eventBus.js';
 import { buildPrefab } from '../render/prefabs.js';
 
 let _nextId = 0;
 
 export class ObjectRegistry {
-  /** @param {PhysicsWorld} physics @param {THREE.Scene} scene */
-  constructor(physics, scene) {
+  /**
+   * @param {PhysicsWorld} physics
+   * @param {THREE.Scene} scene
+   * @param {EventBus|null} [bus]  for RECOVERY (§27.4 "recovery" is one stream: movers in
+   *        main.js, objects here). Null by default — every suite that builds a registry by
+   *        hand keeps working, and a registry with no bus simply does not announce.
+   * @param {(() => number)|null} [now]  the clock, so the event carries a real simTimeMs
+   */
+  constructor(physics, scene, bus = null, now = null) {
     this.physics = physics;
     this.scene = scene;
+    this.bus = bus;
+    this.now = now || (() => 0);
     this.entities = new Map();        // entityId -> entity
     this.byCollider = new Map();      // rapier collider handle -> entity
   }
@@ -188,6 +198,9 @@ export class ObjectRegistry {
       const speed = Math.hypot(v.x, v.y, v.z);
       const spin = Math.hypot(w.x, w.y, w.z);
       e.state.settled = !e.state.held && speed < 0.08 && spin < 0.15;
+      // §15.3 "heaviest thing moved": a record of ever having been in a hand. Written nowhere
+      // until M6 — heaviestMoved() in main.js tested it and it was always false (M2's note).
+      if (e.state.held) e.state.everHeld = true;
 
       const t = e.body.translation();
       if (e.state.settled && t.y > -1) {
@@ -210,7 +223,7 @@ export class ObjectRegistry {
        * and it is not free — Phase 10 will price the callout as a §15.1 fee. Nothing about
        * the object's condition changes here. */
       if (e.state.outOfBoundsMs >= RECOVERY.outOfBoundsGraceSeconds * 1000) {
-        this.recover(e);
+        this.recover(e, 'out of bounds');
         recovered.push(e.id);
       }
     }
@@ -221,8 +234,10 @@ export class ObjectRegistry {
    * Put one object back on its last known good transform (§18.3).
    * Also callable on demand, which is what the Phase 5 suite uses to prove that EVERY
    * object in the manifest can come back rather than only the ones that happened to fall.
+   * Emits ONE RECOVERY carrying the fee the invoice will bill (ECONOMY.recoveryFee), so the
+   * §27.4 "recovery" signal is a single stream with the movers' (main.js) — m17 R4.
    */
-  recover(entity) {
+  recover(entity, reason = 'out of bounds') {
     const s = entity.state.lastStable;
     entity.body.setTranslation(
       { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z }, true);
@@ -235,6 +250,12 @@ export class ObjectRegistry {
     entity.state.outOfBoundsMs = 0;
     entity.state.settled = false;
     entity.state.recoveries = (entity.state.recoveries || 0) + 1;
+    if (this.bus) {
+      this.bus.emit(EVENTS.RECOVERY, {
+        entityId: entity.id, reason, fee: ECONOMY.recoveryFee,
+        newTransform: { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z },
+      }, this.now());
+    }
     return entity;
   }
 

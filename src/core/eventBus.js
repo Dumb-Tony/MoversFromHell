@@ -34,7 +34,7 @@ export const EVENTS = Object.freeze({
   PART_CHANGED:     'PART_CHANGED',     // entityId, part, removed|restored, dimensions
   ZONE_CHANGED:     'ZONE_CHANGED',     // entityId, zoneId, entered|exited, settled
   CARGO_STATE:      'CARGO_STATE',      // entityId, truckId, secured, support, risk
-  ROAD_FORCE:       'ROAD_FORCE',       // truckId, type, vector, severity
+  ROAD_FORCE:       'ROAD_FORCE',       // roadType, label, severity (never `type` — the envelope owns it)
   RECOVERY:         'RECOVERY',         // entityId, reason, fee, oldTransform, newTransform
   CONTRACT_PHASE:   'CONTRACT_PHASE',   // from, to, time, validationResult
 });
@@ -75,7 +75,7 @@ export class EventBus {
   }
 
   emit(type, payload = {}, simTimeMs = 0) {
-    const evt = { type, simTimeMs, ...payload };
+    const evt = { ...payload, type, simTimeMs };   // envelope keys WIN: a payload `type` used to turn ROAD_FORCE into 'hardBrake' (m17 R4e)
     this.emitted++;
 
     this.log.push(evt);

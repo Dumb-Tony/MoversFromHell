@@ -133,14 +133,16 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     settings: { ...DEFAULT_SETTINGS, mouseSensitivity: 1.7, gripMode: 'toggle', invertLookY: true, stickDeadzone: 0.3 },
     shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu' },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
+    runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
   };
   eq('V4 save(x) reports success', save(x), true);
   deep('V4 …then load() deep-equals x', load(), x);
   const blob = JSON.parse(localStorage.getItem(SAVE_KEY));
   eq('V4a the blob carries the schema', blob.schema, SAVE_SCHEMA);
   eq('V4b …and the build label that wrote it (§27.1)', blob.build, BUILD.label);
-  eq('V4c …and exactly the four documented sections beside them',
-     Object.keys(blob).sort().join(','), 'bestInvoice,build,schema,settings,shell');
+  // M6 added `runs` (§27.4 kept run records) as the sixth top-level key.
+  eq('V4c …and exactly the six documented sections beside them',
+     Object.keys(blob).sort().join(','), 'bestInvoice,build,runs,schema,settings,shell');
 
   // A save is a file a player can edit. Same validator as the live Input (input.js).
   localStorage.setItem(SAVE_KEY, JSON.stringify({

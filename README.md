@@ -114,6 +114,22 @@ what to do next (the truck, how many to load, the road, how many to unload), eve
 at says which room it is for, and thirty seconds into a job with nothing grabbed a single notice
 names the grab buttons. Cargo glance while driving is **LB** on a pad (View is join/leave).
 
+**Furniture legs come off.** The couch is §7.1's own example: E with the screwdriver takes
+its legs off (0.85 → 0.77 m across, 60 s billed to the clock, the notice names it) and Q puts
+them back. It now starts in the kitchen behind the 34" door, so the doorway turn is the couch's
+real route — 10 mm on its side intact, 90 mm with the legs off — and the 32" opening on the front
+wall goes from impossible to 50 mm.
+
+**After the invoice: seven questions and a run report.** The settlement sheet asks GDD §27.3's
+seven playtest questions (five on a 1–5 scale with words at each end, two as a line of text;
+Skip is a button) and has a **Copy run report (JSON)** button. The report is human-readable
+JSON: build, seed, date, sim milliseconds per phase, grips, drops, recoveries, damage events,
+straps by state, cargo loaded/unloaded and the worst shift in transit, the invoice to the cent,
+completion, the session's restart count, your answers, and every event of the run with its time
+stamp. If the clipboard is refused (plain http, an embedded pane) the report is already selected
+in the box under the button. The last six run records and your answers are kept in this browser
+only; **clear responses** deletes them.
+
 ## Test it
 
 ```bash
@@ -177,7 +193,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**1272 assertions across seventeen suites, all passing** — plus a GPU-only suite that the
+**1437 assertions across eighteen suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -197,13 +213,22 @@ item damage was silently unbilled from the second run on) with a three-run soak 
 resource count identical after run 1 and run 3; a settings card with versioned persistence
 (grip mode, look speeds, invert, deadzone, text size, camera distance, quality tier, best
 invoice); and prompts that speak your device, an objective line, room hints on every item, and a
-stall hint. That is six of the eight milestones.
+stall hint. Batch 3 finished the eight: a run recorder with a Copy-to-JSON run report and
+GDD §27.3's seven playtest questions on the settlement sheet (so an external group's session
+arrives as data, never uploaded), and §7.1's own example built at last — the couch's legs come
+off for 60 s of labour, it starts behind the 34" door, and the standing open design question
+about the tight doors is resolved in KNOWN_ISSUES with the measured clearances. The eight are
+done; the plan's addendum names the next two (audio, hand-frame grip damping).
 
 ![The pause card](docs/phase16-pause.png)
 
 ![The settings card](docs/phase17-settings.png)
 
 ![The objective line](docs/phase17-hud.png)
+
+![The settlement sheet with the seven questions](docs/phase18-settlement.png)
+
+![The couch with its legs off, behind the 34" door](docs/phase18-couch-legs.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 
@@ -212,9 +237,9 @@ shingle, siding, glass, grass, asphalt, card, walnut, hi-vis — and each kind h
 albedo texture, relief and light response, which is the direct answer to "everything reads
 as different colours of the same texture" (m13 G4 asserts no two kinds share an image).
 The crew keeps its toy proportions, pinned by test (G7). The couch is still exactly 2.10 m
-and still will not fit the 32" door — every rounded prefab is measured against its own
-collider to the millimetre (m13 A1), because §13.4's collision-faithful rule outranks any
-art direction.
+and still will not fit the 32" door intact — with the legs off it passes by 50 mm (m6
+E14/E16) — and every rounded prefab is measured against its own collider to the millimetre
+(m13 A1), because §13.4's collision-faithful rule outranks any art direction.
 
 ![Inside, and in co-op](docs/phase15-interior.png)
 
@@ -462,6 +487,12 @@ Per `Dev\INDEX.md`, most of the scaffold was copied rather than written:
 Names were kept so the lineage stays greppable.
 
 ## Known limitations
+
+- **Nothing is uploaded, ever.** The project rule is zero external requests, so §27.4's
+  "opt-in upload" is the Copy button; a playtest group sends the pasted JSON by hand. The
+  recorder's frame cost was measured in a real Chrome (0.03 ms per step at worst), not in the
+  harness, where virtual time freezes the clock. The report's `trips` is always 1 and its
+  `briefing` / `settlement` phases are always 0 in this build.
 
 - **Replay is a full unwind** (Phase 11 M2): tools are detached and retrieved, parts
   reassembled, friction and collider sizes restored, recoveries zeroed, the damage ledger

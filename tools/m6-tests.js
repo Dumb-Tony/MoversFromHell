@@ -21,14 +21,14 @@
  */
 
 import { SIM, TOOLS, DAMAGE, PLAYER, GRIP, CARRY } from '../src/config.js';
-import { OBJECT_DEFS } from '../src/objects/definitions.js';
+import { OBJECT_DEFS, PHASE5_SPAWNS, validateDef } from '../src/objects/definitions.js';
 import { TOOL_DEFS, PHASE6_TOOL_SPAWNS, validateAllToolDefs } from '../src/tools/definitions.js';
 import {
   impactToleranceOf, conditionLossFor, gripMultiplierFor, blanketShedsAt,
   rampGeometry, packedVolume, disassemble, reassemble, currentDimensions,
 } from '../src/tools/tools.js';
-import { INTERIOR_DOORS, zoneAt } from '../src/world/house.js';
-import { minProjectedWidth } from '../src/render/scene.js';
+import { INTERIOR_DOORS, PARTITION_T, zoneAt } from '../src/world/house.js';
+import { APERTURES, minProjectedWidth, fitsThroughGap } from '../src/render/scene.js';
 import { EVENTS } from '../src/core/eventBus.js';
 import { restoreClearedObjects } from '../src/player/grip.js';
 import { GROUP_PRESETS } from '../src/physics/world.js';
@@ -747,25 +747,40 @@ lines.push('--- E. screwdriver: dimensions (GDD §9.1 "disassemble authored part
       reassemble(registry, shelf, 'shelves');
     }
 
-    /* THE HONEST NEGATIVE, and it is the most important assertion in this section.
+    /* THE HONEST NEGATIVE, REWRITTEN DELIBERATELY (Phase 11 M8).
      *
-     * The obvious expectation is that disassembly is how you get furniture through tight
-     * doors. It is not, and the data says so plainly: every object with an authored
-     * disassembly path ALREADY passes the tightest opening on its route (0.86 m) by at
-     * least 160 mm, so nothing that can be taken apart needed to be. The one genuinely
-     * tight object — the couch at 0.850 m against 0.860 — has no disassembly path at all,
-     * and the wardrobe's real constraint is its 2.00 m height against a 2.03 m opening,
-     * which taking the doors off does not touch.
+     * From Phase 6 to Phase 17 this assertion read "no disassemblable object was ever
+     * blocked by a doorway — the win is volume, not clearance", and it was AUTHORED to block
+     * exactly the claim made below: it existed so that no later phase could quietly say
+     * disassembly gets furniture through doors when the data said otherwise. The data said
+     * otherwise because couch_3seat_01 — the one object that is genuinely tight, 0.850 m
+     * against 0.860 and 0.820 — had `disassembly: []`, although §7.1's own worked example
+     * of the schema is this couch with "four legs / screwdriver". M8 authored the legs
+     * (0.85 -> 0.77 across) and moved the couch behind the 0.86 door, so the old assertion
+     * would now fail for the right reason, and it is rewritten rather than patched:
      *
-     * So the payoff asserted above is PACKED VOLUME, which feeds Phase 7's one-trip
-     * question, and that is the payoff that actually exists. This assertion exists to stop
-     * a later phase quietly claiming the clearance win instead. */
-    const tightest = Math.min(...INTERIOR_DOORS.map((d) => d.gap));
+     *   exactly ONE disassemblable object has a true cross-section (min of height and
+     *   depth — the long axis cannot stand up in a 2.03 m doorway, m0 C3/C4) wider than the
+     *   narrowest opening in the game, it is the couch, and its legs-off cross-section fits.
+     *
+     * For the other six the payoff is still PACKED VOLUME (E3, E7), and the wardrobe's real
+     * constraint is still its 2.00 m height against a 2.03 m opening. The old formula used
+     * min(x, z) — the footprint — which called the couch 0.90 and would have failed the
+     * moment it gained a part; the cross-section is the number a doorway actually tests. */
+    const narrowestOpening = Math.min(...APERTURES.map((a) => a.gap), ...INTERIOR_DOORS.map((d) => d.gap));
     const withParts = Object.values(OBJECT_DEFS).filter((d) => (d.disassembly || []).length > 0);
-    const neededIt = withParts.filter((d) => minProjectedWidth(d.dimensions.x, d.dimensions.z) > tightest);
-    lines.push(`      ${withParts.length} objects can be taken apart; ${neededIt.length} of them needed to be`);
-    ok('E8 no disassemblable object was ever blocked by a doorway — the win is volume, not clearance',
-       neededIt.length === 0, neededIt.map((d) => d.id).join(', '));
+    const crossSection = (dims) => minProjectedWidth(dims.y, dims.z);
+    const neededIt = withParts.filter((d) => crossSection(d.dimensions) > narrowestOpening);
+    lines.push(`      ${withParts.length} objects can be taken apart; ${neededIt.length} of them needed to be ` +
+               `(narrowest opening ${narrowestOpening.toFixed(2)} m)`);
+    ok('E8 exactly one disassemblable object is wider than the narrowest opening, and it is the couch — ' +
+       'disassembly is a clearance win for precisely the object that needs one (§7.1, §8.2)',
+       neededIt.length === 1 && neededIt[0].id === 'couch_3seat_01',
+       `${neededIt.map((d) => `${d.id} ${crossSection(d.dimensions).toFixed(3)}`).join(', ') || 'none'} vs ${narrowestOpening}`);
+    const couchLegsOff = (OBJECT_DEFS.couch_3seat_01.disassembly[0] || {}).shrinksTo || { y: 9, z: 9 };
+    ok('E8a …and with its legs off its cross-section fits that opening (0.77 <= 0.82)',
+       neededIt.length === 1 && crossSection(couchLegsOff) <= narrowestOpening,
+       `${crossSection(couchLegsOff).toFixed(3)} vs ${narrowestOpening}`);
 
     /* §9.1's FAILURE MODE: "loose pieces get lost". The state has to record what came off,
      * or a wardrobe arrives at the destination and nobody can say its doors are missing. */
@@ -785,6 +800,182 @@ lines.push('--- E. screwdriver: dimensions (GDD §9.1 "disassemble authored part
       .filter((p) => p.reversible !== true);
     ok('E12 every authored part is reversible (§8.2 "unscrew and reattach")',
        irreversible.length === 0, `${irreversible.length} one-way parts`);
+  }
+}
+emit('running...');
+
+/* ── E13-E16. THE COUCH'S LEGS (Phase 11 build-side M8: §7.1, §8.2, §3.3, §2.1) ────────
+ *
+ * §7.1's own schema example — "four legs / screwdriver" — authored at last, and proved at
+ * three levels: the data (E13), the geometry (E14), the collider (E15) and the physics
+ * (E16). E16 is the assertion that matters: a rigid box pushed at a doorway either goes
+ * through or it does not, and the answer must flip on the legs alone. */
+lines.push('--- E13-E16. the couch\'s legs come off (M8: GDD §7.1, §8.2, §3.3, §2.1) ---');
+{
+  const couchDef = OBJECT_DEFS.couch_3seat_01;
+  const legs = (couchDef.disassembly || [])[0];
+  const problems = validateDef(couchDef);
+  ok('E13 the couch passes its own validator with a disassembly row (§24.4)',
+     problems.length === 0, problems.join('; '));
+  ok('E13a …exactly one authored part, and it is the legs (§7.1 "four legs / screwdriver")',
+     couchDef.disassembly.length === 1 && legs && legs.part === 'legs' && legs.tool === 'screwdriver',
+     JSON.stringify(couchDef.disassembly));
+  ok('E13b …reversible (§8.2 "unscrew and REATTACH")', !!legs && legs.reversible === true);
+  near('E13c …and it costs 60 s of preparation time at the configured scale (§8.2, §2.3)',
+       legs ? legs.seconds * TOOLS.screwdriver.timeScale : NaN, 60, 1e-9);
+
+  /* E14 — the geometry, in the same pure function m0 C5-C11 use. The intact numbers are
+   * NOT re-asserted here; m0 C5/C6 still own "0.85 cannot pass 0.82, short by 30 mm". */
+  const sTo = legs ? legs.shrinksTo : { x: 0, y: 0, z: 0 };
+  const at82 = fitsThroughGap(sTo.z, sTo.y, 0.82);
+  const at86 = fitsThroughGap(sTo.z, sTo.y, 0.86);
+  const intact82 = fitsThroughGap(couchDef.dimensions.z, couchDef.dimensions.y, 0.82);
+  ok('E14 legs off, the couch passes the 32" opening on its side — fits, not face-on',
+     at82.fits === true && at82.faceOn === false, JSON.stringify(at82));
+  near('E14a …by 50 mm', at82.clearance, 0.05, 1e-9);
+  near('E14b …and the 34" door by 90 mm (was 10 mm intact)', at86.clearance, 0.09, 1e-9);
+  ok('E14c intact it still cannot pass 0.82 — the gate is real, the legs are the key (§3.3)',
+     intact82.fits === false && Math.abs(intact82.clearance - (-0.03)) <= 1e-9,
+     JSON.stringify(intact82));
+
+  /* E15 — the collider follows (§8.1: silhouette and collision agree). */
+  const couch = byDef('couch_3seat_01');
+  ok('E15 there is a couch to take apart', !!couch);
+  if (couch) {
+    for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p);
+    const r = disassemble(registry, couch, 'legs');
+    ok('E15a the legs come off through disassemble()', !!r);
+    if (r) {
+      near('E15b before: 0.85 m tall', r.before.y, 0.85, 1e-9);
+      near('E15c after: 0.77 m — 80 mm of leg', r.after.y, 0.77, 1e-9);
+      near('E15d packed volume before 1.6065 m3', r.volumeBefore, 1.6065, 1e-4);
+      near('E15e …after 1.4553 m3 (-9.4%)', r.volumeAfter, 1.4553, 1e-4);
+      near('E15f the COLLIDER is 0.77 tall, not just the record', couch.collider.halfExtents().y * 2, 0.77, 1e-6);
+      near('E15g …and currentDimensions() agrees', currentDimensions(couch).y, 0.77, 1e-9);
+      lines.push(`      couch ${r.before.y} -> ${r.after.y} m tall; volume ${r.volumeBefore.toFixed(4)} -> ${r.volumeAfter.toFixed(4)} m³; ` +
+                 `${r.seconds.toFixed(0)} s of prep`);
+      ok('E15h reassemble() puts them back', !!reassemble(registry, couch, 'legs'));
+      near('E15i …to exactly 0.85', couch.collider.halfExtents().y * 2, 0.85, 1e-6);
+      ok('E15j …with nothing recorded as missing', (couch.state.removedParts || []).length === 0,
+         JSON.stringify(couch.state.removedParts));
+    }
+  }
+
+  /* E16 — THE PHYSICS. Roll the couch onto its side (height across x, long axis along z,
+   * depth up: 0.90 m tall, under the 2.03 m header) and push it at a doorway with a steady
+   * force at its centre of mass, the way m3 E2a pushes it. 600 N is a hair over its 552 N
+   * of floor friction (definitions.js couch note), so it creeps rather than flies. */
+  if (couch) {
+    const THREE = M.THREE;
+    // local x (long) -> world z, local y (height) -> world x, local z (depth) -> world y
+    const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0));
+    const rolled = new THREE.Quaternion().setFromRotationMatrix(basis);
+    const aabbOf = (e) => {
+      const q = e.body.rotation();
+      const el = new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w)).elements;
+      const he = e.collider.halfExtents();
+      const t = e.body.translation();
+      const ex = Math.abs(el[0]) * he.x + Math.abs(el[4]) * he.y + Math.abs(el[8]) * he.z;
+      const ez = Math.abs(el[2]) * he.x + Math.abs(el[6]) * he.y + Math.abs(el[10]) * he.z;
+      return { minX: t.x - ex, maxX: t.x + ex, minZ: t.z - ez, maxZ: t.z + ez, cx: t.x, cz: t.z };
+    };
+    const parkRolled = (e, x, z) => {
+      e.body.setTranslation({ x, y: 0.47, z }, true);
+      e.body.setRotation({ x: rolled.x, y: rolled.y, z: rolled.z, w: rolled.w }, true);
+      e.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      e.body.wakeUp();
+      physics.primeQueries();
+    };
+    const settle = (n) => { for (let i = 0; i < n; i++) { physics.clearForces(); physics.step(); registry.step(STEP); } };
+    /** Push along -z for `seconds`; returns the end AABB and the deepest the leading face got
+     *  past the wall's near face (penetration, m) while the couch was still outside it. */
+    const push = (legsOff, x, z0, wallNearZ, newtons, seconds) => {
+      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p);
+      if (legsOff) disassemble(registry, couch, 'legs');
+      parkRolled(couch, x, z0);
+      settle(40);
+      let maxPen = 0;
+      const n = Math.round(seconds * 1000 / STEP);
+      for (let i = 0; i < n; i++) {
+        physics.clearForces();
+        couch.body.addForce({ x: 0, y: 0, z: -newtons }, true);
+        physics.step(); registry.step(STEP);
+        const a = aabbOf(couch);
+        // Only meaningful while the trailing end is still outside — once through, the box is past the plane by design.
+        if (a.maxZ > wallNearZ) maxPen = Math.max(maxPen, wallNearZ - a.minZ);
+      }
+      physics.clearForces();
+      const a = aabbOf(couch);
+      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p);
+      return { ...a, width: a.maxX - a.minX, maxPen };
+    };
+
+    /* The 32" opening on the front wall (x -3.2; wall z -2.0, 0.18 thick: outer face -1.91,
+     * inner face -2.09). Nothing stands on the line inside now that the couch has left the
+     * living room. Legs off: through and across the room to the back partition. Legs on:
+     * the 0.85 m box meets 0.82 m of wall and stops at the outer face. */
+    const front = APERTURES.find((a) => a.id === 'interior32');
+    const OUTER32 = -2.0 + 0.09, INNER32 = -2.0 - 0.09;
+    const off32 = push(true, front.x, -0.6, OUTER32, 600, 4);
+    const on32 = push(false, front.x, -0.6, OUTER32, 600, 4);
+    lines.push(`      32" (0.82): legs off ${off32.width.toFixed(3)} m wide -> centre z ${off32.cz.toFixed(3)}; ` +
+               `legs on ${on32.width.toFixed(3)} m wide -> centre z ${on32.cz.toFixed(3)}, ` +
+               `penetration ${(on32.maxPen * 1000).toFixed(1)} mm`);
+    ok('E16 legs off, 600 N pushes the couch clean through the 32" opening — the whole couch past the inner face',
+       off32.cz < INNER32 - 1.05, `centre z ${off32.cz.toFixed(3)} (need < ${(INNER32 - 1.05).toFixed(2)}); width ${off32.width.toFixed(3)}`);
+    ok('E16a …by more than a metre of centre travel past the inner face', off32.cz < INNER32 - 1.0,
+       `${(INNER32 - off32.cz).toFixed(2)} m past`);
+    ok('E16b legs on, the same push stops at the jamb — centre never reaches the wall plane',
+       on32.cz > -1.0 && on32.minZ >= OUTER32 - 0.03,
+       `centre z ${on32.cz.toFixed(3)}, leading face ${on32.minZ.toFixed(3)} vs outer face ${OUTER32}`);
+    ok('E16c …with under 30 mm of wall penetration (no tunnelling, no hard-denial fakery)',
+       on32.maxPen < 0.03, `${(on32.maxPen * 1000).toFixed(1)} mm`);
+
+    /* The 34" door on the couch's SHIPPED route (living_kitchen: wall z -5.0, 0.12 thick,
+     * living-room face -4.94; gap 0.86 at x 2.60). Furniture that stands on the line is
+     * parked in a field for the push and put back after. Both branches of §3.3 are open here
+     * and the physics says how they differ: legs off goes through at 600 N with no yaw; the
+     * intact couch, 10 mm narrower than the door, jams at the jamb under the same blind push
+     * and needs 700 N — the 10 mm is real, and it is unpleasant, exactly as house.js says. */
+    const door = INTERIOR_DOORS.find((d) => d.id === 'living_kitchen');
+    const NEAR86 = door.at + PARTITION_T / 2, FAR86 = door.at - PARTITION_T / 2;
+    const parkedAway = [];
+    let k = 0;
+    for (const e of registry.entities.values()) {
+      if (['armchair_01', 'chair_dining_01', 'box_fragile_01', 'box_small_01'].includes(e.defId)) {
+        parkedAway.push(e); parkAt(e, PAD.x + 20 + (k % 5) * 2, 0.5, PAD.z + 20 + Math.floor(k / 5) * 2); k++;
+      }
+    }
+    settle(10);
+    const off86 = push(true, door.centre, -3.5, NEAR86, 600, 4);
+    const on86 = push(false, door.centre, -3.5, NEAR86, 600, 4);
+    const on86hard = push(false, door.centre, -3.5, NEAR86, 700, 3);
+    lines.push(`      34" (0.86): legs off 600 N -> centre z ${off86.cz.toFixed(3)}; legs on 600 N -> ` +
+               `centre z ${on86.cz.toFixed(3)}, penetration ${(on86.maxPen * 1000).toFixed(1)} mm; legs on 700 N -> ${on86hard.cz.toFixed(3)}`);
+    ok('E16d the shipped door: legs off, 600 N takes the couch straight into the kitchen (90 mm)',
+       off86.cz < FAR86 - 1.05, `centre z ${off86.cz.toFixed(3)} (need < ${(FAR86 - 1.05).toFixed(2)})`);
+    ok('E16e …legs on, the same blind push jams the intact couch at the jamb (10 mm is not a margin)',
+       on86.cz > -4.2 && on86.maxPen < 0.03,
+       `centre z ${on86.cz.toFixed(3)}, penetration ${(on86.maxPen * 1000).toFixed(1)} mm`);
+    ok('E16f …and 700 N still gets it through — §2.1: the brute branch is open, it just costs more',
+       on86hard.cz < FAR86 - 1.05, `centre z ${on86hard.cz.toFixed(3)}`);
+
+    // Everything back where the contract starts, the couch included.
+    const rows = game.state.manifest;
+    PHASE5_SPAWNS.forEach((s, i) => {
+      const e = rows[i] && registry.get(rows[i].entityId);
+      if (!e) return;
+      e.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
+      const yaw = s.yaw || 0;
+      e.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+      e.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      e.body.wakeUp();
+    });
+    physics.primeQueries();
+    settle(30);
+    void parkedAway;
   }
 }
 emit('running...');

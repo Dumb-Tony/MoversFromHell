@@ -378,16 +378,24 @@ export function packedVolume(dims) {
 /**
  * Take an authored part off an object (§8.2, §23.1's `disassembly` array, §7.4).
  *
- * WHAT THIS DOES NOT DO, stated plainly because the obvious expectation is wrong: it does
- * not make anything fit through a door it did not fit through before. Every disassemblable
- * object in the contract already passes the tightest opening on its route (0.86 m) by at
- * least 160 mm, and the one object that is genuinely tight — couch_3seat_01, at 0.850 m
- * against 0.860 — has no authored disassembly path at all. The wardrobe's real constraint
- * is its 2.00 m height against a 2.03 m opening, which taking the doors off does not touch.
+ * WHAT THIS BUYS, stated plainly because for ten phases the honest answer was "volume, not
+ * clearance". Six of the seven disassemblable objects already pass the tightest opening on
+ * their route (0.86 m) by at least 160 mm, so for them the payoff is PACKED VOLUME and
+ * handling: a wardrobe loses 13% of its volume and a bookshelf 80%, which is what decides
+ * Phase 7's one-trip question. The wardrobe's real constraint is its 2.00 m height against
+ * a 2.03 m opening, which taking the doors off does not touch.
  *
- * The measurable payoff is PACKED VOLUME and handling: a wardrobe loses 13% of its volume
- * and a bookshelf 80%, which is what decides Phase 7's one-trip question. Asserting a
- * clearance win here would be asserting something that is not true.
+ * The seventh is the exception §7.1 wrote the schema for: couch_3seat_01, 0.850 m across at
+ * its narrowest in every rotation (m0 C3/C4), against 0.86 (10 mm) and 0.82 (-30 mm). Its
+ * legs (Phase 11 M8) take it to 0.77 — 90 mm at the 34" door, 50 mm at the 32" one — and
+ * since M8 it starts in the kitchen behind the 0.86 door, so this is the one disassembly
+ * that IS a clearance win, and m6 E8 now asserts exactly that: precisely one object needed
+ * it, and it is the couch. §3.3's two approaches at the doorway turn are therefore real:
+ * prepare (legs off, 60 s billed) or brute it through on its side with 10 mm to spare.
+ *
+ * The returned `seconds` are §8.2's "preparation time" — already scaled by
+ * TOOLS.screwdriver.timeScale here, and BILLED by the interaction system through its
+ * chargeWorkMs hook (§2.3). This function itself is instantaneous; the clock is the cost.
  *
  * §9.1's failure mode is the second return value: the part is a real body with real mass
  * that now has to be tracked, carried and loaded. "Loose pieces get lost."

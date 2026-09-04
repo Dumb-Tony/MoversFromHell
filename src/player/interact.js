@@ -73,9 +73,15 @@ export class InteractionSystem {
    *        for the destination-room hint (§21.1 "destination feedback"). By ENTITY id, never
    *        by defId: box_small_01 spawns five times across three rooms. Defaults to none.
    * @param {(zoneId:string)=>string} [roomLabel]  a zone id → the words the hint prints.
+   * @param {(ms:number, why:object)=>void} [chargeWorkMs]  bill preparation time to the
+   *        contract's labour clock (§2.3, §8.2 "preparation time"). A disassembly's authored
+   *        seconds are spent HERE, on the clock the invoice reads, rather than by freezing
+   *        the player for a minute — the cost is real and the hands stay free. Defaults to
+   *        a no-op for suites that build this system without a Game. Phase 11 M8.
    */
   constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus,
-                setPhase = null, now = null, manifestRow = null, roomLabel = null }) {
+                setPhase = null, now = null, manifestRow = null, roomLabel = null,
+                chargeWorkMs = null }) {
     this.physics = physics;
     this.registry = registry;
     this.tools = tools;
@@ -89,6 +95,7 @@ export class InteractionSystem {
     this.now = typeof now === 'function' ? now : () => 0;
     this.manifestRow = typeof manifestRow === 'function' ? manifestRow : () => null;
     this.roomLabel = typeof roomLabel === 'function' ? roomLabel : (id) => id;
+    this.chargeWorkMs = typeof chargeWorkMs === 'function' ? chargeWorkMs : () => {};
 
     /** Per-mover interaction state, keyed by the mover's stable id (§22.4). */
     this.state = new Map();
@@ -569,8 +576,16 @@ export class InteractionSystem {
           this.bus.emit(EVENTS.PART_CHANGED,
             { entityId: e.id, part, action: 'removed', dimensions: r.after }, simTimeMs);
         }
+        /* §8.2's tradeoff is "preparation time", and until Phase 11 M8 it was never paid:
+         * disassemble() returned the authored seconds and this line threw them away, so
+         * taking the legs off was free and §3.3's prepared branch had no cost to weigh
+         * against the brute one. r.seconds already carries TOOLS.screwdriver.timeScale
+         * (tools.js disassemble) — scaled once, there, never twice. The notice names the
+         * price so the player learns what a minute of prep buys (§21.3). */
+        const prepMs = r.seconds * 1000;
+        this.chargeWorkMs(prepMs, { entityId: e.id, part, seconds: r.seconds });
         const saved = (1 - r.volumeAfter / r.volumeBefore) * 100;
-        return this._say(`${part} off — ${saved.toFixed(0)}% smaller`);
+        return this._say(`${part} off — ${saved.toFixed(0)}% smaller · ${r.seconds.toFixed(0)} s of prep`);
       }
       default:
         return null;

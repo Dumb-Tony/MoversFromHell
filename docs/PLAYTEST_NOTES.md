@@ -645,3 +645,24 @@ M1 (2026-09-04): no human session. Developer observation from the m11 drive: the
 
 **Stall hint.** 30 s after START THE JOB with no grip by anyone, one green notice per seat: 'hold LMB / RMB on a box to grab it — two hands for the heavy ones' (LT / RT on a pad). Once per run; a replay re-arms it. It fires on the sim clock, so a paused tester is not nagged. Note the time-to-first-grip for testers who saw it versus those who did not — if most see it, 30 s is too long for the first minute and should come down.
 
+
+## Phase 18 — Phase 11 build side, batch 3: the run recorder and the seven questions, and the couch's legs come off — 2026-09-04
+
+### M6
+
+### M6 — the questions are now asked in the build
+
+Every answer in this file so far is the developer's. From this build the seven §27.3 questions appear under the invoice on the settlement sheet, exactly as the GDD words them: 'When did weight and grip become understandable?', 'Did preparation feel like choice or chore?', 'Could players predict cargo shift and damage?', 'Was the invoice funny and useful or merely punitive?' and 'Would they replay the same contract differently?' on a 1–5 scale with a word at each end (never did … straight away; chore … choice; never … every time; merely punitive … funny and useful; no … definitely), and 'What did the team try that the game allowed or unexpectedly prevented?' and 'Which moment would they tell a friend about?' as a line of text. Skip is a button. Nothing is uploaded.
+
+**How a group's session arrives.** After the invoice, answer (or skip), press 'Copy run report (JSON)' and paste the report into a message; if the clipboard is refused (plain http, an embedded pane) the report is already selected in the box under the button. One report is a few kilobytes: build, seed, date, phase durations in ms, grips/drops/recoveries/damage/impacts, straps by state, cargo loaded/unloaded and the worst departure-to-arrival shift in metres, the invoice to the cent with every line, completion, the session's restart count, the answers, and every event of the run with its sim-time stamp. The developer's own end-to-end run for calibration: 23 events, transit 28 000 ms, one unstrapped fridge shifted 0.388 m, two recoveries billed at 90.00, profit −461.07.
+
+**What to look for in the first external reports.** §26.7's signals now have a column: comprehension = time in `pickup` before the first `GRIP_STARTED` and the drops-per-grip ratio; learning = `worstCargoShift` and `straps.placed` on run 2 vs run 1 of the same group (the `restarts` count says which run it is); replay intent = Q7 against the actual restart count, which is the honest version of the question; core preference = Q3 (choice vs chore) against `toolChanges` and `partChanges`; friction = `recoveries` and `drops`. A report with `questionnaire: null` and `restarts: 0` is a group that played once and did not answer — that is data too.
+
+**Nothing became more or less fun in this milestone**, and no fun claim is made: this is instrumentation. The one feel-adjacent change is that the invoice sheet is longer (the questions sit above 'Run it again' so the answers are given before the run is thrown away); the sheet already scrolled.
+
+### M8
+
+ADD under the Phase 11 external-playtest section:
+
+**M8 — the couch behind the 34" door.** The couch now starts in the kitchen, so every tester meets the 0.86 m doorway with it. Watch which branch they take and how long it takes them to find it: (a) drag or two-carry it on its side through 10 mm — the physics says a straight blind shove at ~600 N jams it at the jamb and ~700 N or a better line gets it through (m6 E16e/E16f), so expect a stall, a re-grip, a pivot; (b) the screwdriver — E on the couch reads 'take the legs off couch 3seat', costs 60 s on the labour clock (the notice says so) and gives 90 mm. Record: did they read the prep cost, did they put the legs back on (Q, free), and did the invoice's labour line make the minute visible. The KNOWN_ISSUES 'single most important open question' — is pivoting the couch round the turn satisfying or fiddly — is finally answerable, and the questionnaire from M6 is how the answer arrives. If more than one group in three bounces off the door without finding either branch, the room hint should name the screwdriver.
+

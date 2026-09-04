@@ -765,3 +765,53 @@ body.coop #build-stamp { opacity: .45; }
 #settlement .best { margin-top: 4px; text-align: right; font-size: calc(10px * var(--ts)); opacity: .5; }
 #settlement .best:empty { display: none; }
 #settlement .best.new { color: var(--lime); opacity: .9; }
+
+/* ── the §27.3 questionnaire and the §27.4 run export on the settlement sheet (M6) ──────
+   Same panel recipe as the stats above it. The scale is five labelled pips between two
+   words, so no answer depends on a colour (§26.5); the export textarea stays hidden until
+   the clipboard refuses. */
+#settlement .telemetry { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#settlement .telemetry .thead {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: calc(11px * var(--ts)); letter-spacing: .1em; color: var(--violet); font-weight: 700;
+}
+#settlement .questionnaire fieldset.q { border: 0; padding: 0; margin: 9px 0 0; min-width: 0; }
+#settlement .questionnaire legend.qtext { padding: 0; font-size: calc(12px * var(--ts)); opacity: .85; }
+#settlement .questionnaire .scale-row {
+  display: flex; align-items: center; gap: 7px; margin-top: 3px; font-size: calc(11px * var(--ts));
+}
+#settlement .questionnaire .anchor { opacity: .5; min-width: 6em; }
+#settlement .questionnaire .anchor.high { text-align: right; }
+#settlement .questionnaire label.pip { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+#settlement .questionnaire label.pip input { margin: 0; accent-color: var(--lime); }
+#settlement .questionnaire input[type=text] {
+  width: 100%; box-sizing: border-box; margin-top: 3px; padding: 5px 7px;
+  background: rgba(0,0,0,.25); color: var(--paper);
+  border: 1px solid var(--line); border-radius: 5px;
+  font: calc(12px * var(--ts)) Quicksand, system-ui, sans-serif;
+}
+#settlement .questionnaire input[type=text]:focus { outline: 1px solid var(--violet); }
+#settlement .questionnaire.skipped fieldset.q { display: none; }
+#settlement .questionnaire.skipped .thead::after { content: ' — skipped'; font-weight: 400; opacity: .6; }
+#settlement .export-row {
+  margin-top: 10px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap;
+  font-size: calc(10px * var(--ts)); opacity: .85;
+}
+#settlement .export-row .copy-note { opacity: .6; }
+#settlement button.minor {
+  background: transparent; color: var(--paper);
+  border: 1px solid var(--line); border-radius: 5px; padding: 4px 10px;
+  font: 600 calc(11px * var(--ts)) Quicksand, system-ui, sans-serif; cursor: pointer;
+}
+#settlement button.minor:hover { border-color: var(--violet); }
+#settlement textarea.export {
+  width: 100%; box-sizing: border-box; height: 140px; margin-top: 6px; padding: 6px;
+  background: rgba(0,0,0,.3); color: var(--paper);
+  border: 1px solid var(--line); border-radius: 5px;
+  font: calc(10px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
+}
+#settlement textarea.export[hidden] { display: none; }
+#settlement .kept {
+  margin-top: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: calc(10px * var(--ts)); opacity: .55;
+}

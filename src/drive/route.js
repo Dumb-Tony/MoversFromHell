@@ -106,7 +106,7 @@ export class RouteDriver {
           this.fired.add(ev.label);
           if (this.bus) {
             this.bus.emit(EVENTS.ROAD_FORCE, {
-              type: ev.type, label: ev.label,
+              roadType: ev.type, label: ev.label,   // M6 found `type` shadowed the bus envelope's type (payload spread after it)
               severity: TRUCK.roadEvents[ev.type].severity,
             }, simTimeMs);
           }

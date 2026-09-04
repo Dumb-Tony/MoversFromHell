@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 17,
-  label: 'phase-17',
+  phase: 18,
+  label: 'phase-18',
   date: '2026-09-04',
 });
 
@@ -783,6 +783,31 @@ export const SETTINGS = Object.freeze({
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
   tiers: ['auto', 'gpu', 'software'],
+});
+
+/** §27.4 telemetry and the §27.3 questionnaire — Phase 11 build-side M6.
+ *
+ *  LOCAL ONLY. The project rule is zero external requests (CLAUDE.md), so §27.4's "explicit
+ *  opt-in upload" is a Copy button that puts human-readable JSON on the clipboard, and
+ *  nothing else. "Deletable" is the 'clear responses' button on the settlement sheet. */
+export const TELEMETRY = Object.freeze({
+  /** Events the RunRecorder keeps VERBATIM per run (§26.6 "no unbounded growth in logs").
+   *  Past this it counts `dropped` and every counter keeps counting — only the list is
+   *  capped. Sized against measurement: a full m14 soak run (strap, dolly, doors off, a TV
+   *  drop, the 28 s drive, the unload) is a few hundred events; a couch scraped along a wall
+   *  emits one IMPACT per contact step, so a ten-minute session can reach the low thousands. */
+  maxEventsPerRun: 5000,
+  /** Compact run summaries (no event lists) kept in the save, newest last (§27.4 "deletable"). */
+  keepRuns: 6,
+  /** Export precision: metres to the millimetre, money to the cent (divisors for Math.round). */
+  precision: { metres: 1000, money: 100 },
+  /** Caps on the strings a stored run record may carry back into the DOM. */
+  textLimits: { isoDate: 32, contractId: 40, counterKey: 40 },
+  /** Strings from a kept run or a questionnaire answer are cut here before the save or the DOM. */
+  textMax: 280,
+  /** §27.3's five scaled questions use one 1..5 scale with text anchors at both ends —
+   *  colour-independent by construction (§26.5). */
+  questionnaire: { scaleMin: 1, scaleMax: 5 },
 });
 
 /** §22.5 debug + performance instrumentation. Validated: Phase 0. */

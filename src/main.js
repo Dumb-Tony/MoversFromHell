@@ -34,7 +34,7 @@ import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
-import { overlappingZones } from './world/house.js';
+import { overlappingZones, zoneAt } from './world/house.js';
 import { ToolSystem, reassemble } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
@@ -52,6 +52,7 @@ import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
 import { load as loadSave, save as writeSave, SHELL_DEFAULTS } from './core/save.js';
+import { RunRecorder, buildRunSummary, compactRun } from './telemetry/runLog.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -64,7 +65,7 @@ import { createPost, postModeFromLocation } from './render/post.js';
 import { present } from './render/present.js';
 import { ContactBlobs } from './render/contactBlobs.js';
 import { updateRimCamera } from './render/materials.js';
-import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT } from './config.js';
+import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT, ECONOMY, TELEMETRY } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -118,11 +119,21 @@ async function boot() {
    *  raised between two frames must not be lost, so it goes through a queue. */
   const pendingNotices = [];
   let strapsPlacedTotal = 0;
+  /** Per mover, the controller.recoveries count last announced as a RECOVERY event (M6). */
+  const recoveriesSeen = new Map();
 
   const bus = new EventBus();
   // The saved feel settings arrive as the constructor patch (input.js validates them).
   const input = new Input(window, canvas, undefined, saved.settings).attach();
   const game = new Game({ contractId: 'suburban_starter', input, bus });
+  /* §22.3 step 6, "record a lightweight event log for scoring and debugging", made a RECORD
+   * rather than the bus's 256-entry diagnostic tail (Phase 11 build-side M6, runLog.js).
+   * Attached before the first emit — game.setPhase(PICKUP) below is the first — so
+   * recorder.events.length === bus.emitted until the per-run cap (m17 R1). The counters go
+   * onto game.state.telemetry through a getter, because game.reset() replaces the state. */
+  const recorder = new RunRecorder({
+    counters: () => (game.state.telemetry ? game.state.telemetry.counters : null),
+  }).attach(bus);
   /* The SHELL's settings — the ones no system reads: UI scale (the `--ts` variable every
    * font-size in styles.css multiplies by), the solo camera boom, the quality tier. Held
    * here, beside seatCount, and never in game.state. */
@@ -146,8 +157,20 @@ async function boot() {
     console.warn('[MFH] content validation', { manifestProblems, spawnOverlaps, zoneOverlaps });
   }
 
-  const registry = new ObjectRegistry(physics, world.scene);
+  // The bus and the clock, so an object recovery is a RECOVERY event with a real stamp (M6).
+  const registry = new ObjectRegistry(physics, world.scene, bus, () => game.clock.simTimeMs);
   game.state.manifest = buildManifest(PHASE5_SPAWNS);
+  /** `fromZone`, from where the row actually spawns (manifest.js promised it "at spawn" and
+   *  nothing filled it — KNOWN_ISSUES had it null on every row). Row i is PHASE5_SPAWNS[i]
+   *  by construction, and the pickup zone is the same record the delivery test reads, so
+   *  the invoice can one day say the couch came out of the kitchen. Re-run on every rebuild
+   *  of the manifest (resetContract below). Phase 11 M8. */
+  const fillFromZones = (rows) => rows.forEach((row, i) => {
+    const s = PHASE5_SPAWNS[i];
+    const z = s ? zoneAt({ x: s.x, y: s.y, z: s.z }) : null;
+    row.fromZone = z ? z.id : null;
+  });
+  fillFromZones(game.state.manifest);
   /** Manifest row index -> entity id. Kept OUTSIDE game.state because a reset replaces the
    *  state wholesale, and a replay has to re-attach the manifest to the same bodies. */
   const contractEntityIds = [];
@@ -309,6 +332,18 @@ async function boot() {
     // the only CONTRACT_PHASE emitter, so from/to/simTimeMs are always on the event.
     setPhase: (to, validation) => game.setPhase(to, validation),
     now: () => game.clock.simTimeMs,
+    /* Preparation time is BILLED (M8; §2.3, §8.2 "preparation time"). A disassembly's
+     * authored seconds land on the labour clock the invoice reads AND on the current
+     * phase's §27.4 line, together — the per-phase clock is the labour clock split (m11 T1),
+     * and a minute spent unscrewing legs was spent in that phase. Same rule as Game.step:
+     * the two phases that bill no labour bill none here either. The mover is not frozen —
+     * the cost is the clock, not the hands (§2.1 never says "wait"). */
+    chargeWorkMs: (ms) => {
+      const s = game.state;
+      if (s.phase !== PHASES.BRIEFING && s.phase !== PHASES.SETTLEMENT) s.elapsedWorkMs += ms;
+      const pm = s.telemetry && s.telemetry.phaseMs;
+      if (pm) pm[s.phase] = (pm[s.phase] || 0) + ms;
+    },
     /* The destination-room hint (M5). The row is looked up through game.state each time
      * because a reset replaces the manifest wholesale; 23 rows is not a search worth caching.
      * 'Living room (destination)' is the zone's label for the map; the hint wants the room. */
@@ -422,7 +457,6 @@ async function boot() {
       }
       m.grips.step(stepMs, { brace: intent.brace, simTimeMs: ctx.simTimeMs });
 
-      const before = m.controller.recoveries;
       p.locomotion = m.controller.step(stepMs, intent);
 
       const pos = m.controller.position;
@@ -433,12 +467,19 @@ async function boot() {
       p.grips.left = m.grips.grips.left ? m.grips.grips.left.entityId : null;
       p.grips.right = m.grips.grips.right ? m.grips.grips.right.entityId : null;
 
-      if (m.controller.recoveries > before) {
+      /* One RECOVERY per increment, against the count last EMITTED rather than the count at
+       * the top of this step: a recoverNow() between steps (the R key is read in-step; a
+       * suite or the pause card is not) was invisible to a before/after diff, so the §27.4
+       * recorder's tally disagreed with recoveryCount(). The fee is the one the invoice
+       * bills (ECONOMY.recoveryFee), not the 0 it carried until M6. */
+      const seen = recoveriesSeen.get(m.id) || 0;
+      for (let k = seen; k < m.controller.recoveries; k++) {
         ctx.bus.emit(EVENTS.RECOVERY, {
-          entityId: m.id, reason: m.controller.lastRecoveryReason, fee: 0,
+          entityId: m.id, reason: m.controller.lastRecoveryReason, fee: ECONOMY.recoveryFee,
           newTransform: { ...m.controller.lastStable },
         }, ctx.simTimeMs);
       }
+      if (m.controller.recoveries !== seen) recoveriesSeen.set(m.id, m.controller.recoveries);
     }
 
     // Clearance depends on EVERY mover — a box put down beside one may be inside the other.
@@ -494,8 +535,25 @@ async function boot() {
    * §3.4's Secure exit is "warnings ACKNOWLEDGED", not resolved, so nothing here blocks a
    * departure — `canDepart()` advises and the prompt carries the warning. Refusing would
    * delete Phase 8's gate, which requires that a badly packed truck can be driven. */
+  /** §27.4 "cargo motion": where every loaded item was when the truck left. Measurement
+   *  scaffolding, not contract state, so it lives here beside the stall timer (M6). */
+  const cargoShift = { snapshot: null };
   game.addSystem('phase', (state) => {
+    if (state.phase === PHASES.TRANSIT && !cargoShift.snapshot) {
+      cargoShift.snapshot = cargo.snapshotPositions();
+    }
     if (state.phase === PHASES.TRANSIT && route.state === 'arrived') {
+      /* The pack's departure-to-arrival shift, measured by the bodies (cargo.shiftSince had
+       * no caller in the game until M6): the worst item in metres and how many moved past
+       * CARGO.shiftToleranceM, onto the §27.4 counters the run summary exports. */
+      const c = state.telemetry && state.telemetry.counters;
+      if (c && cargoShift.snapshot) {
+        const sh = cargo.shiftSince(cargoShift.snapshot);
+        c.worstCargoShift = Math.max(c.worstCargoShift || 0, sh.worst);
+        c.cargo.shifted = sh.moved;
+        c.cargo.measured = sh.count;
+      }
+      cargoShift.snapshot = null;
       game.setPhase(PHASES.DELIVERY);
       pendingNotices.push({ text: 'arrived — unload through the back', kind: 'good' });
     }
@@ -672,9 +730,45 @@ async function boot() {
    * Input.applySettings, which validates and clamps; the three shell keys are applied here.
    * Every control on the card moves a measured value (m16 U2) — nothing is stored for later. */
   let bestInvoice = saved.bestInvoice;
+  /* §27.4 "local event logs … deletable" (M6): the last TELEMETRY.keepRuns run records,
+   * compact (no event lists), carrying the tester's §27.3 answers as they arrive. The save's
+   * sixth key (save.js). `currentRunIndex` is this run's slot once settle() has stored it, so
+   * answers typed after the sheet is up UPDATE the record rather than adding one. */
+  let keptRuns = Array.isArray(saved.runs) ? saved.runs.slice() : [];
+  let currentRunIndex = -1;
   function persist() {
-    return writeSave({ settings: input.getSettings(), shell, bestInvoice });
+    return writeSave({ settings: input.getSettings(), shell, bestInvoice, runs: keptRuns });
   }
+  function storeRun(summary) {
+    keptRuns.push(compactRun(summary));
+    if (keptRuns.length > TELEMETRY.keepRuns) keptRuns.splice(0, keptRuns.length - TELEMETRY.keepRuns);
+    currentRunIndex = keptRuns.length - 1;
+  }
+  /** Close the record: a settled run gets its final answers, an abandoned one is stored now. */
+  function finishRun(summary) {
+    if (currentRunIndex >= 0 && keptRuns[currentRunIndex]) {
+      keptRuns[currentRunIndex].questionnaire = (summary && summary.questionnaire) || null;
+    } else if (summary) {
+      storeRun(summary);
+    }
+    currentRunIndex = -1;
+    persist();
+  }
+  /** The 'clear responses' button: every kept run, gone from memory and from the store. */
+  function clearRuns() {
+    keptRuns = [];
+    currentRunIndex = -1;
+    persist();
+    invoiceScreen.setKeptCount(0);
+    return true;
+  }
+  invoiceScreen.onClearRuns = clearRuns;
+  invoiceScreen.questionnaire.onChange = (answers) => {
+    if (currentRunIndex >= 0 && keptRuns[currentRunIndex]) {
+      keptRuns[currentRunIndex].questionnaire = answers;
+      persist();
+    }
+  };
   const settingsStore = {
     values: () => ({ ...input.getSettings(), ...shell }),
     apply(patch) {
@@ -836,8 +930,15 @@ async function boot() {
         build: BUILD.label, date: new Date().toISOString().slice(0, 10),
       };
     }
+    /* §22.5 "export event log and invoice inputs": the run's record, built from the same
+     * invoice/review/stats the sheet shows (runLog.js buildRunSummary), stored compact in
+     * the save (§27.4), handed to the sheet for the Copy button and the §27.3 form (M6). */
+    const runSum = buildRunSummary(game.state, invoice, review, summary, stats, recorder,
+      { date: new Date().toISOString() });
+    storeRun(runSum);
     persist();
-    invoiceScreen.show(invoice, review, summary, stats, { best: prevBest, isBest });
+    invoiceScreen.show(invoice, review, summary, stats,
+      { best: prevBest, isBest, runSummary: runSum, keptRuns: keptRuns.length });
     game.setPaused(true);
     input.releasePointerLock && input.releasePointerLock();
   }
@@ -858,6 +959,12 @@ async function boot() {
    * is that whatever was attached to it has to be re-attached.
    */
   function resetContract() {
+    /* The run's record is taken FIRST — before the unwind below emits its own GRIP_ENDED
+     * 'contract reset' and STRAP_CHANGED 'released' events — and closed on the recorder just
+     * before game.reset() replaces the counters (M6, runLog.js closeRun). A settled run keeps
+     * the sheet's summary with whatever the tester answered; a run abandoned from the pause
+     * card is summarised live, invoice null, so §27.4's "restart" is on record either way. */
+    const closing = invoiceScreen.report() || liveRunSummary();
     /* ORDER MATTERS HERE, and getting it wrong cost an hour.
      *
      * The first version cleared every tool's `attachedTo` and THEN asked the registry to detach
@@ -891,6 +998,12 @@ async function boot() {
     for (const s of interact.state.values()) { s.carriedTool = null; s.pendingAnchor = null; }
     strapsPlacedTotal = 0;
 
+    // The record closes here, after the unwind and before the state goes (see the top).
+    finishRun(closing);
+    recorder.closeRun(closing);
+    invoiceScreen.clearRun();
+    cargoShift.snapshot = null;
+    recoveriesSeen.clear();
     game.reset();
     // AFTER game.reset(): the damage system reads game.state through a getter, so this
     // clears the NEW run's ledger and windows rather than the state just thrown away.
@@ -898,6 +1011,7 @@ async function boot() {
 
     // Re-attach what the fresh state does not know about.
     game.state.manifest = buildManifest(PHASE5_SPAWNS);
+    fillFromZones(game.state.manifest);   // M8: fromZone again, on the rebuilt rows
     contractEntityIds.forEach((id, i) => { game.state.manifest[i].entityId = id; });
     for (const m of movers) {
       if (!game.state.players[m.id]) {
@@ -958,6 +1072,18 @@ async function boot() {
     for (const m of movers) n += m.controller.recoveries || 0;
     return n;
   }
+  /** The run so far, from live state — no invoice yet (M6, runLog.js). */
+  function liveRunSummary() {
+    const summary = manifestSummary(game.state.manifest);
+    const stats = contributionStats(game.state, {
+      strapsPlaced: strapsPlacedTotal, recoveries: recoveryCount(), heaviestMoved: heaviestMoved(),
+    });
+    return buildRunSummary(game.state, null, null, summary, stats, recorder,
+      { date: new Date().toISOString() });
+  }
+  /** What the Copy button would export right now: the settled record with the live §27.3
+   *  answers, or the run so far. */
+  function runSummary() { return invoiceScreen.report() || liveRunSummary(); }
   function heaviestMoved() {
     let m = 0;
     for (const e of registry.entities.values()) {
@@ -1280,6 +1406,12 @@ async function boot() {
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,
+    /* §27.4 instrumentation (M6): the run recorder, the run summary the Copy button exports,
+     * the §27.3 questionnaire and the kept runs the save holds. */
+    recorder, runSummary, buildRunSummary,
+    get questionnaire() { return invoiceScreen.questionnaire; },
+    get keptRuns() { return keptRuns.slice(); },
+    clearRuns,
     buildInvoice, reconcile, reviewFor, contributionStats, manifestSummary, stepManifest,
     get player() { return active().controller; },
     get grips() { return active().grips; },

@@ -5,51 +5,29 @@ learning goal" (§25.3).
 
 ---
 
-## OPEN DESIGN QUESTION — the couch does not fit through a 32" door
+## RESOLVED (Phase 11 M8) — the couch and the tight doors
 
-**Status: needs a product decision. Not a bug.**
+**Status: decided and built. Option 1 with the GDD's other key.** The couch is still 2.10 × 0.90 ×
+0.85 m and its narrowest intact presentation is still 0.850 m in every orientation (m0 C3-C11).
+What changed is that §7.1's own example finally exists: `couch_3seat_01` has `disassembly: [legs]`,
+80 mm of leg, and with the legs off its narrowest presentation is 0.770 m.
 
-The GDD specifies `couch_3seat_01` as 2.10 x 0.90 x 0.85 m (§7.1, given as the worked
-example of an object definition). A rigid convex box passes a slot of clear width *g* if
-and only if `min(w, h) <= g` — the projected width `w|cos t| + h|sin t|` is minimised at
-one of the endpoints, never in between. So the couch's narrowest presentation is
-**0.850 m in every possible orientation**.
+| Doorway | Clear width | Couch intact | Couch, legs off |
+|---|---|---|---|
+| 32" interior (0.82 m) | 0.82 | cannot pass — short by 30 mm | passes on its side, 50 mm |
+| 34" (0.86 m) | 0.86 | passes on its side, 10 mm | passes on its side, 90 mm |
+| 36" front door (0.91 m) | 0.91 | side 60 mm, face-on 10 mm | side 140 mm |
 
-| Doorway | Clear width | Couch |
-|---|---|---|
-| 32" interior (0.82 m) | 0.82 | **cannot pass, ever** — short by 30 mm |
-| 34" (0.86 m) | 0.86 | passes on its side, 10 mm clearance |
-| 36" front door (0.91 m) | 0.91 | passes on its side (60 mm), or face-on (10 mm) |
+Asserted in `tools/m6-tests.js` E14 (geometry), E15 (collider) and E16 (physics: at 0.82 a 600 N
+push takes the legless couch clean through and stops the intact one at the outer face with 0.0 mm
+penetration). Taking the legs off costs 60 s on the labour clock (§8.2 "preparation time", §2.3),
+so §3.3's two approaches are both priced: prepare (a minute) or brute it on its side with 10 mm.
 
-Asserted in `tools/m0-tests.js` C5–C11.
+The couch now STARTS in the kitchen (`PHASE5_SPAWNS` row 0, 2.50 / −8.40), so its route to the
+truck is the 34" door then the 36" front door — the doorway turn house.js was built for is on the
+shipped contract at last, not demonstration geometry. The 32" opening remains on the front wall,
+off every route, as the legible example of a clearance the legs unlock.
 
-This interacts with three parts of the GDD at once:
-
-- §3.3 requires every substantial obstacle to support **at least two approaches**, a
-  prepared one and a brute-force one. At 0.82 m the brute-force branch is not merely hard,
-  it is geometrically impossible — which is a different kind of obstacle from the one §3.3
-  describes.
-- §8.2 lists exactly the outs: remove the door from its hinges, or unscrew the furniture
-  legs. That suggests the impossibility is intended and is what makes preparation matter.
-- §2.1 says the game "should rarely say no", and should "show why an attempt struggles".
-  A couch that cannot pass must communicate *why* through leverage and contact feedback,
-  not through an invisible refusal.
-
-**Three options:**
-
-1. **Keep 0.82 m and lean in.** The interior door is a hard preparation gate; the front
-   door is 0.91 m so the couch can still leave the house. Maximum design payoff, and makes
-   §8.2's door removal load-bearing rather than optional. Requires door removal to exist by
-   Phase 5, earlier than §25.2's Phase 6 tool slot.
-2. **Widen the prototype's interior doors to 0.86 m.** The couch passes on its side with
-   10 mm to spare — genuinely tense, still teaches rotation, no dependency on Phase 6.
-3. **Shrink the couch.** Rejected unless the §7.1 example is meant as illustrative rather
-   than normative — its dimensions are realistic and the whole point is realistic logistics.
-
-All three widths are currently built into the Phase 0 scene so the decision can be made by
-looking at it rather than by arithmetic. Coral jambs = impossible, lime = passable.
-
----
 
 ## Technical limitations
 
@@ -193,12 +171,10 @@ is *satisfying* or merely *fiddly* is the single most important open question in
 project, and it cannot be answered by a test. It is the first thing to put in front of a
 playtester.
 
-**§8.2's two other answers to the turn do not exist yet.** The GDD offers three ways past a
-tight corner: pivot it, take the door off its hinges, or unscrew the legs. Only the first is
-buildable in Phase 5, so right now the turn has exactly one solution — which is thinner than
-§3.3 asks for ("at least two approaches"). Phase 6's tools close this, and the layout was
-built now specifically so Phase 6 has a real problem to solve rather than an invented one.
-Until then the route puzzle is honest but narrow.
+**§8.2's second answer to the turn exists; the third does not.** Pivot it (Phase 5), or unscrew
+the couch's legs (Phase 11 M8: 90 mm at the 34" door for 60 s of labour). Taking a door off its
+hinges is still unbuilt — no door leaf exists as an object anywhere (docs/PHASE11_PLAN.md,
+"Deliberately not now"). §3.3's "at least two approaches" now holds at the turn with two, not three.
 
 **Destination zones are named and unbuilt.** Every manifest row carries a `toZone`
 (`dest_living`, `dest_kitchen`, `dest_bedroom`) because §12.1 defines a manifest as
@@ -218,10 +194,10 @@ should be a §15.1 line item — a callout fee — and `state.recoveries` is cou
 so Phase 10 can charge for it. Until then, dropping something off the world is a fast
 teleport rather than a mistake, which is the wrong incentive and is fixed by the invoice.
 
-**The 32" opening is still impossible for the couch, on purpose.** Unchanged from Phase 0
-and asserted again by m5 B8. It is on the front wall, not on the couch's route, so it denies
-nothing — it is there as a legible example of a clearance that cannot be brute-forced, and
-becomes a real decision once Phase 6 can remove a door.
+**The 32" opening is still impossible for the INTACT couch, on purpose — and possible with the
+legs off.** m5 B8 and m6 E14c keep the intact fact; m6 E14/E16 add the legs-off one (50 mm; through
+at 600 N). It is on the front wall, not on the route, so it still denies nothing; it is now the
+example of a gate with a key rather than a hole.
 
 ## Phase 6 open items
 
@@ -367,10 +343,6 @@ contract UX that can name a room. What exists is a marker in the middle of each 
 wrong-room delivery should block completion, the change is one predicate in `stepManifest`
 and the inversion of m9's D1. It is recorded here because the next person will have an
 opinion and should know it was a choice rather than an oversight.
-
-**`fromZone` is still null on every manifest row.** It is filled at spawn in principle; in
-practice nothing sets it, so the invoice cannot yet say an item came out of the bedroom and
-went into the kitchen — which is the most legible form of §15.1's room-accuracy line.
 
 ## Phase 10 open items
 
@@ -657,4 +629,28 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 **The stall hint is coaching state outside game.state.** `stallHint {ms, fired, done, armed}` lives in main.js (it is not contract data and must not be serialised); a save/restore (M4/M6) that replays a run mid-pickup starts the timer fresh. Acceptable: the hint is advisory and once per run.
 
 **m15 I1a fails after M4.** main.js now registers `pauseScreen.onSettings` at boot, so M3's 'Settings slot hidden while nothing has registered a handler' assertion is stale. Not an M5 change; M4 to retarget it.
+
+
+## Phase 18 open items
+
+### M6
+
+- **The ROAD_FORCE bus trap M6 measured is fixed at integration**: `src/drive/route.js` now emits `roadType`, and `EventBus.emit` spreads the payload FIRST so the envelope's `type` / `simTimeMs` can never be shadowed again (m17 R4e reports 3 of 3 road events stamped ROAD_FORCE).
+- **The run report is local only.** §27.4's 'explicit opt-in upload' is not implemented and will not be: the project rule is zero external requests. A tester copies the JSON (button, or the selected textarea when the clipboard is refused — it is refused on plain http and in embedded panes) and sends it by hand. Kept runs (last 6, no event lists) and questionnaire answers live in this browser's localStorage under `mfh.save` and are gone with 'clear responses' or a cleared site.
+- **Frame cost of the recorder cannot be measured by the smoketest harness.** Under `--virtual-time-budget` `performance.now()` is frozen, so `game.stats.systemMs` reads 0.000 ms with the recorder on or off and m17 P1 passes vacuously there (it prints a NOTE line when both readings are 0). The honest number was taken in a real Chrome: 0.031 ms difference at worst over 600-frame passes (means 0.20/0.12 ms off, 0.18/0.15 ms on, 0.1 ms timer granularity).
+- **`counters.trips` is always 1.** `state.tripCount` is never written and `CargoSystem.tripCount` stays 1; the run report records that honestly rather than inventing a second trip.
+- **`phases.briefing` and `phases.settlement` are always 0** in the report, for the reasons already recorded for `telemetry.phaseMs`.
+- **Questionnaire answers are per device and per run**; there is no way to attribute a report to a person or a session id beyond the build label, seed and ISO date it carries. Deliberate (§27.4 'never record voice chat', no identity).
+
+### M8
+
+**The intact couch jams at the 34" door under a blind push.** m6 E16e: on its side, pushed straight at living_kitchen with 600 N (a hair over its 552 N of floor friction), the intact couch stops at the jamb with 8.3 mm of penetration and 0.44 deg of yaw; 700 N or a straighter line gets it through (E16f). Geometrically 10 mm; physically a shove that has to be earned. That is the intent — house.js calls it 'passable, and unpleasant' — and no human has tried it. It is the first thing the questionnaire should ask about.
+
+**Reattaching is free.** E bills 60 s to take the legs off; Q puts them back for nothing (m11 P2d). A player can therefore shrink the couch through the door and restore it at no cost, which is fine for §8.2's 'reattach' but means the round trip is priced once. Charging the reverse is one more call through the same `chargeWorkMs` hook.
+
+**The legless couch is a shorter couch.** disassemble() rescales the whole prefab in y (tools.js), so the mesh reads as a squashed couch rather than one without legs. Collider-faithful per §13.4 and asserted (m6 E15f, m13 A-series unchanged); a leg-hiding prefab variant is art, not scope.
+
+**Loose parts are still a string.** `state.removedParts` records 'legs'; no 12.6 kg of leg bodies appear (`TOOLS.screwdriver.partMassFraction` still has no consumer). Unchanged from Phase 6.
+
+**The archival screenshot scripts reference the old couch position.** tools/_shot-phase5.js and later still stage the couch in the living room; they are documented as not re-shot. tools/_shot-couch-legs.js is the M8 shot.
 

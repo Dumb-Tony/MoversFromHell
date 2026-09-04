@@ -15,6 +15,10 @@
  *                validator")
  *   shell        UI scale, camera distance, quality tier — the shell's, not the input's
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
+ *   runs         §27.4's local run records (Phase 11 build-side M6): the last
+ *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
+ *                completion, restarts and the §27.3 questionnaire answers — never the event
+ *                lists. "Deletable": the settlement sheet's 'clear responses' empties it.
  *
  * Deliberately NOT saved: anything in game.state. Settings never enter it (m0 E8 / m12 J3),
  * and a contract is not resumable mid-run — §26.6's replay is from the start. The stored blob
@@ -22,16 +26,16 @@
  * build that can read it.
  */
 
-import { BUILD, SETTINGS } from '../config.js';
+import { BUILD, SETTINGS, TELEMETRY } from '../config.js';
 import { DEFAULT_SETTINGS, sanitiseSettings } from './input.js';
 
 export const SAVE_KEY = SETTINGS.saveKey;
 export const SAVE_SCHEMA = SETTINGS.schema;
 export const SHELL_DEFAULTS = Object.freeze({ ...SETTINGS.shellDefaults });
 
-/** The three things load() hands back when there is nothing to load. Fresh objects each call. */
+/** The four things load() hands back when there is nothing to load. Fresh objects each call. */
 export function defaultSave() {
-  return { settings: { ...DEFAULT_SETTINGS }, shell: { ...SHELL_DEFAULTS }, bestInvoice: null };
+  return { settings: { ...DEFAULT_SETTINGS }, shell: { ...SHELL_DEFAULTS }, bestInvoice: null, runs: [] };
 }
 
 /** localStorage, or null — private mode, a locked-down profile, or a storage accessor that
@@ -69,6 +73,64 @@ export function migrate(data) {
     settings: { ...base.settings, ...sanitiseSettings(data.settings).accepted },
     shell: sanitiseShell(data.shell),
     bestInvoice: sanitiseInvoice(data.bestInvoice),
+    runs: sanitiseRuns(data.runs),
+  };
+}
+
+/** The kept runs: an array of compact run records, newest last, at most TELEMETRY.keepRuns.
+ *  Anything that is not a record is dropped rather than half-kept. */
+export function sanitiseRuns(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const r of list) { const s = sanitiseRun(r); if (s) out.push(s); }
+  return out.slice(-TELEMETRY.keepRuns);
+}
+
+/** One compact run (runLog.js compactRun): finite numbers, bounded strings, a fixed key set. */
+export function sanitiseRun(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const T = TELEMETRY.textMax;
+  const str = (v, n = T) => String(v == null ? '' : v).slice(0, n);
+  const numMap = (o) => {
+    const m = {};
+    if (!o || typeof o !== 'object') return m;
+    for (const [k, v] of Object.entries(o)) {
+      if (typeof v === 'object' && v !== null) { m[str(k, TELEMETRY.textLimits.counterKey)] = numMap(v); continue; }
+      const n = Number(v);
+      if (Number.isFinite(n)) m[str(k, TELEMETRY.textLimits.counterKey)] = n;
+    }
+    return m;
+  };
+  const inv = obj.invoice && typeof obj.invoice === 'object' ? obj.invoice : null;
+  let questionnaire = null;
+  if (obj.questionnaire && typeof obj.questionnaire === 'object') {
+    questionnaire = {};
+    for (const [k, v] of Object.entries(obj.questionnaire)) {
+      if (!/^q\d{1,2}$/.test(k)) continue;
+      questionnaire[k] = typeof v === 'number' && Number.isFinite(v) ? v : str(v);
+    }
+    if (!Object.keys(questionnaire).length) questionnaire = null;
+  }
+  return {
+    build: str(obj.build, SETTINGS.textLimits.build),
+    date: str(obj.date, TELEMETRY.textLimits.isoDate),
+    contractId: str(obj.contractId, TELEMETRY.textLimits.contractId),
+    seed: finite(obj.seed, 0),
+    elapsedWorkMs: finite(obj.elapsedWorkMs, 0),
+    phases: numMap(obj.phases),
+    counters: numMap(obj.counters),
+    delivered: obj.delivered == null ? null : finite(obj.delivered, 0),
+    total: obj.total == null ? null : finite(obj.total, 0),
+    roomCorrect: obj.roomCorrect == null ? null : finite(obj.roomCorrect, 0),
+    complete: !!obj.complete,
+    invoice: inv && Number.isFinite(Number(inv.profit)) ? {
+      income: finite(inv.income, 0), costs: finite(inv.costs, 0), profit: finite(inv.profit, 0),
+      grade: str(inv.grade, SETTINGS.textLimits.grade), score: finite(inv.score, 0),
+    } : null,
+    restarts: finite(obj.restarts, 0),
+    eventsRecorded: finite(obj.eventsRecorded, 0),
+    eventsDropped: finite(obj.eventsDropped, 0),
+    questionnaire,
   };
 }
 
@@ -104,9 +166,9 @@ export function sanitiseInvoice(obj) {
 /**
  * Write the whole save. Returns false rather than throwing on a full or refused store —
  * settle() calls this and the invoice must show regardless (m16 V5).
- * @param {{settings?: object, shell?: object, bestInvoice?: object|null}} data
+ * @param {{settings?: object, shell?: object, bestInvoice?: object|null, runs?: object[]}} data
  */
-export function save({ settings = {}, shell = {}, bestInvoice = null } = {}) {
+export function save({ settings = {}, shell = {}, bestInvoice = null, runs = [] } = {}) {
   const s = storage();
   if (!s) return false;
   const payload = {
@@ -115,6 +177,7 @@ export function save({ settings = {}, shell = {}, bestInvoice = null } = {}) {
     settings: { ...DEFAULT_SETTINGS, ...sanitiseSettings(settings).accepted },
     shell: sanitiseShell(shell),
     bestInvoice: sanitiseInvoice(bestInvoice),
+    runs: sanitiseRuns(runs),
   };
   try { s.setItem(SAVE_KEY, JSON.stringify(payload)); return true; } catch (e) { return false; }
 }

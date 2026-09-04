@@ -19,6 +19,7 @@ import { EventBus, EVENTS, PHASES } from './core/eventBus.js';
 import { Rng, hashStr } from './core/rng.js';
 import { Input, CONTEXTS } from './core/input.js';
 import { SIM } from './config.js';
+import { createTelemetryCounters } from './telemetry/runLog.js';
 
 /** §23.2 contract runtime, plus the §22.4 session seam. Serializable by construction. */
 export function createInitialState({ contractId = 'suburban_starter', seed = null } = {}) {
@@ -60,6 +61,10 @@ export function createInitialState({ contractId = 'suburban_starter', seed = nul
      *  Pattern: SmallTownEmergencyServices\src\game.js `state.telemetry` counters. */
     telemetry: {
       phaseMs: Object.fromEntries(Object.values(PHASES).map((p) => [p, 0])),
+      /** §27.4's other signals — grips, drops, recoveries, damage, strap use, cargo motion —
+       *  counted by the RunRecorder as the events pass (src/telemetry/runLog.js, M6). Here
+       *  rather than on the recorder so a reset zeroes them with everything else. */
+      counters: createTelemetryCounters(),
     },
 
     // ---- shell ----

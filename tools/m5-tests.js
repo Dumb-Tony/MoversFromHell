@@ -22,7 +22,7 @@
 import { SIM, MANIFEST, RECOVERY, DAMAGE } from '../src/config.js';
 import { OBJECT_DEFS, PHASE5_SPAWNS, validateAllDefs } from '../src/objects/definitions.js';
 import {
-  ZONES, INTERIOR_DOORS, PARTITIONS, ROUTES, ROOM,
+  ZONES, INTERIOR_DOORS, PARTITIONS, ROUTES, ROOM, PARTITION_T,
   zoneAt, zoneById, overlappingZones, wallSegments, tightestOnRoute,
 } from '../src/world/house.js';
 import {
@@ -528,6 +528,96 @@ lines.push('--- F. no hard denial (GDD §2.1, §6.3) ---');
   ok('F6 …and the whole definition set passes its own validator (§24.4)',
      Object.keys(allProblems).length === 0,
      JSON.stringify(allProblems).slice(0, 160));
+}
+emit('running...');
+
+/* ── H. THE COUCH STARTS BEHIND THE 34-INCH DOOR (Phase 11 build-side M8) ──────────────
+ *
+ * Placed before G so G's leak and banner checks cover it. Until M8 the couch spawned in the
+ * living room and its route out was ['front36'] = 0.91 m: the 0.86 door and the doorway
+ * turn house.js was built around were demonstration geometry it never met. Now it spawns in
+ * the kitchen, so its route is living_kitchen (0.86) then front36 (0.91). The placement
+ * rules the file header promises are re-asserted for THIS row specifically — a couch half
+ * inside a partition is exactly the authoring bug the rules exist for — and the two
+ * §3.3 branches are stated as numbers: intact 10 mm on its side, legs off 90 mm. */
+lines.push('--- H. the couch starts behind the 34" door (M8: GDD §3.3, §8.1, §13.1, §2.1) ---');
+{
+  const idx = PHASE5_SPAWNS.findIndex((s) => s.def === 'couch_3seat_01');
+  const spawn = PHASE5_SPAWNS[idx];
+  const cd = OBJECT_DEFS.couch_3seat_01.dimensions;
+  const aabb = { minX: spawn.x - cd.x / 2, maxX: spawn.x + cd.x / 2, minZ: spawn.z - cd.z / 2, maxZ: spawn.z + cd.z / 2,
+                 minY: spawn.y - cd.y / 2, maxY: spawn.y + cd.y / 2 };
+  const overlaps1D = (aLo, aHi, bLo, bHi) => aLo < bHi && bLo < aHi;
+  const overlapsBox = (b) => overlaps1D(aabb.minX, aabb.maxX, b.minX, b.maxX) && overlaps1D(aabb.minZ, aabb.maxZ, b.minZ, b.maxZ);
+  const near = (n, a, b, tol) => ok(n, Math.abs(a - b) <= tol, `${a} vs ${b} (tol ${tol})`);
+
+  eq('H1 the couch is still manifest row 0 (m5 D3/E4, m9 and m15 read rows[0])', idx, 0);
+  const kitchen = zoneById('kitchen');
+  const z = zoneAt({ x: spawn.x, y: spawn.y, z: spawn.z });
+  eq('H2 it spawns in the kitchen', z && z.id, 'kitchen');
+  ok('H2a …the WHOLE couch, not just its centre — every corner of its AABB inside the zone',
+     aabb.minX >= kitchen.minX && aabb.maxX <= kitchen.maxX && aabb.minZ >= kitchen.minZ && aabb.maxZ <= kitchen.maxZ,
+     `x ${aabb.minX.toFixed(2)}..${aabb.maxX.toFixed(2)} z ${aabb.minZ.toFixed(2)}..${aabb.maxZ.toFixed(2)} vs ` +
+     `kitchen x ${kitchen.minX}..${kitchen.maxX} z ${kitchen.minZ}..${kitchen.maxZ}`);
+
+  // Partition segments: the solid runs either side of each opening, as built (§8.1).
+  const wallBoxes = [];
+  for (const p of PARTITIONS) {
+    for (const seg of wallSegments(p)) {
+      wallBoxes.push(p.axis === 'x'
+        ? { id: p.id, minX: seg.lo, maxX: seg.hi, minZ: p.at - PARTITION_T / 2, maxZ: p.at + PARTITION_T / 2 }
+        : { id: p.id, minX: p.at - PARTITION_T / 2, maxX: p.at + PARTITION_T / 2, minZ: seg.lo, maxZ: seg.hi });
+    }
+  }
+  // The shell: the kitchen's back wall (z = ROOM.minZ) and side wall (x = ROOM.maxX), 0.18 thick.
+  wallBoxes.push({ id: 'shell_back', minX: ROOM.minX, maxX: ROOM.maxX, minZ: ROOM.minZ - ROOM.wallT / 2, maxZ: ROOM.minZ + ROOM.wallT / 2 });
+  wallBoxes.push({ id: 'shell_right', minX: ROOM.maxX - ROOM.wallT / 2, maxX: ROOM.maxX + ROOM.wallT / 2, minZ: ROOM.minZ, maxZ: ROOM.maxZ });
+  const inWall = wallBoxes.filter(overlapsBox);
+  ok('H3 it overlaps no partition segment and no shell wall', inWall.length === 0, inWall.map((w) => w.id).join(', '));
+  lines.push(`      back wall inner face ${(ROOM.minZ + ROOM.wallT / 2).toFixed(2)} vs couch ${aabb.minZ.toFixed(2)}: ` +
+             `${((aabb.minZ - (ROOM.minZ + ROOM.wallT / 2)) * 1000).toFixed(0)} mm`);
+
+  // Doorway clear boxes: the opening plus 0.20 m either side of the wall plane (m13 B1's box).
+  const clearBoxes = INTERIOR_DOORS.map((d) => (d.axis === 'x'
+    ? { id: d.id, minX: d.centre - d.gap / 2, maxX: d.centre + d.gap / 2, minZ: d.at - PARTITION_T / 2 - 0.20, maxZ: d.at + PARTITION_T / 2 + 0.20 }
+    : { id: d.id, minX: d.at - PARTITION_T / 2 - 0.20, maxX: d.at + PARTITION_T / 2 + 0.20, minZ: d.centre - d.gap / 2, maxZ: d.centre + d.gap / 2 }));
+  for (const a of APERTURES) clearBoxes.push({ id: a.id, minX: a.x - a.gap / 2, maxX: a.x + a.gap / 2, minZ: ROOM.maxZ - 0.09 - 0.20, maxZ: ROOM.maxZ + 0.09 + 0.20 });
+  const inDoor = clearBoxes.filter(overlapsBox);
+  ok('H4 …and no doorway clear box (nothing starts in a door)', inDoor.length === 0, inDoor.map((d) => d.id).join(', '));
+
+  // Every other spawn, by the same AABB test overlappingSpawns uses (y included).
+  const others = overlappingSpawns(PHASE5_SPAWNS).filter(([i, j]) => i === idx || j === idx);
+  ok('H5 …and no other spawn AABB', others.length === 0,
+     others.map(([i, j]) => `${PHASE5_SPAWNS[i].def}/${PHASE5_SPAWNS[j].def}`).join(' | '));
+  const fridge = PHASE5_SPAWNS.find((s) => s.def === 'fridge_01');
+  const fridgeMinX = fridge.x - OBJECT_DEFS.fridge_01.dimensions.x / 2;
+  near('H5a …100 mm clear of the fridge beside it', fridgeMinX - aabb.maxX, 0.10, 1e-9);
+
+  // The route this puts it on.
+  eq('H6 the kitchen\'s route is two legs — front36 then living_kitchen from the driveway in',
+     ROUTES.kitchen.join(' -> '), 'front36 -> living_kitchen');
+  const tightest = tightestOnRoute('kitchen', APERTURES);
+  near('H6a …so the tightest opening on the couch\'s route is now 0.86 m — the 34" door (was 0.91)', tightest, 0.86, 1e-9);
+  const narrowest = minProjectedWidth(cd.z, cd.y);
+  ok('H7 intact, the couch can still get out: 0.850 <= 0.86 (§2.1 no accidental hard denial)',
+     narrowest <= tightest, `${narrowest.toFixed(3)} vs ${tightest.toFixed(3)}`);
+  near('H7a …with exactly 10 mm to spare, on its side', tightest - narrowest, 0.010, 1e-9);
+  const legs = (OBJECT_DEFS.couch_3seat_01.disassembly || [])[0];
+  const legsOff = legs ? minProjectedWidth(legs.shrinksTo.z, legs.shrinksTo.y) : NaN;
+  near('H7b …or 90 mm with the legs off — §3.3\'s prepared branch, on the shipped contract', tightest - legsOff, 0.090, 1e-9);
+
+  // The manifest row: same destination, and fromZone finally filled (KNOWN_ISSUES had it null on every row).
+  const row = rows[idx];
+  eq('H8 its manifest row still goes to dest_living', row.toZone, 'dest_living');
+  eq('H8a …and fromZone says where it came from', row.fromZone, 'kitchen');
+  const wrongFrom = rows.filter((r, i) => {
+    const s = PHASE5_SPAWNS[i]; const zz = zoneAt({ x: s.x, y: s.y, z: s.z });
+    return !r.fromZone || r.fromZone !== (zz && zz.id);
+  });
+  ok('H8b every row\'s fromZone is the zone it actually spawns in', wrongFrom.length === 0,
+     wrongFrom.map((r) => `${r.defId}:${r.fromZone}`).join(', '));
+  const fromCounts = rows.reduce((m, r) => { m[r.fromZone] = (m[r.fromZone] || 0) + 1; return m; }, {});
+  lines.push(`      fromZone: ${Object.entries(fromCounts).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
 }
 emit('running...');
 

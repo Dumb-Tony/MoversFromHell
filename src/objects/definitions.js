@@ -126,7 +126,15 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'twoPersonPreferred'],
     colour: 0x8a5a4a,
     cargoHints: ['heavy-low'],
-    disassembly: [],
+    /* §7.1's own schema example is THIS couch with "four legs / screwdriver", and §8.2 lists
+     * "furniture legs: unscrew and reattach" as one of the two outs at a tight door. 80 mm
+     * legs: 0.85 -> 0.77 across, which is the couch's narrowest presentation (m0 C3/C4), so
+     * with the legs off it clears the 0.82 m opening by 50 mm and the 0.86 m door by 90 mm
+     * where intact it is -30 mm and +10 mm. Anything >= 30 mm of leg would clear 0.82; 80 mm
+     * is what a three-seater's legs actually are. 60 s is the §8.2 "preparation time" —
+     * billed to the labour clock by the interaction system, not free (§2.3). Packed volume
+     * 1.6065 -> 1.4553 m3 (-9.4%). Phase 11 M8. */
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 60, reversible: true, shrinksTo: { x: 2.10, y: 0.77, z: 0.90 } }],
   },
 
   /* The middle rung, so "heavy" is not a single data point. 55 kg is liftable one-handed
@@ -568,8 +576,19 @@ export const PHASE3_SPAWNS = Object.freeze([
  * inside a partition, so the suite checks all three rather than trusting this comment.
  */
 export const PHASE5_SPAWNS = Object.freeze([
+  /* THE COUCH STARTS BEHIND THE 34-INCH DOOR (Phase 11 M8). Row 0 stays row 0 — m5, m9 and
+   * m15 read rows[0] — but it now spawns in the KITCHEN (x 0..5, z -9..-5). Until M8 it
+   * stood in the living room at (-2.60, -3.20), where ROUTES.living_room is ['front36'] =
+   * 0.91 m and nothing on its way out was narrower than 0.91 — the 0.86 and 0.82 openings
+   * were demonstration geometry. From the kitchen its route is living_kitchen (0.86 m: on
+   * its side, 10 mm intact or 90 mm with the legs off) then front36 (0.91), which is §3.3's
+   * two approaches on the shipped contract and the thing house.js:6-18 built the turn for.
+   * Spans x 1.45..3.55, z -8.85..-7.95: 100 mm clear of the fridge (x >= 3.65), 60 mm off
+   * the back wall's inner face (-8.91), clear of the heavy box (x <= 1.18) and of the
+   * boxes at z >= -7.25. Still goes to dest_living. */
+  { def: 'couch_3seat_01',     x:  2.50, y: 0.45, z: -8.40, yaw: 0.00,  to: 'dest_living',  handling: 'two-person' },
+
   // ---- living room: x -5..5, z -5..-2 ----
-  { def: 'couch_3seat_01',     x: -2.60, y: 0.45, z: -3.20, yaw: 0.00,  to: 'dest_living',  handling: 'two-person' },
   { def: 'armchair_01',        x:  2.00, y: 0.48, z: -3.00, yaw: 0.35,  to: 'dest_living',  handling: '' },
   { def: 'tv_55_01',           x: -4.30, y: 0.40, z: -4.40, yaw: 1.57,  to: 'dest_living',  handling: 'fragile' },
   { def: 'side_table_01',      x:  0.60, y: 0.31, z: -2.70, yaw: 0.00,  to: 'dest_living',  handling: '' },

@@ -297,6 +297,18 @@ lines.push('--- B. promised == delivered (GDD §4.4, §2.1) ---');
     interact.act(me());
     lookAt(me(), standOffFrom({ x: -38, y: 0.4, z: 30 }, 1.4), { x: -38, y: 0.4, z: 30 });
   }]);
+  // 8. carrying the screwdriver, at the couch — §7.1's "four legs / screwdriver" (Phase 11 M8).
+  // At x -22, not -30: the screwdriver drops where the mover stands, and section C's first
+  // aim runs along the -30 line at the couch — a tool left on that line is what E picks.
+  situations.push(['screwdriver+couch', () => {
+    reset();
+    parkAt(couch, -22, 0.45, 30);
+    const sd = toolByDef('screwdriver_01');
+    const p = posOf(sd);
+    lookAt(me(), standOffFrom(p, 1.1), p);
+    interact.act(me());
+    lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
+  }]);
 
   let promised = 0, honoured = 0;
   const broken = [];
@@ -313,6 +325,9 @@ lines.push('--- B. promised == delivered (GDD §4.4, §2.1) ---');
   ok('B6 every action the prompt offers is one E can perform (§4.4)',
      broken.length === 0, broken.join(' | '));
   ok('B7 …and the sweep actually exercised several situations', promised >= 5, `${promised}`);
+  // Phase 11 M8: the couch's legs added a promise; the count is asserted so it cannot slip out silently.
+  ok('B7c M8: eight promises made and eight honoured — the couch-legs verb among them',
+     promised === 8 && honoured === 8, `${promised} made, ${honoured} honoured`);
   void box;
 }
 emit('running...');
@@ -1015,6 +1030,108 @@ lines.push('--- O. the next objective, the room, and the stall hint (M5: §26.7,
   ok('O6f a replay re-arms it for the next run', M.stallHint.armed && !M.stallHint.fired && M.stallHint.ms === 0,
      JSON.stringify(M.stallHint));
   M.pendingNotices.length = 0;
+}
+emit('running...');
+
+/* ── P. THE COUCH'S LEGS, AND PREPARATION COSTS TIME (Phase 11 build-side M8) ───────────
+ *
+ * §7.1's own example verb — "four legs / screwdriver" — reached the way a player reaches
+ * it (P1), and §8.2's "preparation time" finally PAID (P2): disassemble() has returned the
+ * authored seconds since Phase 6 and _applyTool threw them away, so taking parts off was
+ * free and §3.3's prepared branch had no cost to weigh against the brute one. The charge
+ * goes on the labour clock the invoice reads AND on the phase's §27.4 line, so T1's
+ * "phase durations add up to elapsedWorkMs" survives it (P3). P5 is the cargo payoff.
+ * The brief's ids: P1 = "situation 8", P2 = "C11" (C11 was already the ramp pickup). */
+lines.push('--- P. couch legs and the prep-time charge (M8: GDD §7.1, §8.2, §2.3, §3.3) ---');
+{
+  reset();
+  const couch = byDef('couch_3seat_01');
+  const sd = toolByDef('screwdriver_01');
+  const near = (n, a, b, tol) => ok(n, Math.abs(a - b) <= tol, `${a} vs ${b} (tol ${tol})`);
+  ok('P0 there is a couch and a screwdriver', !!couch && !!sd);
+  if (couch && sd) {
+    const home = posOf(couch);   // its kitchen spawn — O6f's replay just put it there
+    parkAt(couch, -22, 0.45, 30);
+    const p = posOf(sd);
+    lookAt(me(), standOffFrom(p, 1.1), p);
+    interact.act(me());
+    step(6);
+    ok('P0a the screwdriver is in hand', interact._for(me().id).carriedTool === sd.id);
+    lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
+    step(4);
+
+    /* P1 — situation 8. label() derives the words from the defId (interact.js label():
+     * 'couch_3seat_01' -> 'couch 3seat'), the same way the wardrobe's prompt reads
+     * 'take the doors off wardrobe'; the brief's 'the couch' is not what any prompt says. */
+    const d = interact.describe(me());
+    eq('P1 aiming the screwdriver at the couch promises its legs (§4.4, §7.1)',
+       d.primary, 'take the legs off couch 3seat');
+    const w0 = game.state.elapsedWorkMs;
+    const phase0 = game.state.phase;
+    const pm0 = game.state.telemetry.phaseMs[phase0];
+    const gap0 = Object.values(game.state.telemetry.phaseMs).reduce((a, b) => a + b, 0) - w0;
+    const msg = interact.act(me(), game.clock.simTimeMs);
+    ok('P1a …and E takes them off', (couch.state.removedParts || []).includes('legs'),
+       JSON.stringify(couch.state.removedParts));
+    near('P1b …the collider is 0.77 m tall now', couch.collider.halfExtents().y * 2, 0.77, 1e-6);
+
+    /* P2 — the brief's C11: the clock moved by the authored seconds, and by nothing else. */
+    const charged = 60000 * TOOLS.screwdriver.timeScale;
+    near(`P2 E charged ${charged} ms of preparation to the labour clock — no frame ran, only the charge (§8.2, §2.3)`,
+         game.state.elapsedWorkMs - w0, charged, 1e-6);
+    ok('P2a …and the notice names the cost', /60 s/.test(msg || '') && /legs off/.test(msg || ''), msg || '');
+    ok('P2b …and the notice is what the HUD will show (interact.lastMessage)', interact.lastMessage === msg);
+    near(`P3 the ${phase0} phase's §27.4 line took the same charge, so T1's sum still holds`,
+         game.state.telemetry.phaseMs[phase0] - pm0, charged, 1e-6);
+    /* Real frames, because only Game.step bills labour — the suite's step() helper drives
+     * the systems and never touches the clock. The labour clock must then read the charge
+     * plus exactly the sim time that passed, and nothing else. */
+    const t0 = game.clock.simTimeMs;
+    for (let k = 0; k < 6; k++) M.game.frame(FRAME);
+    const simMs = game.clock.simTimeMs - t0;
+    ok('P2c six real frames later the clock has moved by the charge PLUS the sim time, nothing more',
+       simMs > 0 && Math.abs((game.state.elapsedWorkMs - w0) - (charged + simMs)) <= 1e-6,
+       `${(game.state.elapsedWorkMs - w0).toFixed(3)} vs ${charged} + ${simMs.toFixed(3)}`);
+    const gap1 = Object.values(game.state.telemetry.phaseMs).reduce((a, b) => a + b, 0) - game.state.elapsedWorkMs;
+    near('P3a …phase durations minus elapsedWorkMs is unchanged by the charge', gap1, gap0, 1e-6);
+
+    // Q puts them back on — free, and the record clears (§8.2 "reattach").
+    const w1 = game.state.elapsedWorkMs;
+    const back = interact.secondary(me());
+    ok('P1c Q puts the legs back on', (couch.state.removedParts || []).length === 0 && /back on/.test(back || ''),
+       `${JSON.stringify(couch.state.removedParts)} "${back}"`);
+    near('P1d …and the collider is 0.85 m again', couch.collider.halfExtents().y * 2, 0.85, 1e-6);
+    eq('P2d …reassembly charged nothing (recorded as a seam in KNOWN_ISSUES)', game.state.elapsedWorkMs - w1, 0);
+
+    /* P2e — the two phases that bill no labour bill none here either (same rule as Game.step). */
+    game.state.phase = PHASES.SETTLEMENT;
+    const w2 = game.state.elapsedWorkMs, s2 = game.state.telemetry.phaseMs[PHASES.SETTLEMENT];
+    interact.act(me(), game.clock.simTimeMs);
+    ok('P2e in SETTLEMENT the legs still come off but no labour is billed', (couch.state.removedParts || []).includes('legs') &&
+       Math.abs(game.state.elapsedWorkMs - w2) < 1e-6, `${game.state.elapsedWorkMs - w2} ms billed`);
+    near('P2f …while the settlement phase\'s own §27.4 line records the minute', game.state.telemetry.phaseMs[PHASES.SETTLEMENT] - s2, charged, 1e-6);
+    interact.secondary(me());
+    game.state.phase = phase0;
+
+    /* P5 — the packed-volume payoff, through the cargo system's own accounting (cargo.js reads
+     * currentDimensions). The couch alone in the box: intact 2.10 x 0.85 x 0.90 = 1.6065 m3,
+     * legless 1.4553. Long axis along z — the box is exactly 2.10 wide (m7). */
+    reset();
+    parkAt(couch, M.truckPose.x, I.minY + 0.45 + 0.02, (I.minZ + I.maxZ) / 2, Math.PI / 2);
+    step(90);
+    const loaded = cargo.loadedEntities();
+    ok('P5 parked in the truck the couch counts as loaded, and it is the only thing that does',
+       loaded.length === 1 && loaded[0] === couch, loaded.map((e) => e.defId).join(', '));
+    const vIntact = cargo.volumeUsed();
+    near('P5a intact it takes 1.6065 m3 of the box', vIntact, 1.6065, 1e-3);
+    disassemble(registry, couch, 'legs');
+    const vLegless = cargo.volumeUsed();
+    near('P5b legs off it takes 1.4553 m3 — 9.4% of a couch back (§10.5)', vLegless, 1.4553, 1e-3);
+    lines.push(`      cargo volumeUsed: intact ${vIntact.toFixed(4)} m³, legless ${vLegless.toFixed(4)} m³ (-${((1 - vLegless / vIntact) * 100).toFixed(1)}%)`);
+    reassemble(registry, couch, 'legs');
+    parkAt(couch, home.x, home.y, home.z);
+    reset();
+  }
 }
 emit('running...');
 
