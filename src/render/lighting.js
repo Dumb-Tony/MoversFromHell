@@ -24,6 +24,32 @@
  * calls and 7 488 triangles outdoors — a scene with enormous headroom — so the cost that
  * matters is per-fragment shader work and the extra shadow PASSES, one per casting light.
  * A room spot's pass only renders what is inside its own frustum, which is one room.
+ *
+ * PHASE 15 — THE REBALANCE (the Overcooked look, chosen 2026-09-02). The rig's STRUCTURE is
+ * untouched (m13 F4-F9 count the same lights and casters); the constants are re-derived from
+ * photometry instead of inherited. ACES maps v = input × exposure / 0.6 through RRTAndODTFit,
+ * so with RENDER.look.exposure 1.05 a lit white up-face receiving sun 0.83 + hemi 0.41 +
+ * ambient 0.04 + fill 0.07 = 1.35 lands at 0.835 linear = 0.93 sRGB: lifted, unclipped, and
+ * under the 0.86 bloom threshold. The same face in shadow receives 0.52 → 0.79 sRGB, and a
+ * mid albedo (0.4) lands lit 0.61 / shadow 0.31 — a ratio of 0.51 where the old rig gave
+ * ~0.12. Key and shadow are separated by HUE (sun hue 36 against sky hue 215), not by value;
+ * that is what keeps the shadows readable without a fourth lamp. The documented Lambert
+ * lesson still stands: the gradient comes from hemi contrast, bevel, vertex AO and rim —
+ * never from more lights. Light count stays 10, casters 4.
+ *
+ * Two things the film mock measured and this rig keeps: the sun stays at (16, 17, 11) —
+ * moving it throws the truck's shadow across the whole frame — and the kitchen's spot is
+ * WARM (0xfff0e0, not the cool 0xe6efff a first draft had): one cold room among warm ones
+ * read as a different building, not as daylight.
+ *
+ * SHADOWS: VSM on the gpu tier only. The vendored r128 uploads shadow.radius into a two-pass
+ * box blur, samples both moments, clamps light bleeding at (p - 0.3) / (0.95 - 0.3), and
+ * renders the material's own FRONT faces into the map — so a couch foot's shadow starts at
+ * the foot with no peter-panning gap. PCFSoft ignores shadow.radius entirely, so on that
+ * fallback the softness is just the sun's 20 mm texel. VSM is never set on the software
+ * tier: its blur passes would land inside the headless harness, where a shadow pass already
+ * costs ~100x what it costs a GPU (see detectRenderTier). shadowMapTypeFor() below is the
+ * one place that decision is made; main.js applies it right after detectRenderTier.
  */
 
 import { RENDER } from '../config.js';
@@ -31,23 +57,41 @@ import { RENDER } from '../config.js';
 /** Warm tungsten, against the sun's cooler daylight. The contrast between the two is most of
  *  what makes an interior read as an interior rather than as a darker outdoors. */
 export const LIGHTING = Object.freeze({
-  // The TOY direction's light (chosen 2026-08-25): harder, warmer, more exposed —
-  // the values of the approved mock, baked rather than multiplied at runtime.
-  sun:        { colour: 0xffdfae, intensity: 1.59, at: { x: 16, y: 17, z: 11 } },
-  fill:       { colour: 0x9fc0e0, intensity: 0.26, at: { x: -12, y: 9, z: -14 } },
-  hemi:       { sky: 0xbcd8ee, ground: 0x6b6350, intensity: 0.22 },
+  /** Key. Position unchanged since the film mock proved moving it throws the truck's shadow
+   *  across the frame. Colour hue 36 — the warm half of the hue separation. */
+  sun:        { colour: 0xffe0b0, intensity: 1.25, at: { x: 16, y: 17, z: 11 } },
+  /** Cool bounce from the opposite quarter, so the shadowed side of a box is blue-grey
+   *  rather than black. No shadow map (see buildLighting). */
+  fill:       { colour: 0xa9c4e6, intensity: 0.30, at: { x: -12, y: 9, z: -14 } },
+  /** Sky hue 215 against the sun's 36. The GROUND colour is warm on purpose: undersides
+   *  pick up tabletop bounce, which is the diorama read. 0.48 is the photometry's value;
+   *  0.42-0.55 is the tuning window (_probe-look.js reads the lit/shadow ratio). */
+  hemi:       { sky: 0xd4e4ff, ground: 0x9c7c5e, intensity: 0.48 },
   /** A floor under the whole scene, so a shadowed corner is dim rather than black. §26.5
-   *  needs states legible; nothing is legible at zero. */
-  ambient:    { colour: 0xb9c6d4, intensity: 0.10 },
+   *  needs states legible; nothing is legible at zero. Small: hemi now carries the lift. */
+  ambient:    { colour: 0xffe2cc, intensity: 0.06 },
   room:       {
     colour: 0xffc98e,
-    intensity: 2.35,
-    penumbra: 0.75,
+    intensity: 1.90,
+    penumbra: 0.85,
     decay: 1.15,
     /** Hung just under the ceiling, like a light would be. */
     dropFromCeiling: 0.16,
     shadowMap: 1024,
-    shadowBias: -0.0012,
+    shadowBias: -0.0008,
+    /** VSM blur radius in map texels — only VSM reads it (PCFSoft ignores radius). */
+    shadowRadius: 3.0,
+  },
+  /** Per-room spot colours, keyed by zone id; L.room.colour is the fallback for a zone that
+   *  is not listed. The pendant shade under each spot matches (scene.js). The destination
+   *  reads more daylit than the pickup house on purpose — it is the end of the day's work. */
+  roomColours: {
+    living_room:  0xffc98e,
+    kitchen:      0xfff0e0,
+    bedroom:      0xffb877,
+    dest_living:  0xfff0d8,
+    dest_kitchen: 0xf6f4ee,
+    dest_bedroom: 0xffe6c4,
   },
   /** The sun's shadow camera half-width. Tighter is sharper: this box is spread across a
    *  fixed 2048 map, so 20 m gives 40/2048 = 19.5 mm per texel where 26 m gave 25 mm. It
@@ -55,6 +99,15 @@ export const LIGHTING = Object.freeze({
    *  destination gets its own room lights and does not need sun shadows to read. */
   sunShadowHalfWidth: 20,
   sunShadowMap: 2048,
+  /** VSM blur radius for the sun map, in texels: 1.6 × 19.5 mm ≈ 31 mm of softness. */
+  sunShadowRadius: 1.6,
+  /** Less negative than the old -0.0006: VSM's moments do not need the PCF acne margin, and
+   *  the deeper bias was lifting every contact shadow off its foot. */
+  sunShadowBias: -0.0004,
+  normalBias: 0.015,
+  /** Fresnel rim colour and falloff — read by materials.js via RENDER.look.rim; listed here
+   *  so the rig is one record. */
+  rim: { sky: RENDER.look.rim.sky, power: RENDER.look.rim.power },
 });
 
 /**
@@ -102,8 +155,30 @@ export function detectRenderTier(renderer) {
     if (/swiftshader|llvmpipe|software|basic render/i.test(name)) return 'software';
     return 'gpu';
   } catch (e) {
-    return 'gpu';                      // unknowable: assume the capable path
+    return 'gpu';
   }
+}
+
+/**
+ * Which shadow-map filter the renderer should run for a tier.
+ *
+ * VSM is gated to the gpu tier: r128's VSM adds a two-pass box blur per casting map
+ * (2×2048² + 4×2×1024² ≈ 16.8 Mtexel of a trivial shader per frame), which a GPU does not
+ * notice and SwiftShader does. ?shadows=pcf restores today's PCFSoft edges with the rest of
+ * the rig intact — the A/B pair the VSM-bleed decision is photographed from. renderer.js
+ * keeps PCFSoft as its constructor default so m0's 0x0 probe renderer is untouched; main.js
+ * applies this right after detectRenderTier.
+ *
+ * @param {typeof THREE} THREE
+ * @param {'gpu'|'software'} tier
+ * @returns {number} THREE.VSMShadowMap | THREE.PCFSoftShadowMap
+ */
+export function shadowMapTypeFor(THREE, tier) {
+  let forcedPcf = false;
+  try { forcedPcf = new URLSearchParams(location.search).get('shadows') === 'pcf'; }
+  catch (e) { /* no location — no override */ }
+  const vsm = tier === 'gpu' && RENDER.look.shadows === 'vsm' && !forcedPcf;
+  return vsm ? THREE.VSMShadowMap : THREE.PCFSoftShadowMap;
 }
 
 /**
@@ -133,8 +208,10 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
   sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
   sun.shadow.camera.top = d;   sun.shadow.camera.bottom = -d;
   sun.shadow.camera.near = 1;  sun.shadow.camera.far = 80;
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.02;
+  sun.shadow.bias = L.sunShadowBias;
+  sun.shadow.normalBias = L.normalBias;
+  // Read by VSM only; harmless under PCFSoft (which ignores radius in r128).
+  sun.shadow.radius = L.sunShadowRadius;
   scene.add(sun);
   scene.add(sun.target);
 
@@ -154,7 +231,9 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
     const h = (r.maxY !== undefined ? r.maxY : 2.7) - L.room.dropFromCeiling;
     const halfDiag = Math.hypot(r.maxX - r.minX, r.maxZ - r.minZ) / 2;
 
-    const spot = new THREE.SpotLight(L.room.colour, L.room.intensity);
+    // Per-room colour, falling back to the rig's tungsten for an unlisted zone.
+    const colour = (L.roomColours && L.roomColours[r.id] !== undefined) ? L.roomColours[r.id] : L.room.colour;
+    const spot = new THREE.SpotLight(colour, L.room.intensity);
     spot.position.set(cx, h, cz);
     /* The cone has to reach the room's CORNERS, or the light stops in a circle on the floor
      * and the corners of a rectangular room stay as flat as they were. A margin over the
@@ -172,7 +251,8 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
       spot.shadow.camera.near = 0.25;
       spot.shadow.camera.far = spot.distance;
       spot.shadow.bias = L.room.shadowBias;
-      spot.shadow.normalBias = 0.02;
+      spot.shadow.normalBias = L.normalBias;
+      spot.shadow.radius = L.room.shadowRadius;
     }
     spot.target.position.set(cx, 0, cz);
     spot.userData.roomId = r.id;
@@ -182,6 +262,5 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
     roomLights.push(spot);
   }
 
-  void RENDER;
   return { sun, fill, hemi, ambient, roomLights, tier };
 }

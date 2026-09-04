@@ -28,4 +28,4 @@ for (let i = 0; i < 60; i++) M.rig.update(p, 1 / 60);
 
 M.body.update(p, facing, 0, 1 / 60);
 M.overlay.el.hidden = true;
-M.renderer.render(M.world.scene, M.camera);
+M.present(M.camera);

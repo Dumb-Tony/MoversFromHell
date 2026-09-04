@@ -15,4 +15,4 @@ M.overlay.el.hidden = true;
 for (const h of M.huds) h.el.hidden = true;
 document.getElementById('help').hidden = true;
 M.syncSize();
-M.renderer.render(M.world.scene, m.camera);
+M.present(m.camera);

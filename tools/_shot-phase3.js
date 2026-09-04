@@ -50,4 +50,4 @@ M.body.update(P.position, 0.62, 0, 1 / 60);
 R.syncMeshes();
 M.hud.update(G.status());
 M.overlay.el.hidden = true;
-M.renderer.render(M.world.scene, M.camera);
+M.present(M.camera);

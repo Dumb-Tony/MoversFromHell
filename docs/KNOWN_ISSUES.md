@@ -544,3 +544,27 @@ it will not be once there is a leaderboard.
 **No settings, so no accessibility surface.** `DEFAULT_SETTINGS` has mouse sensitivity, invert
 Y, deadzone and §21.4's toggle-grip mode, and none of them are reachable without editing a
 file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to copy.
+
+## Phase 15 open items
+
+- **Post verified on one driver.** `copyFramebufferToTexture` from the antialiased default
+  framebuffer (implicit MSAA resolve, RGB capture into an RGB8 texture) is verified on
+  SwiftShader/WebGL2 only. A first-frame `gl.getError()` self-disables the chain with a
+  console warning (same as `?post=off`). Firefox and Safari unverified.
+- **Safari has no `ctx.filter`** on 2D canvas; the texture layer's blur steps fall back to
+  crisp edges there. Textures read sharper, nothing breaks.
+- **Bloom is a room effect.** The sky is tone-mapped under the threshold on purpose, so the
+  outdoor frame has a bright-pass fraction of 0.00 %; bloom shows on the pendants indoors.
+- **Program count on the GPU tier is 33** (feature sets × vertexColors × side); the suite
+  allows 40. Adding kinds with new feature combinations moves it.
+- **Skirting stops 0.03 m short of the jamb markers** by design (the B1 clear-box margin).
+- **Concrete path** runs 1 mm under the plank under-plane at the 34" threshold; a depth
+  watch item on software rasterisers only.
+- **Tile UVs stop short of an edge by the bevel arc** (`userData.uvEdgeShortfall`, up to
+  0.586 r); a grain tile can end a few millimetres before the corner. Not visible at 0.5 m
+  texel; recorded so nobody tightens G6a to 1e-3 again.
+- **No blobs, bump, env, rim or VSM in software** (the tier) — the gate proves the good path
+  only by its absence; `tools\probe.ps1 -Setup tools\m13g-gpu.js` proves it by presence.
+- **Style mocks (`?style=cel|film`) bypass post** — they own the frame; kept photographable.
+- **Phase 1-11 shot scripts** go through `present()` now but frame old phases; they are
+  archival, not re-shot.

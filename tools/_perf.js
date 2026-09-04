@@ -11,14 +11,14 @@ const L = [];
 
 const sample = (label, cam) => {
   M.renderer.info.reset();
-  M.renderer.render(M.world.scene, cam);
+  M.present(cam);
   const i = M.renderer.info;
   const calls = i.render.calls, tris = i.render.triangles;
   const gl = M.renderer.getContext();
-  M.renderer.render(M.world.scene, cam); gl.finish();      // warm the pipeline first
+  M.present(cam); gl.finish();      // warm the pipeline first
   const N = 40;
   const t0 = performance.now();
-  for (let k = 0; k < N; k++) { M.renderer.render(M.world.scene, cam); gl.finish(); }
+  for (let k = 0; k < N; k++) { M.present(cam); gl.finish(); }
   const ms = (performance.now() - t0) / N;
   L.push(`${label.padEnd(12)} calls=${String(calls).padStart(4)} tris=${String(tris).padStart(6)} cpu=${ms.toFixed(2)}ms`);
 };
@@ -42,7 +42,10 @@ M.world.scene.traverse((o) => { if (o.isMesh) meshes++; if (o.isLight) lights++;
 L.push(`scene       meshes=${meshes} lights=${lights} programs=${M.renderer.info.programs.length}`);
 let casting = 0;
 M.world.scene.traverse((o) => { if (o.isLight && o.castShadow) casting++; });
-L.push(`shadowmaps  ${casting} casting`);
+L.push(`shadowmaps  ${casting} casting  type=${M.renderer.shadowMap.type} (VSM=${M.THREE.VSMShadowMap} PCFSoft=${M.THREE.PCFSoftShadowMap})`);
+/* Phase 15: the post chain's passes and targets. Run again with -Query "post=off" and the
+ * difference in cpu= is the chain's own cost; the calls= difference is its four quads. */
+L.push(`post        ${M.post ? JSON.stringify(M.post.info()) : 'off'}  blobs=${M.blobs ? M.blobs.count() : 'off'}  tier=${M.renderTier}`);
 
 // The same frames with every room light's shadow switched off, to price them.
 for (const sp of M.world.roomLights || []) sp.castShadow = false;

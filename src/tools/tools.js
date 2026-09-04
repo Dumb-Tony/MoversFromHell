@@ -32,7 +32,7 @@ import { TOOLS, DAMAGE } from '../config.js';
 import { TOOL_DEFS, validateToolDef } from './definitions.js';
 import { EVENTS } from '../core/eventBus.js';
 import { GROUP_PRESETS } from '../physics/world.js';
-import { matte } from '../render/textures.js';
+import { buildToolVisual } from '../render/prefabs.js';
 
 let _nextToolId = 0;
 
@@ -85,10 +85,10 @@ export class ToolSystem {
     colDesc.setCollisionGroups(GROUP_PRESETS.object);
     const collider = this.physics.world.createCollider(colDesc, body);
 
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(d.x, d.y, d.z),
-      matte(def.colour));
-    mesh.castShadow = true; mesh.receiveShadow = true;
+    // Phase 15: the tool's visual is a prefab (dolly wheels, strap coil, blanket fold) that
+    // fits inside the same d.x × d.y × d.z the collider uses — m13 A-series faithful.
+    const mesh = buildToolVisual(def);
+    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.scene.add(mesh);
 
     const id = `${def.id}#${_nextToolId++}`;

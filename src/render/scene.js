@@ -14,7 +14,45 @@
  * now and static collision later. §8.1: "decorative collision must not contradict the
  * visible surface" — one record is how that stays true. Pattern from
  * AirportBaggageCrew\src\data\airport.js (Dev\INDEX.md → "Map as pure data").
+ *
+ * PHASE 15 — THE OVERCOOKED LOOK (chosen 2026-09-02). Every material site in this file now
+ * names a material CLASS through surface(kind, colour, opts) from materials.js; the two
+ * helpers mat()/surf() are thin wrappers so the call sites read as they always did. What a
+ * kind means — specular, shininess, paired height bump, env sheen, rim — lives in ONE table
+ * there, so the plaster on a partition and the plaster on the front wall's inside face cannot
+ * drift apart. The software tier (the 14-suite harness) gets the same kinds with the
+ * per-fragment extras stripped at construction, which is materials.js's job, not this file's.
+ *
+ * Geometry added here, and the rule each piece obeys:
+ *   - SKIRTING BOARDS as geometry (0.012 × 0.10 m timber strips) along every interior wall
+ *     base, stopped 0.05 m short of every door gap. A skirting drawn into the plaster canvas
+ *     smeared across every wall length; a strip is the same at 10 m and at 1 m. No collider,
+ *     never in a clear box: m13's boxes shrink 2 cm per side and the strip stops 5 cm short.
+ *   - AO SKIRTS: one merged strip mesh per house, 0.30 m wide along every wall base, a
+ *     multiply-blended gradient from the wall out. This is the contact darkening a real
+ *     room has where the floor meets the wall and that no light in this rig can make (a
+ *     hemisphere does not occlude). Lifted to 0.024 — above the 0.021 rug, under the 0.06 m
+ *     floor of the doorway sweeps.
+ *   - PLANK FLOORS: the house floor, the destination floor and the truck deck are ONE merged
+ *     BufferGeometry each of 0.14 × 1.20 m plank quads with real 3 mm gaps over a dark
+ *     under-plane 2 mm lower, and a per-plank 'color' attribute (L ± 0.04). NO y jitter —
+ *     flat, so SwiftShader's depth stays clean with three near-coplanar layers (under-plane,
+ *     planks, rug/skirt) within 9 mm. ~400 planks, 1 draw call per floor.
+ *   - the ceiling gets its own material (an edge vignette), the hedge is nine rounded boxes,
+ *     the flattened cartons are cardboard slabs, one oil-stain decal replaces the per-tile
+ *     stain in the asphalt, the bulbs are unlit 0xfff3d0 with tone mapping OFF (the one
+ *     guaranteed bloom source), the fog reads RENDER.look.fog.
+ *   - MULTIPLY DECALS (AO skirts, oil stain) are Basic materials tagged userData.LAYER, never
+ *     userData.kind: `kind` means "a surface() class with a light response" and m13 G12
+ *     asserts shininess on every one it finds.
+ *   - LAPPED-SIDING GEOMETRY WAS DELIBERATELY NOT BUILT: a merged front-face mesh spans the
+ *     three doorway gaps and fails B1. The siding texture's lap height map carries the read.
+ * Collider count: unchanged. Nothing here registers one (m13 C1/C3), and nothing enters a
+ * doorway clear box (m13 B1/B1b — the interior sweep exists now; tools/_probe-world.js
+ * re-runs both against the destination's doors as well).
  */
+
+import { RENDER } from '../config.js';
 
 /** Real dimensions, metres. §7.1 gives couch_3seat_01 as 2.1 x 0.9 x 0.85 explicitly. */
 export const REFERENCE_DIMS = Object.freeze({
@@ -98,15 +136,16 @@ export { ROOM } from '../world/house.js';
 import { ROOM, ZONES, PARTITIONS, INTERIOR_DOORS, PARTITION_T, wallSegments } from '../world/house.js';
 import { cargoColliders, cargoAnchors, cabColliders } from '../world/truck.js';
 import {
-  DEST_SHELL, DEST_ZONES, DEST_PARTITIONS, DEST_DOORS, destColliders,
+  DEST_SHELL, DEST_ZONES, DEST_PARTITIONS, DEST_DOORS, DEST_APERTURE, destColliders,
 } from '../world/destination.js';
 import {
-  tiled, texGrass, texAsphalt, texConcrete, texSky, texSiding, texShingle, texPlaster,
-  texBoards, texBrick, texTruckSide, texTruckWall, texTruckDeck, texSteel, matte,
-  texFabric, texPaint,
+  canvasTex, texGrass, texAsphalt, texConcrete, texSky, texSiding, texShingle, texPlaster,
+  texBoards, texBrick, texTruckSide, texTruckWall, texCeiling, texCardboard, texCardboardEdge,
+  texRug, texRubber, texWood, texPaint,
 } from './textures.js';
-import { buildLighting, detectRenderTier } from './lighting.js';
-import { roundedBox } from './prefabs.js';
+import { surface, setRenderTier } from './materials.js';
+import { buildLighting, LIGHTING } from './lighting.js';
+import { roundedBox, roundedSlab } from './prefabs.js';
 
 /** Narrowest presentation of a w x h cross-section over all rotations. See above. */
 export function minProjectedWidth(w, h) { return Math.min(w, h); }
@@ -130,6 +169,130 @@ const PALETTE = {
   impossible:0xff5a5a,         // coral — "the couch cannot pass this, in any rotation"
 };
 
+/* ── Phase 15 constants — named, never bare in a system (§25.1) ─────────────────────────
+ * Anything a shader or material reads that is SHARED with other modules comes from
+ * RENDER.look; what is local to this file's geometry is named here. */
+const LOOK = RENDER.look;
+
+/** Floor layering, metres. Three near-coplanar layers live within 9 mm: the dark under-plane,
+ *  the planks 2 mm above it, then the rug (0.021) and the AO skirts (0.024). Under-plane and
+ *  planks are flat (no jitter); the skirts carry polygonOffset. Do not shrink the gaps —
+ *  2 mm is already the smallest step the interior screenshot on SwiftShader keeps clean. */
+const FLOOR = Object.freeze({
+  houseY: 0.015,          // today's house floor height, unchanged
+  rugY: 0.021,
+  underGap: 0.002,        // planks sit this far above the under-plane
+  hostGap: 0.002,         // under-plane sits this far above a host box top (deck, dest slab)
+});
+
+/** Plank floors. ~400 planks over the 9.8 × 6.8 m house interior: 4 verts + 2 tris each,
+ *  one draw call. The vertex colour is a MULTIPLIER on the boards map (surface() with
+ *  vertexColors:true), L ± 0.04 so adjacent planks separate without reading as a checker. */
+const PLANK = Object.freeze({
+  w: 0.14, len: 1.20, gap: 0.003, lJitter: 0.04,
+  stagger: 3,             // row offsets cycle 0, 1/3, 2/3 of a plank — a running bond
+  minW: 0.02, minLen: 0.03, // slivers narrower/shorter than this at a floor edge are dropped
+  under: 0x2b2622,        // the dark line that shows through the 3 mm gaps
+  houseHue: 30, destHue: 26, deckHue: 32,
+});
+
+/** Skirting boards: 12 × 100 mm painted timber, stopped 50 mm short of every door gap so it
+ *  can never enter a clear box (the boxes shrink 20 mm per side; margin 30 mm). */
+const SKIRTING = Object.freeze({
+  t: 0.012, h: 0.10, doorMargin: 0.05, colour: 0xf2ead9,
+  minRun: 0.02,           // a wall span shorter than this between two gaps gets no board
+});
+
+/** AO skirts: width/strength from RENDER.look.skirt; the tint is a warm near-black so the
+ *  darkening sits in the same hue as the shadows the room spots throw. */
+const AO_SKIRT = Object.freeze({ lift: 0.009, tint: [30, 24, 20], texH: 32 });
+
+/** One multiply-blended decal on the driveway where the truck drips. */
+const OIL_STAIN = Object.freeze({
+  w: 1.6, d: 2.2, behindRear: 1.4, y: 0.012, strength: 0.42, texSize: 128,
+  tint: [40, 36, 34],     // the full-strength colour: a cool near-black (oil, not soot)
+  midStrength: 0.55,      // the gradient's middle stop, as a fraction of `strength`…
+  midStop: 0.45,          // …placed at this fraction of the radius
+});
+
+/** Decor resting on a ground plane (hedge, cartons) sits this far above it: a box face
+ *  exactly on y = 0 fights the grass plane for the same depth, and 5 mm is under a lawn. */
+const DECO_LIFT = 0.005;
+
+const HEDGE = Object.freeze({ w: 1.5, h: 0.95, d: 0.75, r: 0.045, x: -11.5, z0: 1.0, pitch: 1.5, n: 9 });
+const CARTONS = Object.freeze({ w: 0.9, t: 0.03, d: 0.7, x: 4.8, z: 11.4, n: 4, yStep: 0.035, ryStep: 0.1 });
+
+/** Bulbs and glow discs: unlit and NOT tone mapped, so they write ~1.0 and are the only
+ *  guaranteed bloom sources (the sky dome stays tone mapped and sits at ~0.62). */
+const BULB = Object.freeze({ colour: 0xfff3d0, r: 0.045 });
+/** Pendant shade: the room's own spot colour pulled halfway toward parchment. */
+const SHADE = Object.freeze({ base: 0xd8b06a, mix: 0.5 });
+/** The cab is enamel with a deeper gloss than the body panels (materialLibrary: cab 70). */
+const CAB_SHININESS = 70;
+/** Texture repeats in metres per tile for the ground planes (texGrass authored at 2 m). */
+const GRASS_TILE_M = 2;
+
+/** Deterministic noise, so a floor looks the same on every machine and every reload
+ *  (same helper as textures.js — kept under one name so the lineage stays greppable). */
+function rnd(i) {
+  const x = Math.sin(i * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/* ── interior wall runs: the one record skirting boards AND AO skirts are cut from ───────
+ *
+ * A "run" is one interior wall FACE: it travels along `axis` from lo to hi, sits at the
+ * constant coordinate `at` on the other axis, and the room extends from it in direction
+ * `into`. Door openings (with a margin) and perpendicular partitions (margin 0, so strips
+ * meet at the corner) are subtracted by cutRun(). Built from the same door records the
+ * walls themselves are cut from, so a strip can no more end up across a doorway than a wall
+ * can — the §8.1 rule, applied to trim. */
+function interiorRuns({ x0, x1, z0, z1, frontGaps, partitions, doors, partT }) {
+  const runs = [];
+  const doorGap = (lo, hi) => ({ lo, hi, margin: SKIRTING.doorMargin });
+  runs.push({ name: 'W', axis: 'z', at: x0, into: +1, lo: z0, hi: z1, gaps: [] });
+  runs.push({ name: 'E', axis: 'z', at: x1, into: -1, lo: z0, hi: z1, gaps: [] });
+  runs.push({ name: 'N', axis: 'x', at: z0, into: +1, lo: x0, hi: x1, gaps: [] });
+  runs.push({ name: 'S', axis: 'x', at: z1, into: -1, lo: x0, hi: x1,
+              gaps: frontGaps.map((g) => doorGap(g[0], g[1])) });
+  for (const p of partitions) {
+    const mine = doors
+      .filter((d) => d.axis === p.axis && Math.abs(d.at - p.at) < 1e-6)
+      .map((d) => doorGap(d.centre - d.gap / 2, d.centre + d.gap / 2));
+    const lim = p.axis === 'x' ? [x0, x1] : [z0, z1];
+    const lo = Math.max(lim[0], Math.min(p.from, p.to));
+    const hi = Math.min(lim[1], Math.max(p.from, p.to));
+    for (const into of [+1, -1]) {
+      runs.push({ name: `${p.id}${into > 0 ? '+' : '-'}`, axis: p.axis, at: p.at + into * partT / 2,
+                  into, lo, hi, gaps: mine.slice() });
+    }
+  }
+  // Perpendicular partitions that reach this face interrupt it (margin 0: the strips meet).
+  for (const run of runs) {
+    for (const q of partitions) {
+      if (q.axis === run.axis) continue;
+      const qLo = Math.min(q.from, q.to), qHi = Math.max(q.from, q.to);
+      if (run.at < qLo - 1e-3 || run.at > qHi + 1e-3) continue;   // q does not reach this face
+      if (q.at <= run.lo || q.at >= run.hi) continue;
+      run.gaps.push({ lo: q.at - partT / 2, hi: q.at + partT / 2, margin: 0 });
+    }
+  }
+  return runs;
+}
+
+/** Solid spans of a run after its gaps (each widened by its margin) are removed. */
+function cutRun(run) {
+  const gaps = run.gaps.map((g) => [g.lo - g.margin, g.hi + g.margin]).sort((a, b) => a[0] - b[0]);
+  const out = [];
+  let cursor = run.lo;
+  for (const [glo, ghi] of gaps) {
+    if (glo > cursor + 1e-4) out.push([cursor, Math.min(glo, run.hi)]);
+    cursor = Math.max(cursor, ghi);
+  }
+  if (run.hi > cursor + 1e-4) out.push([cursor, run.hi]);
+  return out.filter(([a, b]) => b - a > SKIRTING.minRun);
+}
+
 /**
  * @returns {{scene, colliders, spawn, dispose}}
  *   colliders: {minX,maxX,minZ,maxZ,base,top,tag}[] — shared with camera + physics
@@ -137,6 +300,12 @@ const PALETTE = {
  */
 export function buildScene(renderTier = 'gpu') {
   const THREE = window.THREE;
+  /* The tier is pinned HERE as well as in main.js's boot: every surface() below reads it at
+   * construction, and a boot order that built the scene first would hand the SwiftShader
+   * harness bump/normal/env/rim materials (measured: that took a 4 s suite past 600 s) and
+   * would memoise texGrass() WITH a height texture, failing m13 G5. Idempotent — the same
+   * value main.js sets — so the belt does not argue with the braces. */
+  setRenderTier(renderTier);
   const scene = new THREE.Scene();
   // fog is set with the sky, below, so the two cannot disagree about the horizon colour
 
@@ -181,18 +350,25 @@ export function buildScene(renderTier = 'gpu') {
   ];
   const { sun, fill, hemi, ambient, roomLights, tier } = buildLighting(scene, rooms, renderTier);
 
-  const mat = (color, opts = {}) => matte(color, opts);
+  /* THE TWO MATERIAL HELPERS, now thin wrappers over surface(). Every site names a kind;
+   * an unknown kind throws at build time, which is the point — a typo must not ship as a
+   * plain Lambert that looks "nearly right". */
+  const mat = (kind, colour, opts = {}) => surface(kind, colour, opts);
   /** A textured surface. `rx`/`ry` are repeats, normally metres × a density. */
-  const surf = (tex, rx, ry, opts = {}) =>
-    matte(0xffffff, { map: tiled(tex, Math.max(0.25, rx), Math.max(0.25, ry)), ...opts });
+  const surf = (kind, tex, rx, ry, opts = {}) =>
+    surface(kind, 0xffffff, { map: tex, repeat: [Math.max(0.25, rx), Math.max(0.25, ry)], ...opts });
 
   /* The house's outward skin. BoxGeometry indexes materials [+X, -X, +Y, -Y, +Z, -Z], and
    * the aperture wall's DRIVEWAY side is +Z — so siding goes at index 4 and plaster at 5.
    * Getting it the wrong way round clads the living room and plasters the front elevation. */
-  const extSiding = surf(texSiding(34, 0.62), 5, 1.6);
-  const intPlaster = surf(texPlaster(38, 0.84), 3, 1);   // ry=1: see texPlaster
+  const extSiding = surf('siding', texSiding(34, 0.62), 5, 1.6);
+  const intPlaster = surf('plaster', texPlaster(38, 0.84), 3, 1);   // ry=1: see texPlaster
   const frontWallMats = [intPlaster, intPlaster, intPlaster, intPlaster, extSiding, intPlaster];
-  const gardenBrick = surf(texBrick(18), 2, 1);
+  const gardenBrick = surf('brick', texBrick(18), 2, 1);
+  const markerMat = mat('marker', PALETTE.reference);
+  const impossibleMat = mat('marker', PALETTE.impossible);
+  const trimMat = mat('paintedTimber', SKIRTING.colour);
+  const underMat = mat('paintDark', PLANK.under);
 
   /* ---- sky ------------------------------------------------------------------------------
    * An inverted sphere with a gradient on it. The scene used to end at a flat clear colour,
@@ -201,32 +377,39 @@ export function buildScene(renderTier = 'gpu') {
    * band so the two meet without a seam. */
   /* The fog colour and the sky's horizon stop are the SAME VALUE, deliberately. They were
    * 0xdfe9ee and #e2ebef — three points apart, and enough to draw a bright line along the
-   * whole horizon where the fogged ground met the dome. */
+   * whole horizon where the fogged ground met the dome. RENDER.post.divider is the same
+   * value again: the split-screen gap is painted with it. */
   const HORIZON = 0xdfe9ee;
-  scene.fog = new THREE.Fog(HORIZON, 40, 150);
+  /* DIORAMA FOG: 30/120 (from 40/150). The whole site sits inside 120 m, so the far end of
+   * the street fades to the horizon colour and the model reads as sitting on a table. */
+  scene.fog = new THREE.Fog(HORIZON, LOOK.fog.near, LOOK.fog.far);
   const sky = new THREE.Mesh(
     // ⚠ RADIUS MUST STAY UNDER RENDER.far (300 m). At 400 the dome was outside the far
     // plane and got clipped, which paints a hard diagonal edge of clear colour across the
     // top of the frame — it reads as a rendering glitch, not as a missing sky.
     new THREE.SphereGeometry(240, 32, 20),
+    // toneMapped stays at its default TRUE (m13 G10): through ACES the cloud whites land at
+    // ~0.62 linear and never cross the 0.86 bloom knee. Pinning it false would bloom the sky.
     new THREE.MeshBasicMaterial({ map: texSky(), side: THREE.BackSide, fog: false }));
+  sky.name = 'sky';
   scene.add(sky);
 
   // ---- ground ------------------------------------------------------------------------
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), surf(texGrass(), 100, 100));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
+    surf('grass', texGrass(), 400 / GRASS_TILE_M, 400 / GRASS_TILE_M));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
   // Driveway — the §13.1 parking surface, and the flat run a dolly needs (§9.1).
-  const drive = new THREE.Mesh(new THREE.PlaneGeometry(6, 14), surf(texAsphalt(), 3, 7));
+  const drive = new THREE.Mesh(new THREE.PlaneGeometry(6, 14), surf('asphalt', texAsphalt(), 3, 7));
   drive.rotation.x = -Math.PI / 2;
   drive.position.set(0, 0.01, 7);
   drive.receiveShadow = true;
   scene.add(drive);
 
   // A concrete path from the driveway to the front door, and a kerb along the street end.
-  const path = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.2), surf(texConcrete(), 1, 3));
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.2), surf('concrete', texConcrete(), 1, 3));
   path.rotation.x = -Math.PI / 2;
   path.position.set(0, 0.012, -0.9);
   path.receiveShadow = true;
@@ -289,11 +472,13 @@ export function buildScene(renderTier = 'gpu') {
     // Jambs in the lime reference colour: the clearance is the thing being measured.
     // Green jamb = the couch fits through it, coral = it does not. Colour-independent
     // redundancy comes later with labels (§21.4); at Phase 0 this is a dev aid only.
+    // 'marker' is lit + emissive, so a jamb never goes dark in shadow and never passes for
+    // a material — it reads as an instrument (§6.1).
     const passes = fitsThroughGap(REFERENCE_DIMS.couch3Seat.z, REFERENCE_DIMS.couch3Seat.y, a.gap).fits;
-    const jambColor = passes ? PALETTE.reference : PALETTE.impossible;
+    const jambMat = passes ? markerMat : impossibleMat;
     for (const side of [-1, 1]) {
       const j = new THREE.Mesh(
-        new THREE.BoxGeometry(0.04, DOOR_H, WALL_T + 0.02), mat(jambColor));
+        new THREE.BoxGeometry(0.04, DOOR_H, WALL_T + 0.02), jambMat);
       j.position.set(a.x + side * a.gap / 2, DOOR_H / 2, WALL_Z);
       scene.add(j);
     }
@@ -312,25 +497,183 @@ export function buildScene(renderTier = 'gpu') {
 
   // Human-height post. Without it nothing on screen has a believable scale.
   const post = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, REFERENCE_DIMS.moverHeight, 10),
-    mat(PALETTE.reference));
+    new THREE.CylinderGeometry(0.05, 0.05, REFERENCE_DIMS.moverHeight, 10), markerMat);
   post.position.set(-3.0, REFERENCE_DIMS.moverHeight / 2, 3.6);
   post.castShadow = true;
   scene.add(post);
 
+  /* ---- plank floors, AO skirts, skirting: the builders --------------------------------- */
+  const plankFloors = [];
+  const skirts = [];
+  const skirting = [];
+
+  /** One merged plank floor over [x0,x1]×[z0,z1] at height y, planks running along `along`,
+   *  plus its dark under-plane FLOOR.underGap below. */
+  const plankFloor = ({ name, x0, x1, z0, z1, y, along, hue, variant }) => {
+    const aLo = along === 'x' ? x0 : z0, aHi = along === 'x' ? x1 : z1;
+    const cLo = along === 'x' ? z0 : x0, cHi = along === 'x' ? z1 : x1;
+    const pitchC = PLANK.w + PLANK.gap, pitchA = PLANK.len + PLANK.gap;
+    const rows = Math.ceil((cHi - cLo) / pitchC);
+    const pos = [], nrm = [], uv = [], col = [], idx = [];
+    let v = 0, plank = 0;
+    const pushQuad = (qx0, qx1, qz0, qz1, tint) => {
+      // Corner order a=(x0,z0) b=(x0,z1) c=(x1,z1) d=(x1,z0); faces (a,b,d),(b,c,d) wind
+      // counter-clockwise seen from +Y — verified against PlaneGeometry.rotateX(-π/2).
+      const corners = [[qx0, qz0], [qx0, qz1], [qx1, qz1], [qx1, qz0]];
+      for (const [cx, cz] of corners) {
+        pos.push(cx, y, cz);
+        nrm.push(0, 1, 0);
+        // 'tile' UV in metres / plankMetres, u along the plank, so the grain runs its length.
+        const u = (along === 'x' ? cx : cz) / LOOK.plankMetres;
+        const w = (along === 'x' ? cz : cx) / LOOK.plankMetres;
+        uv.push(u, w);
+        col.push(tint, tint, tint);
+      }
+      idx.push(v, v + 1, v + 3, v + 1, v + 2, v + 3);
+      v += 4;
+    };
+    for (let r = 0; r < rows; r++) {
+      const c0 = cLo + r * pitchC, c1 = Math.min(cHi, c0 + PLANK.w);
+      if (c1 - c0 < PLANK.minW) continue;
+      const offset = ((r % PLANK.stagger) / PLANK.stagger) * pitchA;
+      for (let a = aLo - pitchA + offset; a < aHi; a += pitchA) {
+        const a0 = Math.max(aLo, a), a1 = Math.min(aHi, a + PLANK.len);
+        if (a1 - a0 < PLANK.minLen) continue;
+        const tint = 1 + (rnd(plank + 1) * 2 - 1) * PLANK.lJitter;
+        plank++;
+        if (along === 'x') pushQuad(a0, a1, c0, c1, tint); else pushQuad(c0, c1, a0, a1, tint);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    geo.userData.planks = plank;
+    // repeat [1,1] → a RepeatWrapping clone with repeat 1, so the metre UVs tile per plankMetres.
+    const m = new THREE.Mesh(geo, surface('boards', 0xffffff,
+      { map: texBoards(hue, variant), repeat: [1, 1], vertexColors: true }));
+    m.name = `plankFloor:${name}`;
+    m.receiveShadow = true;
+    scene.add(m);
+    plankFloors.push(m);
+
+    const under = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), underMat);
+    under.rotation.x = -Math.PI / 2;
+    under.position.set((x0 + x1) / 2, y - FLOOR.underGap, (z0 + z1) / 2);
+    under.name = `plankUnder:${name}`;
+    under.receiveShadow = true;
+    scene.add(under);
+    return m;
+  };
+
+  /* The AO skirt gradient: 1 × 32, dark at v=0 (the wall) to white at v=1 (open floor).
+   * MULTIPLY blending in r128 is blendFunc(ZERO, SRC_COLOR) — the fragment's RGB is the
+   * multiplier and alpha is ignored — so the strength is baked into the RGB here rather than
+   * carried in alpha. toneMapped:false and fog:false keep the multiplier exact: ACES or fog
+   * would remap it into a value that depends on exposure and distance. A canvas is authored
+   * in sRGB and the texture is tagged sRGB, so the decode-in / encode-out round trip is the
+   * identity and these bytes multiply the sRGB framebuffer directly. */
+  const skirtTex = canvasTex(1, AO_SKIRT.texH, 'aoSkirt', (ctx, w, h) => {
+    const s = LOOK.skirt.strength, [tr, tg, tb] = AO_SKIRT.tint;
+    const dark = `rgb(${Math.round(255 - s * (255 - tr))},${Math.round(255 - s * (255 - tg))},${Math.round(255 - s * (255 - tb))})`;
+    // flipY (CanvasTexture default) puts the canvas BOTTOM at v=0, so the dark stop is at y=h.
+    const g = ctx.createLinearGradient(0, h, 0, 0);
+    g.addColorStop(0, dark);
+    g.addColorStop(1, '#ffffff');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
+  const skirtMat = new THREE.MeshBasicMaterial({
+    map: skirtTex, transparent: true, blending: THREE.MultiplyBlending, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    toneMapped: false, fog: false,
+  });
+  /* `layer`, NOT `kind`: userData.kind is reserved for surface() materials — classed
+   * light-responding surfaces — and m13 G12 asserts shininess >= 4 on every one of them. A
+   * multiply decal is a Basic material with no light response at all, so it is tagged under
+   * its own key. (It was 'kind' once and failed G12 on every run with "aoSkirt, oilStain".) */
+  skirtMat.userData.layer = 'aoSkirt';
+
+  /** Skirting boards + one merged AO skirt for a house whose interior runs are given. */
+  const houseTrim = (name, runs, floorY) => {
+    const pos = [], nrm = [], uv = [], idx = [];
+    let v = 0;
+    const w = LOOK.skirt.width;
+    const skirtY = floorY + AO_SKIRT.lift;
+    for (const run of runs) {
+      const segs = cutRun(run);
+      segs.forEach(([lo, hi], i) => {
+        const len = hi - lo, mid = (lo + hi) / 2;
+        // Skirting board, flush against the wall face.
+        const across = run.at + run.into * SKIRTING.t / 2;
+        const geo = run.axis === 'x'
+          ? new THREE.BoxGeometry(len, SKIRTING.h, SKIRTING.t)
+          : new THREE.BoxGeometry(SKIRTING.t, SKIRTING.h, len);
+        const board = new THREE.Mesh(geo, trimMat);
+        if (run.axis === 'x') board.position.set(mid, floorY + SKIRTING.h / 2, across);
+        else board.position.set(across, floorY + SKIRTING.h / 2, mid);
+        board.name = `skirting:${name}:${run.name}:${i}`;
+        board.receiveShadow = true;
+        scene.add(board);
+        skirting.push(board);
+
+        // AO skirt quad: v = 0 at the wall, 1 at the open edge.
+        const near = run.at, far = run.at + run.into * w;
+        const b0 = Math.min(near, far), b1 = Math.max(near, far);
+        const corners = run.axis === 'x'
+          ? [[lo, b0], [lo, b1], [hi, b1], [hi, b0]]
+          : [[b0, lo], [b0, hi], [b1, hi], [b1, lo]];
+        for (const [cx, cz] of corners) {
+          pos.push(cx, skirtY, cz);
+          nrm.push(0, 1, 0);
+          const b = run.axis === 'x' ? cz : cx;
+          uv.push(0.5, Math.abs(b - near) / w);
+        }
+        idx.push(v, v + 1, v + 3, v + 1, v + 2, v + 3);
+        v += 4;
+      });
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    const skirt = new THREE.Mesh(geo, skirtMat);
+    skirt.name = `aoSkirt:${name}`;
+    skirt.receiveShadow = false;
+    scene.add(skirt);
+    skirts.push(skirt);
+  };
+
   // ---- Phase 1: the room (indoors) ---------------------------------------------------
   // The aperture wall is the room's south side; three more walls and a ceiling close it.
   const R = ROOM;
-  const roomFloor = new THREE.Mesh(
-    new THREE.PlaneGeometry(R.maxX - R.minX, R.maxZ - R.minZ),
-    surf(texBoards(30), (R.maxX - R.minX) * 0.42, (R.maxZ - R.minZ) * 0.42));
-  roomFloor.rotation.x = -Math.PI / 2;
-  roomFloor.position.set((R.minX + R.maxX) / 2, 0.015, (R.minZ + R.maxZ) / 2);
-  roomFloor.receiveShadow = true;
-  scene.add(roomFloor);
+  /* THE HOUSE FLOOR IS PLANKS NOW: one merged geometry over the shell's interior (the walls
+   * stand on grass, as they always did), at today's 0.015 so nothing spawned on it moves. */
+  /* z1 runs to the front wall's OUTER face, not its inner one: the planks under the wall are
+   * inside the wall box and invisible, but in the three doorway gaps they are the threshold.
+   * Stopping at the inner face left 0.18 m of bare grass in the interior32 and front36 gaps
+   * (only door34 has the concrete path under it) — the review's screenshot item. The clear
+   * boxes start at y 0.06, so a 0.015 m floor through a gap is nowhere near B1/B1b. */
+  plankFloor({
+    name: 'house',
+    x0: R.minX + R.wallT / 2, x1: R.maxX - R.wallT / 2,
+    z0: R.minZ + R.wallT / 2, z1: WALL_Z + WALL_T / 2,
+    y: FLOOR.houseY, along: 'x', hue: PLANK.houseHue, variant: 'floor',
+  });
 
   // One plaster material for every interior wall, so the whole house reads as one build.
-  const wallMat = surf(texPlaster(38, 0.84), 3, 1);      // ry=1: see texPlaster
+  const wallMat = surf('plaster', texPlaster(38, 0.84), 3, 1);      // ry=1: see texPlaster
+  /* The ceiling's OWN material: an un-tiled canvas whose radial edge vignette darkens the
+   * perimeter where it meets the walls — the cheapest honest corner occlusion there is. A
+   * BoxGeometry's faces each span 0..1, so the vignette lands whole on the face you see. */
+  const ceilMat = surface('ceiling', 0xffffff, { map: texCeiling() });
 
   const addWall = (cx, cz, sx, sz, tag) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, R.wallH, sz), wallMat);
@@ -345,7 +688,7 @@ export function buildScene(renderTier = 'gpu') {
   addWall((R.minX + R.maxX) / 2, R.minZ, roomW, R.wallT, 'roomWallN');
 
   if (R.ceiling) {
-    const ceil = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.16, roomD), wallMat);
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.16, roomD), ceilMat);
     ceil.position.set((R.minX + R.maxX) / 2, R.wallH + 0.08, (R.minZ + R.maxZ) / 2);
     ceil.receiveShadow = true;
     scene.add(ceil);
@@ -399,17 +742,25 @@ export function buildScene(renderTier = 'gpu') {
       // Lime jambs: these are the clearances the route puzzle is made of, so they are
       // marked the same way the front apertures are.
       const passes = fitsThroughGap(REFERENCE_DIMS.couch3Seat.z, REFERENCE_DIMS.couch3Seat.y, dr.gap).fits;
-      const jc = passes ? PALETTE.reference : PALETTE.impossible;
+      const jm = passes ? markerMat : impossibleMat;
       for (const side of [-1, 1]) {
         const jx = dr.axis === 'x' ? dr.centre + side * dr.gap / 2 : dr.at;
         const jz = dr.axis === 'x' ? dr.at : dr.centre + side * dr.gap / 2;
         const jsx = dr.axis === 'x' ? 0.04 : PARTITION_T + 0.02;
         const jsz = dr.axis === 'x' ? PARTITION_T + 0.02 : 0.04;
-        const j = new THREE.Mesh(new THREE.BoxGeometry(jsx, dr.height, jsz), mat(jc));
+        const j = new THREE.Mesh(new THREE.BoxGeometry(jsx, dr.height, jsz), jm);
         j.position.set(jx, dr.height / 2, jz);
         scene.add(j);
       }
     }
+
+    // Skirting boards and the AO skirt, cut from the same door records as the walls.
+    houseTrim('house', interiorRuns({
+      x0: R.minX + R.wallT / 2, x1: R.maxX - R.wallT / 2,
+      z0: R.minZ + R.wallT / 2, z1: WALL_Z - WALL_T / 2,
+      frontGaps: APERTURES.map((a) => [a.x - a.gap / 2, a.x + a.gap / 2]),
+      partitions: PARTITIONS, doors: INTERIOR_DOORS, partT: PARTITION_T,
+    }), FLOOR.houseY);
   }
 
   /* ---- Phase 7: the truck's cargo box ---------------------------------------------------
@@ -426,30 +777,34 @@ export function buildScene(renderTier = 'gpu') {
      * and `cabColliders()`, so §8.1's one-shared-record rule holds and the cargo volume is
      * exactly what Phase 7 measured. What changed is that the outward faces carry the
      * company's livery, the deck is scuffed ply instead of grey, and the thing has wheels. */
-    const insideMat = surf(texTruckWall(), 2, 1);
-    const deckMat = surf(texTruckDeck(), 3, 2);
-    const sideMat = matte(0xffffff, { map: texTruckSide() });
-    const roofMat = mat(0xd8d5cd);
+    const insideMat = surf('steelPanel', texTruckWall(), 2, 1);
+    // The livery panel carries texTruckSide as its map, one repeat, clamped.
+    const sideMat = surface('paint', 0xffffff, { map: texTruckSide() });
+    const roofMat = mat('paint', 0xd8d5cd);
 
     /* BoxGeometry's material array is indexed [+X, -X, +Y, -Y, +Z, -Z]. The livery belongs
      * on the OUTWARD face only, which is -X for the left wall and +X for the right — so the
      * two walls do not take the same array. Getting this wrong paints the company name on
      * the inside of the cargo box, where only the load can read it. */
-    const bodyMat = mat(0xb2202a);
+    const bodyMat = mat('paint', 0xb2202a);
+    const chassisMat = mat('paintDark', 0x24262b);
+    const chassisEndMat = mat('paintDark', 0x33363c);
     const wallMats = (outwardIsPlusX) => outwardIsPlusX
       ? [sideMat, insideMat, roofMat, roofMat, insideMat, insideMat]
       : [insideMat, sideMat, roofMat, roofMat, insideMat, insideMat];
 
-    for (const c of cargoColliders()) {
+    const cargo = cargoColliders();
+    for (const c of cargo) {
       const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
       if (sx <= 0 || sy <= 0 || sz <= 0) continue;
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz),
         // The deck box is the whole lower body: you walk on its TOP, and its sides are the
-        // truck's flank below the livery.
+        // truck's flank below the livery. Its top face is the dark under-plane of the plank
+        // deck built just below.
         // The under-deck's ±Z faces are CHASSIS, not livery. Painted body-red they made a
         // 4 m slab of flat colour across the whole rear of the truck — the loudest thing in
         // frame, and nothing a real vehicle has.
-        c.tag === 'truckDeck' ? [bodyMat, bodyMat, deckMat, mat(0x24262b), mat(0x33363c), mat(0x33363c)]
+        c.tag === 'truckDeck' ? [bodyMat, bodyMat, underMat, chassisMat, chassisEndMat, chassisEndMat]
         : c.tag === 'truckRoof' ? roofMat
         : c.tag === 'truckWallL' ? wallMats(false)
         : c.tag === 'truckWallR' ? wallMats(true)
@@ -460,9 +815,28 @@ export function buildScene(renderTier = 'gpu') {
       addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag, c.friction);
     }
 
+    /* The plank DECK: over the clear interior between the side walls, from the rear lip to
+     * the headboard, planks running the length of the box. Sits FLOOR.hostGap +
+     * FLOOR.underGap above the deck collider's top — a 4 mm visual sink for a load, against
+     * the 15 mm the house floor has always had. */
+    const deckC = cargo.find((c) => c.tag === 'truckDeck');
+    const wallL = cargo.find((c) => c.tag === 'truckWallL');
+    const wallR = cargo.find((c) => c.tag === 'truckWallR');
+    const headboard = cargo.find((c) => c.tag === 'truckHeadboard');
+    if (deckC) {
+      plankFloor({
+        name: 'deck',
+        x0: wallL ? wallL.maxX : deckC.minX, x1: wallR ? wallR.minX : deckC.maxX,
+        z0: deckC.minZ, z1: headboard ? headboard.minZ : deckC.maxZ,
+        y: deckC.top + FLOOR.hostGap + FLOOR.underGap, along: 'z',
+        hue: PLANK.deckHue, variant: 'deck',
+      });
+    }
+
     // The cab. §11.2's "cab seats are safe" — and §3.4's TRANSIT has to begin somewhere
     // you can walk up to. Not part of cargoColliders(): the cab is not cargo volume.
-    const cabMat = mat(0xb2202a);          // company red, matching the livery stripe
+    // Company red, matching the livery stripe; a deeper gloss than the body panels.
+    const cabMat = mat('paint', 0xb2202a, { shininess: CAB_SHININESS });
     const cabBoxes = [];
     for (const c of cabColliders()) {
       const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
@@ -484,7 +858,7 @@ export function buildScene(renderTier = 'gpu') {
       const cab = cabBoxes[0];
       const cx = (cab.c.minX + cab.c.maxX) / 2;
       const cz = (cab.c.minZ + cab.c.maxZ) / 2;
-      const glass = mat(0x2a3540);
+      const glass = mat('glass', 0x2a3540);
       // Windscreen on the -Z face (the truck faces -Z, away from the house).
       const ws = new THREE.Mesh(new THREE.BoxGeometry(cab.sx * 0.86, cab.sy * 0.34, 0.03), glass);
       ws.position.set(cx, cab.c.base + cab.sy * 0.70, cab.c.minZ - 0.015);
@@ -494,7 +868,7 @@ export function buildScene(renderTier = 'gpu') {
         sg.position.set(cx + s * (cab.sx / 2 + 0.015), cab.c.base + cab.sy * 0.68, cz - cab.sz * 0.12);
         scene.add(sg);
       }
-      const bumper = new THREE.Mesh(new THREE.BoxGeometry(cab.sx * 1.02, 0.20, 0.16), mat(0x3a3d44));
+      const bumper = new THREE.Mesh(new THREE.BoxGeometry(cab.sx * 1.02, 0.20, 0.16), mat('paintDark', 0x3a3d44));
       bumper.position.set(cx, cab.c.base + 0.28, cab.c.minZ - 0.06);
       bumper.castShadow = true;
       scene.add(bumper);
@@ -503,11 +877,14 @@ export function buildScene(renderTier = 'gpu') {
     // Wheels, on both axles. A box on the ground is a shipping container; a box on wheels
     // is a truck, and it is the cheapest possible version of that difference.
     {
-      const tyre = mat(0x1d1f24), hub = mat(0xb9bec5);
-      const bodyMinX = Math.min(...cargoColliders().map((c) => c.minX));
-      const bodyMaxX = Math.max(...cargoColliders().map((c) => c.maxX));
+      // Rubber carries its tread band in texRubber (64², tiled round the tyre); the hub is
+      // chrome — the one part of the truck that is meant to flash in the sun.
+      const tyre = surface('rubber', 0xffffff, { map: texRubber(), repeat: [12, 1] });
+      const hub = mat('chrome', 0xd8dde3);
+      const bodyMinX = Math.min(...cargo.map((c) => c.minX));
+      const bodyMaxX = Math.max(...cargo.map((c) => c.maxX));
       const zs = [];
-      for (const c of cargoColliders()) { zs.push(c.minZ, c.maxZ); }
+      for (const c of cargo) { zs.push(c.minZ, c.maxZ); }
       const zMin = Math.min(...zs), zMax = Math.max(...zs);
       const axleZ = [zMin + 0.95, zMax - 0.85];
       if (cabBoxes.length) axleZ.push((cabBoxes[0].c.minZ + cabBoxes[0].c.maxZ) / 2 - 0.1);
@@ -529,9 +906,40 @@ export function buildScene(renderTier = 'gpu') {
     // Anchor points, in the reference lime. §10.3 wants "anchor validity" legible, and the
     // cheapest honest version of that is being able to see where they are.
     for (const a of cargoAnchors()) {
-      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.16), mat(PALETTE.reference));
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.16), markerMat);
       knob.position.set(a.x, a.y, a.z);
       scene.add(knob);
+    }
+
+    /* THE OIL STAIN: one multiply-blended decal on the drive behind the truck's rear, in
+     * place of the stain that used to repeat in every asphalt tile (which put a drip every
+     * two metres down the whole street). No collider; 2 mm over the drive with polygonOffset. */
+    if (deckC) {
+      const stainTex = canvasTex(OIL_STAIN.texSize, OIL_STAIN.texSize, 'oilStain', (ctx, w, h) => {
+        // White pulled toward the tint by `strength` — the same multiplier math as the AO skirt.
+        const toward = (s) => `rgb(${OIL_STAIN.tint.map((t) => Math.round(255 - s * (255 - t))).join(',')})`;
+        const dark = toward(OIL_STAIN.strength);
+        const mid = toward(OIL_STAIN.strength * OIL_STAIN.midStrength);
+        const g = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, w * 0.5);
+        g.addColorStop(0, dark);
+        g.addColorStop(OIL_STAIN.midStop, mid);
+        g.addColorStop(1, '#ffffff');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      });
+      const stainMat = new THREE.MeshBasicMaterial({
+        map: stainTex, transparent: true, blending: THREE.MultiplyBlending, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+        toneMapped: false, fog: false,
+      });
+      stainMat.userData.layer = 'oilStain';   // `layer`, not `kind` — see the AO skirt material
+      const stain = new THREE.Mesh(new THREE.PlaneGeometry(OIL_STAIN.w, OIL_STAIN.d), stainMat);
+      stain.rotation.x = -Math.PI / 2;
+      stain.position.set((deckC.minX + deckC.maxX) / 2, OIL_STAIN.y, deckC.minZ - OIL_STAIN.behindRear);
+      stain.name = 'oilStain';
+      scene.add(stain);
     }
   }
 
@@ -544,18 +952,39 @@ export function buildScene(renderTier = 'gpu') {
     // colour — §13.1 calls it "one SMALLER site", not a different kind of building, and a
     // plain tan box at the end of the drive undoes the whole art pass at the exact moment
     // the contract is being judged (§15.2).
-    const destMat = surf(texSiding(196, 0.58), 5, 1.6);
-    const destFloorMat = surf(texBoards(26), 4, 4);
+    const destMat = surf('siding', texSiding(196, 0.58), 5, 1.6);
+    /* Siding OUTSIDE, plaster INSIDE: the shell walls are single boxes, so each takes a
+     * material array with the siding on its outward face only (BoxGeometry order
+     * [+X, -X, +Y, -Y, +Z, -Z]). The floor slab is concrete-edged with the dark under-plane
+     * colour on top, under the plank floor. */
+    const slabEdge = surf('concrete', texConcrete(), 4, 0.25);
+    const destFloorMats = [slabEdge, slabEdge, underMat, underMat, slabEdge, slabEdge];
+    const outward = (idx) => { const a = [wallMat, wallMat, wallMat, wallMat, wallMat, wallMat]; a[idx] = destMat; return a; };
+    const destWallMats = {
+      destWallW: outward(1), destWallE: outward(0), destWallN: outward(5),
+      destWallS: outward(4), destDoorHeader: outward(4),
+    };
     for (const c of destColliders()) {
       const sx = c.maxX - c.minX, sz = c.maxZ - c.minZ, sy = c.top - c.base;
       if (sx <= 0 || sy <= 0 || sz <= 0) continue;
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz),
-        c.tag === 'destFloor' ? destFloorMat : destMat);
+        c.tag === 'destFloor' ? destFloorMats
+        : c.tag === 'destCeiling' ? ceilMat
+        : destWallMats[c.tag] || destMat);
       m.position.set((c.minX + c.maxX) / 2, c.base + sy / 2, (c.minZ + c.maxZ) / 2);
       m.castShadow = true; m.receiveShadow = true;
       scene.add(m);
       addCollider((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, sx, sz, c.base, c.top, c.tag);
     }
+
+    // The destination's plank floor over its slab (top 0.02), planks along the long axis.
+    const destSlab = destColliders().find((c) => c.tag === 'destFloor');
+    const destFloorY = (destSlab ? destSlab.top : 0.02) + FLOOR.hostGap + FLOOR.underGap;
+    plankFloor({
+      name: 'dest',
+      x0: DEST_SHELL.minX, x1: DEST_SHELL.maxX, z0: DEST_SHELL.minZ, z1: DEST_SHELL.maxZ,
+      y: destFloorY, along: 'x', hue: PLANK.destHue, variant: 'floor',
+    });
 
     for (const p of DEST_PARTITIONS) {
       for (const seg of wallSegments(p, DEST_DOORS)) {
@@ -566,7 +995,9 @@ export function buildScene(renderTier = 'gpu') {
         const sz = p.axis === 'x' ? PARTITION_T : len;
         const cx = p.axis === 'x' ? mid : p.at;
         const cz = p.axis === 'x' ? p.at : mid;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(sx, DEST_SHELL.wallH, sz), destMat);
+        // Interior partitions are plaster, like the pickup house's — siding indoors read as
+        // a shed.
+        const m = new THREE.Mesh(new THREE.BoxGeometry(sx, DEST_SHELL.wallH, sz), wallMat);
         m.position.set(cx, DEST_SHELL.wallH / 2, cz);
         m.castShadow = true; m.receiveShadow = true;
         scene.add(m);
@@ -574,11 +1005,19 @@ export function buildScene(renderTier = 'gpu') {
       }
     }
 
+    // Skirting + AO skirt for the destination. Its shell walls sit OUTSIDE the bounds, so
+    // the interior faces are the bounds themselves; the front opening is on the +Z side.
+    houseTrim('dest', interiorRuns({
+      x0: DEST_SHELL.minX, x1: DEST_SHELL.maxX, z0: DEST_SHELL.minZ, z1: DEST_SHELL.maxZ,
+      frontGaps: [[DEST_APERTURE.x - DEST_APERTURE.gap / 2, DEST_APERTURE.x + DEST_APERTURE.gap / 2]],
+      partitions: DEST_PARTITIONS, doors: DEST_DOORS, partT: PARTITION_T,
+    }), destFloorY);
+
     // §13.1 says the zones are LABELED, and §21.2's contract UX has to name a room. A lime
     // marker on the floor of each is the cheapest version of that which is not a lie.
     for (const z of DEST_ZONES) {
       if (z.id === 'dest_apron') continue;
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.02, 0.9), mat(PALETTE.reference));
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.02, 0.9), markerMat);
       pad.position.set((z.minX + z.maxX) / 2, 0.03, (z.minZ + z.maxZ) / 2);
       scene.add(pad);
     }
@@ -586,6 +1025,7 @@ export function buildScene(renderTier = 'gpu') {
 
   // ---- Phase 1: obstacles (autostep / mantle / refuse) --------------------------------
   const obstacles = [];
+  const copingTrim = mat('paintedTimber', PALETTE.trim);
   for (const o of OBSTACLES) {
     // Lime = the controller should get you up it; coral = it must refuse.
     /* DRESSED AS GARDEN WALLS, still legible as a legend.
@@ -595,13 +1035,14 @@ export function buildScene(renderTier = 'gpu') {
      * are also four coloured blocks sitting in the front garden, which is a large part of why
      * the site read as a test scene. So the BODY is brickwork and the legend survives as a
      * painted coping along the top edge: the diagnostic is intact, and a raised bed is a
-     * thing a garden has. */
-    const col = o.expectMantle ? PALETTE.reference : (o.top > 1.0 ? PALETTE.impossible : PALETTE.trim);
+     * thing a garden has. The legend copings are 'marker' (emissive, never dark); the plain
+     * autostep one is painted timber. */
+    const copingMat = o.expectMantle ? markerMat : (o.top > 1.0 ? impossibleMat : copingTrim);
     const m = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.top, o.d), gardenBrick);
     m.position.set(o.x, o.top / 2, o.z);
     m.castShadow = true; m.receiveShadow = true;
     scene.add(m);
-    const coping = new THREE.Mesh(new THREE.BoxGeometry(o.w * 1.04, 0.06, o.d * 1.04), mat(col));
+    const coping = new THREE.Mesh(new THREE.BoxGeometry(o.w * 1.04, 0.06, o.d * 1.04), copingMat);
     coping.position.set(o.x, o.top + 0.03, o.z);
     coping.castShadow = true; coping.receiveShadow = true;
     scene.add(coping);
@@ -613,7 +1054,7 @@ export function buildScene(renderTier = 'gpu') {
   // Mesh rotation must match the physics quaternion exactly, or the player walks on an
   // invisible slope. Both read RAMP; neither hard-codes an angle.
   const rampMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(RAMP.width, RAMP.thickness, RAMP.length), surf(texBoards(28), 2, 3));
+    new THREE.BoxGeometry(RAMP.width, RAMP.thickness, RAMP.length), surf('boards', texBoards(28), 2, 3));
   rampMesh.position.set(RAMP.x, RAMP.y, RAMP.z);
   rampMesh.rotation.x = RAMP.angleRad;
   rampMesh.castShadow = true; rampMesh.receiveShadow = true;
@@ -623,7 +1064,7 @@ export function buildScene(renderTier = 'gpu') {
   // collider from RAMP directly; camera occlusion skips it.
 
   const plat = new THREE.Mesh(
-    new THREE.BoxGeometry(PLATFORM.width, PLATFORM.thickness, PLATFORM.depth), surf(texBoards(30), 2, 2));
+    new THREE.BoxGeometry(PLATFORM.width, PLATFORM.thickness, PLATFORM.depth), surf('boards', texBoards(30), 2, 2));
   plat.position.set(PLATFORM.x, PLATFORM.y - PLATFORM.thickness / 2, PLATFORM.z);
   plat.castShadow = true; plat.receiveShadow = true;
   scene.add(plat);
@@ -633,30 +1074,49 @@ export function buildScene(renderTier = 'gpu') {
   /* ---- interior dressing (Phase 14) -------------------------------------------------------
    * A pendant under each room light (so the warm spot has a visible SOURCE — light from
    * nowhere reads as a rendering artefact), a rug, and pictures on the walls. Decoration
-   * only: zero colliders, m13 C1 still asserts it. */
+   * only: zero colliders, m13 C1 still asserts it.
+   *
+   * PER ROOM, NOT PER ROOM LIGHT. The software tier builds no room spots at all (m13 F4),
+   * and a pendant that hung off the spot list vanished with them — so the harness had ZERO
+   * bulbs and m13 G10a ("the bulbs are untonemapped bloom sources", bulbs > 0) could never
+   * pass on the tier it runs on. The pendant is furniture: it hangs where the spot WOULD be
+   * (the same centre and drop as lighting.js computes) whether or not the spot exists. */
   {
-    for (const rl of roomLights || []) {
-      const p = rl.position;
+    const cordMat = mat('paintDark', 0x2a2d33);
+    for (const r of rooms) {
+      const p = new THREE.Vector3((r.minX + r.maxX) / 2, r.maxY - LIGHTING.room.dropFromCeiling, (r.minZ + r.maxZ) / 2);
       const cordH = 0.14;
-      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, cordH, 6), mat(0x2a2d33));
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, cordH, 6), cordMat);
       cord.position.set(p.x, p.y + cordH / 2 + 0.02, p.z);
       scene.add(cord);
+      // The shade matches its room's spot colour, so the light and its source agree.
+      const roomHex = (LIGHTING.roomColours && LIGHTING.roomColours[r.id] !== undefined)
+        ? LIGHTING.roomColours[r.id] : LIGHTING.room.colour;
+      const shadeHex = new THREE.Color(roomHex).lerp(new THREE.Color(SHADE.base), SHADE.mix).getHex();
       const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.17, 0.13, 12, 1, true),
-        matte(0xd8b06a, { side: THREE.DoubleSide }));
+        mat('paper', shadeHex, { side: THREE.DoubleSide }));
       shade.position.set(p.x, p.y + 0.02, p.z);
       scene.add(shade);
-      // The bulb is BASIC — unlit — so it glows regardless of what the light itself does.
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8),
-        new THREE.MeshBasicMaterial({ color: 0xffe6b8 }));
+      /* The bulb is BASIC — unlit — so it glows regardless of what the light itself does,
+       * and NOT tone mapped, so it writes ~1.0 and is a guaranteed bloom source (m13 G10).
+       * Built DIRECTLY, not through textures.basic(): basic() decodes the colour sRGB→linear
+       * (0xfff3d0 → 0xffe5a1), which is right for a lit surface and wrong for an emitter
+       * whose whole job is to sit at the top of the range — and m13 G10a counts the bulbs by
+       * material.color.getHex() === 0xfff3d0, which the decoded value can never match. Kept
+       * as the literal cream: it encodes out a shade paler, which is what a bulb is. */
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(BULB.r, 10, 8),
+        new THREE.MeshBasicMaterial({ color: BULB.colour, toneMapped: false }));
+      bulb.name = 'bulb';
       bulb.position.set(p.x, p.y - 0.02, p.z);
       scene.add(bulb);
     }
 
-    // A rug in the living room — a plane, so it costs one draw call and no collider.
+    // A rug in the living room — a plane, so it costs one draw call and no collider. One
+    // repeat over the rug: the border is drawn in the canvas, so it must not tile.
     const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.8),
-      matte(0xffffff, { map: tiled(texFabric(210, 0.45), 4, 3) }));
+      surface('rug', 0xffffff, { map: texRug(210) }));
     rug.rotation.x = -Math.PI / 2;
-    rug.position.set(2.4, 0.021, -3.6);
+    rug.position.set(2.4, FLOOR.rugY, -3.6);
     rug.receiveShadow = true;
     scene.add(rug);
 
@@ -671,11 +1131,12 @@ export function buildScene(renderTier = 'gpu') {
       { x: -2.6, y: 1.75, z: -4.94, ry: 0, w: 0.38, h: 0.5, hue: 30 },
       { x: -4.94, y: 1.7, z: -6.6, ry: Math.PI / 2, w: 0.45, h: 0.35, hue: 96 },
     ];
+    const frameMat = surface('walnut', 0xffffff, { map: texWood('walnut'), repeat: [1, 1] });
     for (const f of frames) {
       const pic = new THREE.Group();
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h, 0.03), mat(0x6b5334));
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h, 0.03), frameMat);
       const art = new THREE.Mesh(new THREE.BoxGeometry(f.w - 0.06, f.h - 0.06, 0.012),
-        matte(0xffffff, { map: tiled(texPaint(f.hue, 0.45, 0.6), 1, 1) }));
+        surface('paper', 0xffffff, { map: texPaint(f.hue, 0.45, 0.6), repeat: [1, 1] }));
       art.position.z = 0.012;
       pic.add(frame); pic.add(art);
       pic.position.set(f.x, f.y, f.z);
@@ -698,11 +1159,10 @@ export function buildScene(renderTier = 'gpu') {
    * changed — this is dressing around it. */
   {
     const RM = ROOM;
-    const sidingMat = surf(texSiding(34, 0.62), 6, 2);
-    const shingleMat = surf(texShingle(24), 8, 4);
-    const brickMat = surf(texBrick(14), 4, 2);
-    const trimMat = mat(0xf2ead9);
-    const glassMat = mat(0x3d5568);
+    const sidingMat = surf('siding', texSiding(34, 0.62), 6, 2);
+    const shingleMat = surf('shingle', texShingle(24), 8, 4);
+    const brickMat = surf('brick', texBrick(14), 4, 2);
+    const glassMat = mat('glass', 0x3d5568);
 
     const deco = (geo, m, x, y, z, ry = 0) => {
       const mesh = new THREE.Mesh(geo, m);
@@ -742,7 +1202,9 @@ export function buildScene(renderTier = 'gpu') {
     }
 
     /* Cladding on the outward faces of the shell. The walls themselves are already built
-     * and collidable; these are thin skins 1 cm proud of them. */
+     * and collidable; these are thin skins 1 cm proud of them. The lap relief comes from the
+     * siding kind's paired height map — NOT from lapped-board geometry, which was tried on
+     * paper and dropped: a merged front face crosses the three doorway clear boxes (B1). */
     deco(new THREE.BoxGeometry(0.02, RM.wallH, roomD), sidingMat, RM.minX - 0.10, RM.wallH / 2, cz);
     deco(new THREE.BoxGeometry(0.02, RM.wallH, roomD), sidingMat, RM.maxX + 0.10, RM.wallH / 2, cz);
     deco(new THREE.BoxGeometry(roomW, RM.wallH, 0.02), sidingMat, cx, RM.wallH / 2, RM.minZ - 0.10);
@@ -775,30 +1237,32 @@ export function buildScene(renderTier = 'gpu') {
     deco(new THREE.BoxGeometry(front.gap + 0.20, 0.10, 0.06), trimMat,
          front.x, REFERENCE_DIMS.doorwayHeight + 0.11, WALL_Z_FACE);
     // The door itself, swung wide against the wall so nothing blocks the opening.
-    deco(new THREE.BoxGeometry(0.05, REFERENCE_DIMS.doorwayHeight, front.gap * 0.92), mat(0x4a6b8a),
+    deco(new THREE.BoxGeometry(0.05, REFERENCE_DIMS.doorwayHeight, front.gap * 0.92), mat('paintedTimber', 0x4a6b8a),
          front.x + front.gap / 2 + 0.14, REFERENCE_DIMS.doorwayHeight / 2, WALL_Z_FACE - front.gap * 0.46);
     // House number, because §12.1's customer lives somewhere.
     deco(new THREE.BoxGeometry(0.22, 0.30, 0.03), trimMat, front.x - front.gap / 2 - 0.34, 1.6, WALL_Z_FACE);
 
     /* The street and its verge. The driveway used to run to the edge of a green plane, so
      * the site had no context at all — a truck parked in a field. */
-    const street = new THREE.Mesh(new THREE.PlaneGeometry(70, 7), surf(texAsphalt(), 35, 3.5));
+    const street = new THREE.Mesh(new THREE.PlaneGeometry(70, 7), surf('asphalt', texAsphalt(), 35, 3.5));
     street.rotation.x = -Math.PI / 2;
     street.position.set(0, 0.008, 17.5);
     street.receiveShadow = true;
     scene.add(street);
-    // Centre line, dashed.
+    // Centre line, dashed. One material for all seventeen dashes.
+    const lineMat = mat('paintedTimber', 0xd8cf9a);
     for (let i = -34; i < 34; i += 4) {
-      deco(new THREE.BoxGeometry(2.2, 0.01, 0.14), mat(0xd8cf9a), i, 0.014, 17.5);
+      deco(new THREE.BoxGeometry(2.2, 0.01, 0.14), lineMat, i, 0.014, 17.5);
     }
     // Kerbs either side.
+    const kerbMat = surf('concrete', texConcrete(), 30, 1);
     for (const kz of [14.0, 21.0]) {
-      deco(new THREE.BoxGeometry(70, 0.14, 0.28), surf(texConcrete(), 30, 1), 0, 0.07, kz);
+      deco(new THREE.BoxGeometry(70, 0.14, 0.28), kerbMat, 0, 0.07, kz);
     }
 
     /* Landscaping. Placed on the lawn, clear of the driveway, the path and the room shell —
      * a tree where a mover walks is a collider you did not add and a wall they cannot see. */
-    const trunkMat = mat(0x5b4632), leafMat = mat(0x3f6b33), leafMat2 = mat(0x4f7d3a);
+    const trunkMat = mat('bark', 0x5b4632), leafMat = mat('foliage', 0x3f6b33), leafMat2 = mat('foliage', 0x4f7d3a);
     const tree = (tx, tz, scale) => {
       deco(new THREE.CylinderGeometry(0.16 * scale, 0.22 * scale, 2.4 * scale, 8), trunkMat, tx, 1.2 * scale, tz);
       /* Many small lobes, not few big ones — 11 at 0.24-0.37 R reads as foliage where 5 at
@@ -817,12 +1281,14 @@ export function buildScene(renderTier = 'gpu') {
     tree(-9.2, 12.6, 1.05);
     tree(9.8, -1.2, 0.85);
 
-    // A hedge along the boundary, and a mailbox at the kerb.
-    for (let i = 0; i < 9; i++) {
-      deco(new THREE.BoxGeometry(1.5, 0.95, 0.75), leafMat, -11.5, 0.48, 1.0 + i * 1.5);
+    // A hedge along the boundary — nine rounded boxes (one cached geometry; a rounded box
+    // is never translate()d, only positioned) — and a mailbox at the kerb.
+    const hedgeGeo = roundedBox(THREE, HEDGE.w, HEDGE.h, HEDGE.d, HEDGE.r);
+    for (let i = 0; i < HEDGE.n; i++) {
+      deco(hedgeGeo, leafMat, HEDGE.x, HEDGE.h / 2 + DECO_LIFT, HEDGE.z0 + i * HEDGE.pitch);
     }
     deco(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8), trunkMat, -3.4, 0.55, 13.4);
-    deco(new THREE.BoxGeometry(0.28, 0.24, 0.44), mat(0x8a2f2f), -3.4, 1.22, 13.4);
+    deco(new THREE.BoxGeometry(0.28, 0.24, 0.44), mat('paint', 0x8a2f2f), -3.4, 1.22, 13.4);
 
     /* A roof on the delivery house too. Same construction as above, sat on its own shell —
      * §13.1's "one smaller site", so it is one span rather than two. */
@@ -837,11 +1303,12 @@ export function buildScene(renderTier = 'gpu') {
                           dcx + s * (DW / 4), dEave + dRise / 2, dcz);
         slab.rotation.z = s * -Math.atan2(dRise, DW / 2 + dOver);
       }
+      const destGableMat = surf('siding', texSiding(196, 0.58), 4, 1);
       for (const gz of [DEST_SHELL.minZ - 0.02, DEST_SHELL.maxZ + 0.02]) {
         for (let i = 0; i < 5; i++) {
           const f = i / 5;
           deco(new THREE.BoxGeometry(DW * (1 - f) * 0.98, dRise / 5 + 0.02, 0.16),
-               surf(texSiding(196, 0.58), 4, 1), dcx, dEave + dRise * f + dRise / 10, gz);
+               destGableMat, dcx, dEave + dRise * f + dRise / 10, gz);
         }
       }
       for (const s of [-1, 1]) {
@@ -856,11 +1323,19 @@ export function buildScene(renderTier = 'gpu') {
     }
 
     // A wheelie bin and a stack of flattened cartons by the drive: signs of a move underway.
-    deco(new THREE.BoxGeometry(0.58, 0.95, 0.62), mat(0x2f4a2f), 3.6, 0.48, 12.0);
-    deco(new THREE.BoxGeometry(0.60, 0.06, 0.66), mat(0x22331f), 3.6, 0.98, 12.0);
-    for (let i = 0; i < 4; i++) {
-      deco(new THREE.BoxGeometry(0.9, 0.03, 0.7), surf(texBoards(32), 1, 1),
-           4.8, 0.02 + i * 0.035, 11.4, 0.2 + i * 0.1);
+    deco(new THREE.BoxGeometry(0.58, 0.95, 0.62), mat('plastic', 0x2f4a2f), 3.6, 0.48, 12.0);
+    deco(new THREE.BoxGeometry(0.60, 0.06, 0.66), mat('paint', 0x22331f), 3.6, 0.98, 12.0);
+    /* Flattened cartons are CARDBOARD, not the ply they used to borrow: a rounded slab whose
+     * top/bottom carry the liner and whose edge band carries the flute normal map — the
+     * same two-group construction as a box lid (prefabs.js roundedSlab). */
+    const cartonGeo = roundedSlab(THREE, CARTONS.w, CARTONS.t, CARTONS.d);
+    const cartonMats = [
+      surface('card', 0xffffff, { map: texCardboard('flat') }),
+      surface('cardEdge', 0xffffff, { map: texCardboardEdge() }),
+    ];
+    for (let i = 0; i < CARTONS.n; i++) {
+      deco(cartonGeo, cartonMats, CARTONS.x, CARTONS.t / 2 + DECO_LIFT + i * CARTONS.yStep, CARTONS.z,
+           0.2 + i * CARTONS.ryStep);
     }
   }
 
@@ -868,6 +1343,9 @@ export function buildScene(renderTier = 'gpu') {
     scene, colliders, props, sun, fill, hemi, ambient, roomLights, tier, grid, apertures: APERTURES,
     obstacles, ramp: RAMP, platform: PLATFORM, room: ROOM,
     spawn: { x: 0, y: 0, z: 5.0 },
+    /** Phase 15 test handles: the two merged AO strips, every skirting board, the three
+     *  merged plank floors (m13 G8, G15). */
+    skirts, skirting, plankFloors,
     dispose() {
       scene.traverse((o) => {
         if (o.geometry) o.geometry.dispose();

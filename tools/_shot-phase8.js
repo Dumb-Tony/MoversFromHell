@@ -80,4 +80,4 @@ M.tools.syncMeshes();
 M.hud.update(movers[0].grips.status());
 M.overlay.el.hidden = true;
 M.syncSize();
-M.renderer.render(M.world.scene, M.camera);
+M.present(M.camera);

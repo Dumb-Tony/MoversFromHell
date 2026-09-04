@@ -15,10 +15,44 @@
  *
  * The body is normalised to exactly PLAYER.height with its feet at y=0, so the mesh can
  * never drift out of sync with the capsule that every clearance number derives from.
+ *
+ * ── PHASE 15 (2026-09-03): the same silhouette, a real surface response. ──
+ *
+ * The proportions are the user's and are NOT touched — they are pinned as BODY_RATIOS so
+ * m13 G7 tests them rather than trusting this comment — and update()'s arm-reach block is
+ * byte-identical to Phase 12. What changed is only what the light does on the body:
+ *
+ *   • Every box part is a roundedBox (prefabs.js) at the SAME dimensions as the BoxGeometry
+ *     it replaces, with `ao: 0` (a body does not sit on the floor) and a `.clone()` — the
+ *     legs and arms are top-pivoted by geometry.translate(), and prefabs.js's cache hands
+ *     the SAME geometry to every caller of that size, so translating the cached one would
+ *     move every part of that size in the world. Clone first, ALWAYS.
+ *   • Materials come from surface(): skin, cotton, denim, retro-reflective hi-vis and leather
+ *     stop sharing one Lambert. The vest's specular mask makes its silver bands catch the
+ *     sun and bloom — the mover's signature sparkle. The hands are 'marker' (lit + emissive)
+ *     so they read as grip markers in any light (§6.1) and never pass for a material.
+ *   • ⚠ NO body material has vertexColors. The body bakes no colour attribute, and in r128
+ *     a vertexColors material without one renders BLACK (see prefabs.js header rule 1) —
+ *     surface() defaults vertexColors:false, so the trap cannot reach the crew.
+ *   • The vest is 'face' UV (each face spans 0..1) so texHiVis's two bands land on the
+ *     vest rather than at whatever height the metric 'tile' mapping put them.
  */
 
 import { PLAYER } from '../config.js';
-import { texHiVis, texDenim, matte } from './textures.js';
+import { texHiVis, texDenim } from './textures.js';
+import { surface } from './materials.js';
+import { roundedBox } from './prefabs.js';
+
+/** TOY PROPORTIONS (2026-08-25), as fractions of PLAYER.height (torsoW in metres): shorter
+ *  legs, wider torso, a plainly oversized head. The silhouette IS the style. Pinned here so
+ *  a test can deep-equal them; the geometry below reads from this object and nowhere else. */
+export const BODY_RATIOS = Object.freeze({ leg: 0.44, torso: 0.34, head: 0.105, torsoW: 0.52 });
+
+/** Flat body colours: the skin, the boots, and §6.1's reference lime for the hands. */
+const BODY_COLOURS = Object.freeze({
+  skin: '#cfa98c', boots: '#2a2420', hands: '#a8d93a', defaultCloth: '#5f6b8a',
+  hiVisHue: 66, denimHue: 220, denimLight: 0.28, denimRepeat: 6,
+});
 
 export function makeBlockout(clothColour) {
   const THREE = window.THREE;
@@ -27,16 +61,26 @@ export function makeBlockout(clothColour) {
 
   // Phase 4 gives each mover its own colour, so which one you are driving is readable at a
   // glance rather than from the HUD.
-  const skin = '#cfa98c', cloth = clothColour || '#5f6b8a', dark = '#2f3444', hi = '#a8d93a';
-  const mat = (c) => matte(c);
-  const denimMat = matte(0xffffff, { map: texDenim(220, 0.26) });
-  const visMat = matte(0xffffff, { map: texHiVis(66) });
+  const cloth = clothColour || BODY_COLOURS.defaultCloth;
+  const skinMat = surface('skin', BODY_COLOURS.skin, { toy: false });
+  const clothMat = surface('cloth', cloth);
+  const bootMat = surface('leather', BODY_COLOURS.boots);
+  const handMat = surface('marker', BODY_COLOURS.hands);
+  const denimMat = surface('denim', 0xffffff, {
+    map: texDenim(BODY_COLOURS.denimHue, BODY_COLOURS.denimLight),
+    repeat: [BODY_COLOURS.denimRepeat, BODY_COLOURS.denimRepeat],
+  });
+  const visMat = surface('hivis', 0xffffff, { map: texHiVis(BODY_COLOURS.hiVisHue), repeat: [1, 1] });
+
+  /* A rounded box CLONE at the given dimensions — the clone is what makes the top-pivot
+   * translate below safe (see the header). ao: 0 — nothing here stands on the ground. */
+  const box = (w, h, d, uv = 'tile') => roundedBox(THREE, w, h, d, { radius: 'auto', ao: 0, uv }).clone();
 
   /* TOY PROPORTIONS (2026-08-25): shorter legs, wider torso, a plainly oversized head.
    * The silhouette IS the style — the old ratios were realistic, and realistic ratios on
    * primitive geometry read as unfinished rather than as chosen. Still normalised to
    * exactly PLAYER.height below, so the capsule contract holds. */
-  const legH = H * 0.44, torsoH = H * 0.34, headR = H * 0.105;
+  const legH = H * BODY_RATIOS.leg, torsoH = H * BODY_RATIOS.torso, headR = H * BODY_RATIOS.head;
 
   /* THE CREW ACTUALLY LOOK LIKE A CREW NOW — hi-vis, caps, work boots, gloves.
    *
@@ -50,10 +94,10 @@ export function makeBlockout(clothColour) {
    * is not laziness: seeing where the hands are is a grip affordance the game depends on
    * from Phase 2 onward, and hi-vis gloves are also just what movers wear. */
   const mkLeg = (sx) => {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.17, legH, 0.19), denimMat);
+    const l = new THREE.Mesh(box(0.17, legH, 0.19), denimMat);
     l.position.set(sx * 0.13, legH / 2, 0);
     // Boot: wider, darker, at the ankle. Child of the leg, so it swings with the gait.
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.175, legH * 0.17, 0.235), mat('#241f1c'));
+    const boot = new THREE.Mesh(box(0.175, legH * 0.17, 0.235), bootMat);
     boot.position.set(0, -legH / 2 + legH * 0.085, 0.024);
     l.add(boot);
     g.add(l);
@@ -61,34 +105,34 @@ export function makeBlockout(clothColour) {
   };
   const legL = mkLeg(-1), legR = mkLeg(1);
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, torsoH, 0.30), mat(cloth));
+  const torso = new THREE.Mesh(box(BODY_RATIOS.torsoW, torsoH, 0.30), clothMat);
   torso.position.y = legH + torsoH / 2;
   // The vest, a hair proud of the shirt on all sides and stopping short at the shoulders,
   // so the mover's own colour still reads at a glance (§6.4 — you must know which is yours).
-  const vest = new THREE.Mesh(new THREE.BoxGeometry(0.55, torsoH * 0.76, 0.335), visMat);
+  const vest = new THREE.Mesh(box(0.55, torsoH * 0.76, 0.335, 'face'), visMat);
   vest.position.set(0, -torsoH * 0.08, 0);
   torso.add(vest);
   g.add(torso);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), mat(skin));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
   head.position.y = legH + torsoH + headR * 0.95;
   g.add(head);
 
   // A cap: crown plus peak. The PEAK is the facing tell — it points -Z, matching
   // forwardFlat() at yaw 0, exactly as the nose cone it replaces did.
   const crown = new THREE.Mesh(
-    new THREE.SphereGeometry(headR * 1.04, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.52), mat(cloth));
+    new THREE.SphereGeometry(headR * 1.04, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.52), clothMat);
   crown.position.set(0, headR * 0.12, 0);
   head.add(crown);
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(headR * 1.5, headR * 0.16, headR * 0.95), mat(cloth));
+  const nose = new THREE.Mesh(box(headR * 1.5, headR * 0.16, headR * 0.95), clothMat);
   nose.position.set(0, headR * 0.16, -headR * 1.05);
   head.add(nose);
 
   const mkArm = (sx) => {
-    const a = new THREE.Mesh(new THREE.BoxGeometry(0.13, torsoH * 0.95, 0.15), mat(skin));
+    const a = new THREE.Mesh(box(0.13, torsoH * 0.95, 0.15), skinMat);
     a.position.set(sx * 0.335, legH + torsoH * 0.52, 0);
     // Short sleeve over the top third.
-    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.15, torsoH * 0.34, 0.17), mat(cloth));
+    const sleeve = new THREE.Mesh(box(0.15, torsoH * 0.34, 0.17), clothMat);
     sleeve.position.set(0, torsoH * 0.30, 0);
     a.add(sleeve);
     g.add(a);
@@ -99,7 +143,7 @@ export function makeBlockout(clothColour) {
   // Hand markers, in the reference lime. §6.1 gives each hand its own grip, so seeing
   // where the hands are matters from Phase 2 onward — cheap to put in now.
   const mkHand = (sx) => {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.13), mat(hi));
+    const h = new THREE.Mesh(box(0.13, 0.13, 0.13), handMat);
     h.position.set(sx * 0.335, legH + torsoH * 0.10, 0);
     g.add(h);
     return h;
@@ -107,6 +151,7 @@ export function makeBlockout(clothColour) {
   const handL = mkHand(-1), handR = mkHand(1);
 
   // Pivot the limbs from their TOP, so a swing reads as a hinge rather than a slide.
+  // These are CLONES (see `box` above), so the translate never reaches the shared cache.
   for (const [m, h] of [[legL, legH], [legR, legH]]) {
     m.geometry.translate(0, -h / 2, 0);
     m.position.y = legH;

@@ -23,10 +23,13 @@ watch it come off the ground — or press F2 and have someone else grab it.
 > press it (§4.4), straps are drawn (§10.3), and the contract ends on a settlement screen you
 > can replay from (§15.2).
 >
-> **It also looks like a game now, with a chosen art direction** — TOY: rounded chunky
-> geometry, saturated colour, hard warm light, a crew with toy proportions whose arms reach
-> to what they are holding. Picked from three in-engine options; `?style=cel` and
-> `?style=film` remain live if you want to see the roads not taken.
+> **It also looks like a game now.** The art direction is Overcooked's — chunky rounded
+> geometry, saturated colour, hard warm light — with the crew's own toy proportions kept
+> (not the stubby ones). Phase 15 gave it a material library (forty kinds, each with its own
+> texture, relief and light response), variance shadows, baked and contact occlusion, and
+> a post-processing chain over the backbuffer: bloom off the pendants, a warm grade and a
+> seat-local vignette. `?post=off`, `?shadows=pcf`, `?style=cel` and `?style=film` are
+> live for the comparisons.
 >
 > **And two people can play it.** Press **F2** for split-screen local co-op: P1 on WASD and
 > the mouse, P2 on the arrow keys or the first controller plugged in. §6.4's two-mover
@@ -142,20 +145,29 @@ GDD §25.2 defines a 13-phase roadmap.
 Plus four increments that are not on the roadmap. **The playable layer** gave phases 6–10 the
 input bindings and HUD each of them had deferred. **Local co-op** gave §6.4's second pair of
 hands to a second person. **The art pass** dressed a build that §20.4 had deliberately kept
-diagnostic for twelve phases. **The toy pass** committed that dressing to a direction. None of them is §25.2's Phase 11 — that one is the playtest,
-it is next, and the last two are what make it possible to run with strangers.
+diagnostic for twelve phases. **The toy pass** committed that dressing to a direction, and
+**the Overcooked overhaul** (Phase 15) made it a look: a material library instead of tinted
+Lambert, post-processing, variance shadows, contact occlusion. None of them is §25.2's
+Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
+to run with strangers.
 
-**857 assertions across fourteen suites, all passing.**
+**893 assertions across fourteen suites, all passing** — plus a GPU-only suite that the
+software harness cannot run, for the paths the tier strips there.
 
-![The toy pass](docs/phase14-look.png)
+![The Overcooked overhaul](docs/phase15-look.png)
 
-Two movers carrying a couch, all four arms reaching to it — the game's thesis in one image.
-The art direction is **TOY**, chosen from three photographed options (`?style=cel` and
-`?style=film` stay live for the comparison): rounded chunky geometry everywhere, saturated
-colour, hard warm light, and crew with toy proportions whose hands sit on their actual grip
-points. The couch is still exactly 2.10 m and still will not fit the 32" door — every rounded
-prefab is measured against its own collider to the millimetre (m13 A1), because §13.4's
-collision-faithful rule outranks any art direction.
+The pickup house through the post chain. Every surface names a material kind — plaster,
+shingle, siding, glass, grass, asphalt, card, walnut, hi-vis — and each kind has its own
+albedo texture, relief and light response, which is the direct answer to "everything reads
+as different colours of the same texture" (m13 G4 asserts no two kinds share an image).
+The crew keeps its toy proportions, pinned by test (G7). The couch is still exactly 2.10 m
+and still will not fit the 32" door — every rounded prefab is measured against its own
+collider to the millimetre (m13 A1), because §13.4's collision-faithful rule outranks any
+art direction.
+
+![Inside, and in co-op](docs/phase15-interior.png)
+
+![The thirteen headline material kinds](docs/phase15-materials.png)
 
 An art pass is the most dangerous change this project can make, because its mistakes are
 invisible to every test that came before it — so `m13` measures the boundary between what you

@@ -161,4 +161,4 @@ M.overlay.el.hidden = true;
 if (M.title) { M.title.start(); M.title.el.hidden = true; }
 
 M.syncSize();
-M.renderer.render(M.world.scene, M.camera);
+M.present(M.camera);

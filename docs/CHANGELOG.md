@@ -3,6 +3,81 @@
 Required by GDD §25.1. One entry per increment, newest first. Each entry states the
 behaviour hypothesis, what it touched, and what was checked.
 
+## Phase 15 — the Overcooked overhaul — 2026-09-04
+
+Not a §25.2 roadmap gate; the user's brief before the next milestones: *"the art style of
+Overcooked, but with the body proportions we have now — a post-processing run, shading,
+lighting and shadows, and everything should have different textures rather than reading as
+different colours of the same texture."* No external assets. Three.js stays r128 core.
+
+The whole thing was built by a design panel (four proposals, three judges) and four
+file-owned implementers each adversarially reviewed against a written contract, with the
+orchestrator integrating afterwards. What follows is what shipped, and the numbers.
+
+### What changed
+
+**A material library instead of tinted Lambert.** `src/render/materials.js` (new) defines
+forty `KINDS` — plaster, walnut, boards, card, fabric, steel, paint, glass, grass, asphalt,
+denim, hi-vis and the rest — each a row of specular colour, shininess, relief (bump or
+normal from a paired height canvas), environment reflection and a fresnel rim. Every material
+in the scene is built through `surface(kind, colour, opts)` and carries `userData.kind`.
+The texture layer (`textures.js`) mints an albedo AND a paired height canvas AND, where the
+row asks, a specular mask in one `texSet()` call; `heightFor()`/`specFor()` look them up by
+image so tiled clones still find their relief. A shared `onBeforeCompile` patch adds the
+rim to the Phong shader once (one program per feature set — 32 on the GPU tier, 9 in software).
+
+**Post-processing over the backbuffer.** `post.js` (new): after the seats are rendered,
+`copyFramebufferToTexture` lifts the finished, MSAA-resolved frame into a texture and four
+passes run — bright + 4× downsample, blur H, blur V, composite (bloom, warm grade with lift
+and gain, seat-local vignette, ordered dither, divider gap in the configured colour). No
+scene render target, so the antialiasing is kept. Bulbs are the bloom sources; the sky is
+tone-mapped so it never blooms (bright-pass fraction measured at 0.00 % outdoors).
+`present.js` (new) is the ONE render entry point: shadow maps once per frame, every seat,
+then post. All 17 tools that called `renderer.render()` directly now go through it.
+
+**Shadows.** Variance shadow maps on the GPU tier (soft, no acne); PCFSoft in software.
+`shadowMap.autoUpdate` is off and `present()` raises `needsUpdate` once per frame, so co-op
+renders every map once instead of once per seat — proven structurally (G9c: a co-op frame
+costs less than a solo frame plus one seat).
+
+**Contact occlusion without SSAO.** Baked vertex AO on every rounded prefab (a `color`
+attribute; m13 G3 pins the black-attribute trap), AO skirts along wall feet, and
+`contactBlobs.js` (new): a soft dark quad under every mover and object, placed by a Rapier
+ray each frame, fading with lift so a carried box has no shadow on the floor.
+
+**Geometry.** Rounded boxes measured and rescaled to exactly their collider size (m13 A1-A7
+still hold, to the millimetre), 'face' UVs for stencils and 'tile' UVs in metres for grain,
+tape as real strips inside the box, 36 skirting boards, plank floors as merged geometry with
+per-plank colour, pendants in every room. Tools are prefabs now too (`buildToolVisual`).
+
+**Characters.** `BODY_RATIOS` pinned and tested (G7) — the toy proportions stay; Overcooked's
+stubby figures were explicitly refused. Hi-vis with a paired specular mask, denim, skin and
+cloth kinds.
+
+### Numbers (software tier, the gate)
+| | software tier (the gate, SwiftShader) | GPU tier (`probe.ps1`, `?tier=gpu`) |
+|---|---|---|
+| suites | 14 suites, **893 assertions**, all passing (m13 now 71, section G is 33 of them) | `m13g-gpu.js`: 31 assertions, all passing |
+| scene meshes | 495 | 495 |
+| one seat's draw calls | 242 | 316 |
+| whole solo frame (every shadow map + seat + post) | 728 | 1608 |
+| whole co-op frame | 931 — less than 728 + 242, so the maps render once | 1855 — less than 1608 + 316 |
+| shader programs | 9 | 33 |
+| shadow type | PCFSoft, sun only, 1024 map | VSM, sun + rooms, 2048 map |
+| outdoor frame, post on vs off | — | p95 luminance 0.81 vs 0.86; pixels over the bloom threshold 0.13 % vs 4.26 %; sky-band pixels over it 0.00 % vs 14.05 % — the grade keeps the clouds under the threshold, the bright pass lets through 0.000 % of texels outdoors and lights only the pendants |
+| post chain | not constructed | 4 passes, quarter-res bloom targets, 0 textures allocated per warm frame |
+| contact blobs | not constructed | 25 visible, all 4–60 mm above their floor |
+
+### The reviews earned their keep
+- G4 as first written compared material *parameters*; it would have failed on card, boards,
+  plaster and walnut, which the library separates by texture. It now asserts the direct claim:
+  no two kinds share an albedo image.
+- G6a demanded a tile u-range exact to 1e-3; the bevel projection is short by up to 0.586 r
+  per edge (measured 4.1876 vs 4.2000). One-sided band now.
+- Draw-call assertions with `info.autoReset` on read only the LAST render — the composite quad.
+- The blob probe read `hit.toi`; Rapier 0.20 says `timeOfImpact`. Every blob was NaN-hidden.
+- The post chain reports 0x0 until its first capture; the suite read `info()` too early.
+
 ## Phase 14 — the toy pass — 2026-08-25
 
 **Gate:** not a §25.2 roadmap phase. "Make it look much better" forked three ways —

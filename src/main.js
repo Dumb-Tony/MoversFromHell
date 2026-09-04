@@ -52,9 +52,16 @@ import { TitleScreen } from './ui/titleScreen.js';
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
-import { detectRenderTier } from './render/lighting.js';
+import { detectRenderTier, shadowMapTypeFor } from './render/lighting.js';
 import { styleFromLocation, applyStyle } from './render/styles.js';
-import { BUILD, MOVERS, COOP, RENDER } from './config.js';
+/* Phase 15 — the Overcooked overhaul. The four modules below are the render side of it;
+ * main.js owns only the tier decision, the post/blob construction and the one present(). */
+import { setRenderTier } from './render/textures.js';
+import { createPost, postModeFromLocation } from './render/post.js';
+import { present } from './render/present.js';
+import { ContactBlobs } from './render/contactBlobs.js';
+import { updateRimCamera } from './render/materials.js';
+import { BUILD, MOVERS, COOP, RENDER, PLAYER } from './config.js';
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -71,6 +78,14 @@ async function boot() {
   /* Quality tier before the scene, because it decides how many shadow maps get built. See
    * detectRenderTier — shadow passes are ~100x more expensive in software than lights are. */
   const renderTier = detectRenderTier(renderer);
+  /* The texture and material libraries read the tier too, and they must know it BEFORE the
+   * scene is built: on the software tier they mint no height/spec canvases, no bump, no env,
+   * no rim — the difference between a 4 s suite and a 600 s one (measured, Phase 13). */
+  setRenderTier(renderTier);
+  /* VSM on a GPU, PCFSoft on the software tier (?shadows=pcf forces PCF for an A/B). Shadow
+   * maps are scheduled by present() ONCE per frame rather than once per seat. */
+  renderer.shadowMap.type = shadowMapTypeFor(THREE, renderTier);
+  renderer.shadowMap.autoUpdate = false;
   const world = buildScene(renderTier);
 
 
@@ -457,6 +472,50 @@ async function boot() {
   const styleMode = styleFromLocation();
   const styled = styleMode ? applyStyle(styleMode, world, renderer) : { postRender: null };
 
+  /* ---- Phase 15: post chain and contact blobs — GPU tier only ----------------------------
+   * The post chain reads the finished backbuffer (copyFramebufferToTexture — no scene render
+   * target, MSAA kept) and composites bloom, grade and a seat-local vignette. It yields to a
+   * style mock's own postRender and to ?post=off. Blobs are the soft contact darkening under
+   * every mover and object, placed by a Rapier ray each frame. Neither exists in software. */
+  const post = (renderTier === 'gpu' && RENDER.post.enabled && postModeFromLocation() !== 'off' && !styled.postRender)
+    ? createPost(renderer, THREE, RENDER.post) : null;
+  const blobs = renderTier === 'gpu' ? new ContactBlobs(THREE, world.scene, RENDER.look.blob) : null;
+  /* Ground height under (x, z): a ray straight down with the source's own collider excluded,
+   * so a blob never rides the object it belongs to. Same call shape as the mantle probes. */
+  const blobProbe = (x, y, z, exclude) => {
+    const hit = physics.world.castRay(new R.Ray({ x, y, z }, { x: 0, y: -1, z: 0 }),
+                                      RENDER.look.blob.rayMax, true, undefined, undefined, exclude || undefined);
+    return hit ? y - hit.timeOfImpact : null;   // Rapier 0.20: timeOfImpact, never .toi (grip.js, controller.js agree)
+  };
+  const blobSources = () => {
+    const out = [];
+    for (const m of movers) {
+      const p = m.controller.position;   // feet-level
+      out.push({ x: p.x, y: p.y, z: p.z, yaw: m.rig.yaw, sx: PLAYER.radius * 2, sz: PLAYER.radius * 2,
+                 bottomY: p.y, disc: true, exclude: m.controller.collider });
+    }
+    for (const e of registry.entities.values()) {
+      if (!e.mesh || !e.def) continue;
+      const d = e.def.dimensions;
+      /* Read the BODY, not the mesh: the mesh is synced once per render frame, and a probe
+       * that runs before that sync (a suite, a shot) reads meshes still at the origin — five
+       * blobs at y = -d.y/2 + 0.02, measured (m13g H9). The body is the physics truth at any
+       * moment. Its bottom under the CURRENT rotation: the y-extent of a rotated cuboid is the
+       * absolute second row of the rotation times the half-extents; from a quaternion that
+       * row is (2(xy − wz), 1 − 2(x² + z²), 2(yz + wx)). */
+      const t = e.body.translation(), r = e.body.rotation();
+      const r10 = 2 * (r.x * r.y - r.w * r.z), r11 = 1 - 2 * (r.x * r.x + r.z * r.z), r12 = 2 * (r.y * r.z + r.w * r.x);
+      const halfY = Math.abs(r10) * d.x / 2 + Math.abs(r11) * d.y / 2 + Math.abs(r12) * d.z / 2;
+      const yaw = Math.atan2(2 * (r.w * r.y + r.x * r.z), 1 - 2 * (r.y * r.y + r.z * r.z));
+      out.push({ x: t.x, y: t.y, z: t.z, yaw, sx: d.x, sz: d.z, bottomY: t.y - halfY, exclude: e.collider });
+    }
+    return out;
+  };
+  /* Compile every program once at boot so the first frame does not stall on forty material
+   * variants, and so materials.js's rimAnchorFound bookkeeping is settled before any probe
+   * reads it. Tens of milliseconds on a GPU; skipped in software, where it is ~12 s. */
+  if (renderTier === 'gpu') renderer.compile(world.scene, movers[0].camera);
+
   const overlay = new DebugOverlay(ui, game);
   /* One HUD per SEAT, built up front rather than on join: creating DOM at the moment a
    * player presses F2 means the first co-op frame is the one that also does a layout, and
@@ -776,13 +835,14 @@ async function boot() {
     }
     for (let s = 0; s < seatCount; s++) huds[s].tickNotices();
 
-    if (styled.postRender && seatCount === 1) {
-      // The film grade is single-viewport for the mock; split-screen grading is part of
-      // the real build if this direction wins.
+    const seatList = Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));
+    if (blobs) blobs.update(blobSources(), blobProbe, seatList.map((m) => m.camera));
+    if (styled.postRender && seatCount === 1 && !post) {
+      // A style mock owns the frame (the film grade is single-viewport by design).
       styled.postRender(renderer, world.scene, moverOfSeat(0).camera);
     } else {
-      renderSeats(renderer, world.scene,
-                  Array.from({ length: seatCount }, (_, s) => moverOfSeat(s)), rects);
+      // THE one render entry point (present.js): shadow maps once, every seat, then post.
+      present(renderer, world.scene, seatList, rects, post, updateRimCamera);
     }
     overlay.update(frameMs, {
       bodies: physics.stats.bodies,
@@ -812,6 +872,18 @@ async function boot() {
     physics, registry, movers, tools, straps, cargo,
     /* Seat controls, so a suite can seat a second player without a keyboard. */
     setSeats, layoutFor, divider,
+    /* Phase 15. present() renders the live seats through the post chain exactly as the loop
+     * does; with a camera it renders that camera full-frame instead (the shot scripts). Every
+     * tool that used to call renderer.render() directly goes through here now, because a
+     * direct render draws a shadowless, ungraded frame with no error. */
+    renderTier, post, blobs,
+    present: (cam) => {
+      const w = canvas.clientWidth || 0, h = canvas.clientHeight || 0;
+      const list = cam ? [{ camera: cam }] : Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));
+      const rs = layoutFor(cam ? 1 : seatCount, w, h);
+      if (blobs) blobs.update(blobSources(), blobProbe, list.map((m) => m.camera));
+      return present(renderer, world.scene, list, rs, post, updateRimCamera);
+    },
     get seatCount() { return seatCount; },
     seatInput: (s) => seatInputs[s],
     moverOfSeat, seatOfMover,

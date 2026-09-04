@@ -138,4 +138,4 @@ panel.innerHTML =
 document.getElementById('ui').appendChild(panel);
 
 M.syncSize();
-M.renderer.render(M.world.scene, M.camera);
+M.present(M.camera);

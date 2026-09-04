@@ -571,3 +571,34 @@ solver since Phase 4 — this is the first time the bodies agree.
 **Still unanswered:** whether the toy read survives the DRIVE, where the camera sits far
 back and the rounded edges subtend a pixel. The direction was chosen on carrying scenes;
 the route needs its own look at.
+
+## Phase 15 — the Overcooked overhaul — 2026-09-04
+
+**What to look at.** Stand on the driveway and look at the house: siding, shingles, plaster
+and glass should read as four different *materials*, not four colours. Walk inside: the
+plank floor has grain and per-plank tone, the skirting is a real board, the pendants glow
+(the only thing that blooms — the sky never does), and every box and couch has a soft dark
+patch under it that fades as you lift it. Carry a box to a window and turn: the cardboard's
+face stencil stays centred and the tape catches the light differently from the card.
+
+**The crew.** Same proportions as Phase 14 — pinned in a test now — with hi-vis that
+glints, denim that doesn't, and hands that still land on the grip points.
+
+**A/B switches worth trying** (all URL queries):
+- `?post=off` — the raw frame. Bloom, warm grade, lift and vignette gone; this is what the
+  toy pass looked like with the new materials.
+- `?shadows=pcf` — hard-edged PCF instead of variance shadows.
+- `?tier=software` — what the test harness sees: no bump, no env, no rim, no blobs, no post.
+
+**Watch for (first playtest of this look):**
+- Any surface that still reads as flat colour — paint on the truck is *meant* to (gloss + env
+  is its texture); anything else is a missing kind.
+- Blob placement on the porch steps and the ramp (a ray straight down; sloped floors are
+  the edge case).
+- Rim light on the far side of a mover in co-op — the rim tracks each seat's camera; if one
+  half looks rimless, the per-seat hook is not firing.
+- Frame time on a real GPU: the frame is ~1600 draw calls solo with every shadow map, blob and post pass; the
+  harness cannot measure time, only the player can.
+
+**Not tested yet:** Firefox and Safari (post chain self-disables on a GL error; Safari
+textures are crisper for lack of `ctx.filter`).
