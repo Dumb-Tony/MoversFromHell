@@ -37,7 +37,9 @@ export function createRenderer(canvas) {
    * or they get double-corrected and go pale — see `canvasTex`. */
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.16;   // the toy direction's exposure (2026-08-25)
+  // Phase 15: derived in RENDER.look so a lit white lands ~0.93 sRGB, unclipped, under the
+  // bloom threshold. createRenderer still owns no render targets (m0 G17-G22's 0x0 probe).
+  renderer.toneMappingExposure = RENDER.look.exposure;
   renderer.physicallyCorrectLights = false;
 
   const camera = new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);

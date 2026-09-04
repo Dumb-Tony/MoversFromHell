@@ -12,7 +12,8 @@ param(
   [int]$Width    = 1600,
   [int]$Height   = 900,
   [int]$Port     = 8388,
-  [string]$Query = ""     # extra query params for the page, e.g. "style=toy"
+  [string]$Query = "",    # extra query params for the page, e.g. "style=cel"
+  [int]$Budget   = 12000   # --virtual-time-budget ms; the post chain on SwiftShader needs headroom
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -61,7 +62,7 @@ $profileDir = Join-Path $env:TEMP ("abc-shot-" + [System.Guid]::NewGuid().ToStri
 Start-Process $chrome -ArgumentList `
   "--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check",
   "--user-data-dir=$profileDir","--window-size=$Width,$Height",
-  "--hide-scrollbars","--virtual-time-budget=8000",
+  "--hide-scrollbars","--virtual-time-budget=$Budget",
   "--screenshot=$outPath",$shotUrl -NoNewWindow -Wait
 
 if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }

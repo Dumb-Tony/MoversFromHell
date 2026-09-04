@@ -111,11 +111,8 @@ function applyCel(THREE, world) {
   });
   for (const [o, hull] of outlines) o.add(hull);
 
-  // Flat cartoon light: one sun for the band split, bright even fill, no moody corners.
-  world.sun.intensity = 1.1;
-  world.hemi.intensity = 0.75;
-  world.ambient.intensity = 0.25;
-  for (const s of world.roomLights || []) s.intensity *= 0.7;
+  // Phase 15: the rig is LIGHTING's (lighting.js). A variant restyles materials only, so
+  // flipping ?style= no longer moves lights the photometry was derived against.
   return { postRender: null };
 }
 
@@ -170,16 +167,9 @@ function applyFilm(THREE, world, renderer) {
   quadScene.add(new THREE.Mesh(tri, gradeMat));
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-  /* The first grade dropped the sun AND crushed with a low-pivot contrast, and the mock
-   * photographed as dusk — a broken render, not a direction. The light stays near stock;
-   * the grade is the difference. */
-  world.sun.intensity = 1.12;
-  /* The sun stays at its stock position. Lowering it to (19,13,13) for "golden hour" threw
-   * the truck's shadow across the entire mid-frame at the game's main camera angle — the
-   * mock photographed as a power cut, and the grade got the blame. */
-  world.hemi.intensity = 0.44;
-  world.ambient.intensity = 0.15;
-  for (const s of world.roomLights || []) s.intensity *= 1.1;
+  /* Phase 15: SUPERSEDED by src/render/post.js, the shipping post chain (backbuffer capture,
+   * bloom, grade, seat-local vignette). This RT-based single-viewport grade stays only so the
+   * rejected "film" direction remains photographable; it no longer touches the light rig. */
 
   return {
     postRender(r, scene, camera) {

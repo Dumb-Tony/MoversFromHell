@@ -69,7 +69,13 @@ export function applyAspect(camera, rect) {
  * like the pixel-ratio bug above, reads as "co-op does not work" rather than as a GL state
  * mistake.
  */
-export function renderSeats(renderer, scene, seats, rects) {
+export function renderSeats(renderer, scene, seats, rects, beforeSeat) {
+  /* SHADOW MAPS ONCE PER FRAME (Phase 15). main.js sets renderer.shadowMap.autoUpdate =
+   * false, so the maps are rendered only where needsUpdate is raised — here, at the top of
+   * the seat loop, which means co-op renders every map ONCE rather than once per seat as it
+   * did before (and the VSM blur passes are paid once). Raised here rather than only in
+   * present() so any legacy caller of renderSeats keeps its shadows. */
+  renderer.shadowMap.needsUpdate = true;
   const multi = seats.length > 1;
   renderer.setScissorTest(multi);
   for (let i = 0; i < seats.length; i++) {
@@ -77,6 +83,9 @@ export function renderSeats(renderer, scene, seats, rects) {
     if (!r || r.w <= 0 || r.h <= 0) continue;
     renderer.setViewport(r.x, r.y, r.w, r.h);
     if (multi) renderer.setScissor(r.x, r.y, r.w, r.h);
+    // Per-seat hook: the fresnel rim's shared view-space "up" is a property of the camera
+    // rendering THIS seat, so materials.js updates it here, not once per frame.
+    if (beforeSeat) beforeSeat(seats[i].camera, r);
     renderer.render(scene, seats[i].camera);
   }
   renderer.setScissorTest(false);
