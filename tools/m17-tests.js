@@ -717,6 +717,32 @@ lines.push('--- Q6. localStorage accessor throwing → the sheet, the questions 
   try { back = !!window.localStorage; } catch (e) { back = false; }
   ok('Q6d the store is back', back);
 }
+emit('M24...');
+
+/* ── M24. §21.2's reveal is OFF on the harness page: show() is the final state at once ────
+ * Phase 11 build-side M24 animates the sheet's major lines on wall time (invoiceScreen.js);
+ * on `_smoketest-<port>.html` it is off unless a suite asks (m31 V1), so every Q-series line
+ * above reads the sheet the instant settle() returns — pinned here, beside them. */
+lines.push('--- M24. the reveal is off here: the sheet is final the instant settle() returns (m31 V3) ---');
+{
+  eq('M24-R1 invoiceScreen.revealEnabled is false on the harness page', M.invoiceScreen.revealEnabled, false);
+  if (!M.invoiceScreen.visible) { drainNotices(); M.settle(); }
+  const sh = sheet();
+  eq('M24-R2 nothing is revealing after settle()', M.invoiceScreen.revealing, false);
+  const bd = sh.querySelector('.breakdown');
+  ok('M24-R3 the breakdown is open at once', !!bd && bd.hidden === false);
+  const ml = [...sh.querySelectorAll('.majors .mline')];
+  ok('M24-R4 every major line is visible with its final amount (the last is PROFIT/LOSS)',
+     ml.length >= 2 && ml.every((el) => !el.hidden && el.querySelector('.mamt').textContent.replace('−', '-') === (Number(el.dataset.final) < 0 ? '-' : '') + Math.abs(Number(el.dataset.final)).toFixed(2)) &&
+     ml[ml.length - 1].dataset.major === 'profit',
+     ml.map((el) => `${el.dataset.major}:${el.hidden}:${el.querySelector('.mamt').textContent}`).join(' '));
+  ok('M24-R5 the \'What happened\' recap block is on the sheet, above the stats and the form',
+     !!sh.querySelector('.recap') && !!(sh.querySelector('.recap').compareDocumentPosition(sh.querySelector('.stats')) & Node.DOCUMENT_POSITION_FOLLOWING));
+  ok('M24-R6 Q1e still holds: .stats, then the form, then the replay button, all inside the sheet',
+     (() => { const s = sh.querySelector('.stats'), f = sh.querySelector('form.questionnaire'), r = sh.querySelector('[data-act=replay]');
+       return !!s && !!f && !!r && !!(s.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+         !!(f.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) && !!f.closest('.sheet'); })());
+}
 emit('perf...');
 
 /* ── P. the recorder inside the fixed step ────────────────────────────────── */

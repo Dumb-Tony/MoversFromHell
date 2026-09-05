@@ -500,7 +500,8 @@ export const OBJECT_DEFS = Object.freeze({
     centerOfMassOffset: { x: 0, y: 0, z: 0 },
     physics: { friction: 0.55, restitution: 0.02, linearDamping: 0.16, angularDamping: 0.7 },
     grip: { forceMult: 0.96, surface: 'wood' },
-    fragility: 'normal',
+    // 'sturdy' (M23): a stock door dropped 1.5 m is marked, not totalled — DAMAGE.fragility.
+    fragility: 'sturdy',
     replacementValue: DOOR.replacementValue,
     surfaceTags: ['wood', 'fixture'],
     tags: ['fixture', 'flat', 'door'],

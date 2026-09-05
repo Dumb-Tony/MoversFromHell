@@ -609,6 +609,29 @@ lines.push('--- Z. integration ---');
   void R;
 }
 
+/* ── M23 (Phase 11 build-side): the door-frame surface kind, as data ─────────────
+ * M14 reserved 'doorLeaf_' in the allow-list for the hinge brute-force branch; M23 filled it
+ * as `door_frame_<doorId>` — the frame of a hung leaf, priced by fixed charges (surfaces.js
+ * surfaceRow), read from the leaf's side of the narrow phase (damage.js _strainFrames). The
+ * physics is tools/m30-force-tests.js; this pins the table the walls share with it. */
+lines.push('--- M23. the door_frame surface kind (GDD §8.3, §3.3) ---');
+{
+  const { doorFrameTag, doorIdOf, isDoorFrameTag, surfaceRow, DOOR_FRAME_KIND } = await import('../src/damage/surfaces.js');
+  const tag = doorFrameTag('living_kitchen');
+  eq('M23-PD1 doorFrameTag(living_kitchen) is door_frame_living_kitchen', tag, 'door_frame_living_kitchen');
+  ok('M23-PD1 …billable, a door-frame tag, and doorIdOf round-trips', billable(tag) && isDoorFrameTag(tag) && doorIdOf(tag) === 'living_kitchen');
+  ok('M23-PD1 …\'doorLeaf_\' is no longer reserved: the old placeholder prefix is free', !billable('doorLeaf_living_kitchen'));
+  eq('M23-PD2 labelFor names the door by its room', labelFor(tag), 'kitchen door');
+  const row = surfaceRow(tag), wall = surfaceRow('wall');
+  ok('M23-PD3 surfaceRow: the frame is the one §8.3 row with fixed charges {bent, forced} = DAMAGE.property.doorFrame; a wall keeps the default row',
+     row.kind === DOOR_FRAME_KIND && row.charges.bent === P.doorFrame.chargeBent && row.charges.forced === P.doorFrame.chargeForced && wall.charges === null && wall.kind === null,
+     `${JSON.stringify(row)} / ${JSON.stringify(wall)}`);
+  ok('M23-PD4 a hung leaf is an ENTITY collider, not a static: physics.tagOf answers null and the walls\' attribution never bills it (the frame pass does)',
+     M.doors.leaves().every((e) => physics.tagOf(e.collider) === null));
+  ok('M23-PD5 every property line this suite wrote is a wall/header/truck line — none a door frame (nothing here touched a leaf)',
+     prop().every((l) => !isDoorFrameTag(l.surfaceId)));
+}
+
 } catch (e) {
   fails++;
   lines.push(`FAIL  suite threw  <- ${e && e.message}`);

@@ -210,6 +210,9 @@ export const CUES = Object.freeze({
       scuffed:   { caption: 'wall scuffed',      parts: [[700, 380, 0.08, 'triangle', 0.14]], noise: [0.05, 900, 0.22] },
       dented:    { caption: 'wall dented',       parts: [[420, 160, 0.14, 'square', 0.22]], noise: [0.08, 600, 0.28] },
       holed:     { caption: 'wall holed',        parts: [[260, 70, 0.30, 'sawtooth', 0.30], [120, 40, 0.40, 'triangle', 0.20, 0.03]], noise: [0.12, 500, 0.34] },
+      // M23: a door FRAME's two states (damage.js _strainFrames) — the hinges creak, then go.
+      bent:      { caption: 'door frame bent',   parts: [[300, 220, 0.18, 'sawtooth', 0.18], [180, 90, 0.16, 'triangle', 0.14, 0.06]], noise: [0.06, 700, 0.20] },
+      forced:    { caption: 'door forced',       parts: [[240, 60, 0.32, 'sawtooth', 0.32], [900, 300, 0.10, 'square', 0.18, 0.02], [110, 45, 0.45, 'triangle', 0.24, 0.05]], noise: [0.14, 1100, 0.34] },
       _:         { caption: 'damage',            parts: [[1100, 400, 0.10, 'square', 0.16]] },
     },
   },
@@ -268,6 +271,10 @@ export const CUES = Object.freeze({
     variants: {
       removed: { caption: 'door off its hinges', parts: [[820, 980, 0.05, 'square', 0.14], [820, 980, 0.05, 'square', 0.14, 0.09], [140, 70, 0.22, 'triangle', 0.26, 0.30]] },
       rehung:  { caption: 'door back on',        parts: [[980, 820, 0.05, 'square', 0.14], [520, 300, 0.07, 'square', 0.16, 0.10]] },
+      // M23: torn off its hinges by a shove (damage.js _forceLeaf). The boot-time 'hung'
+      // announcement carries `silent: true` and never reaches the queue (_onEvent).
+      forced:  { caption: 'door forced',         parts: [[160, 50, 0.30, 'sawtooth', 0.30], [700, 200, 0.12, 'square', 0.16, 0.03]], noise: [0.12, 900, 0.30] },
+      hung:    { caption: 'door on its hinges',  parts: [[820, 980, 0.05, 'square', 0.10]] },
       _:       { caption: 'door',                parts: [[600, 600, 0.06, 'square', 0.10]] },
     },
   },
@@ -457,6 +464,10 @@ export class GameAudio {
 
   _onEvent(e) {
     if (!this.enabled) return;
+    /* An event stamped `silent: true` is bookkeeping for the run record, not a happening:
+     * main.js's boot-time DOOR_STATE 'hung' (M23), which would otherwise caption 'door on
+     * its hinges' four times over after START. No sound, no caption. */
+    if (e && e.silent === true) return;
     if (this.queue.length >= AUDIO.maxVoices) { this.stats.droppedQueue++; return; }
     this.queue.push(e);
   }

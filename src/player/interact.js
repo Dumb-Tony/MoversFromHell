@@ -342,9 +342,10 @@ export class InteractionSystem {
         if ((e.state.removedParts || []).length) {
           return { primary: null, secondary: this._partLabel(e), target: t };
         }
-        // A leaf off its hinges, within reach of its jamb: Q hangs it back (§8.2 "reattach").
+        // A leaf off its hinges, within reach of its jamb: Q hangs it back (§8.2 "reattach") —
+        // or says the doorway is blocked (M23), and does nothing, like the M12 refusal.
         if (isLeaf(e) && this._atJamb(e)) {
-          return { primary: null, secondary: DOOR_REHANG_LABEL, target: t,
+          return { primary: null, secondary: this._doorwayBlocked(e) ? DOOR_BLOCKED_LABEL : DOOR_REHANG_LABEL, target: t,
                    hint: `${label(e)} — hold {gripL}/{gripR} to carry` };
         }
         /* DEVICE-NEUTRAL. The grips are LMB/RMB for seat 0's mouse, [ ] for seat 1's
@@ -436,6 +437,35 @@ export class InteractionSystem {
     return Math.hypot(t.x - h.x, t.z - h.z) <= DOOR.rehangRange;
   }
 
+  /** Is something standing where this leaf would hang (M23; KNOWN_ISSUES M11 "rehanging
+   *  into an occupied doorway")? A shape query through the physics world with the hung
+   *  pose's box — house.js's AABB shape at state.home, shrunk by DOOR.occupancyMargin so the
+   *  floor it stands on, the jamb it sits flush against and the header do not count — and
+   *  anything but the leaf's own body inside it blocks: a box, a piece, a tool, a MOVER (the
+   *  capsules are colliders too). One place, so the prompt and Q agree; the reset's
+   *  rehangAll never asks, because a reset teleports everything home. */
+  _doorwayBlocked(entity) {
+    const st = entity.state;
+    const home = st.home;
+    const R = this.physics && this.physics.R;
+    const world = this.physics && this.physics.world;
+    if (!home || !R || !world || typeof world.intersectionsWithShape !== 'function') return false;
+    const L = DOOR.leaf, m = DOOR.occupancyMargin;
+    // The hung leaf stands axis-aligned: its yaw is a multiple of a quarter turn (leafPose).
+    const alongZ = Math.abs(Math.sin(home.yaw)) < 0.5;   // local z (its length) along world z
+    const hx = (alongZ ? L.t : L.length) / 2 - m;
+    const hz = (alongZ ? L.length : L.t) / 2 - m;
+    const hy = L.height / 2 - m;
+    if (!(hx > 0 && hy > 0 && hz > 0)) return false;
+    let hit = false;
+    try {
+      const shape = new R.Cuboid(hx, hy, hz);
+      world.intersectionsWithShape({ x: home.x, y: home.y, z: home.z }, { x: 0, y: 0, z: 0, w: 1 }, shape,
+        () => { hit = true; return false; }, undefined, undefined, undefined, entity.body);
+    } catch (e) { hit = false; }
+    return hit;
+  }
+
   /** …and what to call it. */
   _undoLabel(entity) {
     if (!entity) return null;
@@ -445,7 +475,8 @@ export class InteractionSystem {
     if (entity.state.blanketId) return 'take the blanket off';
     const part = (entity.state.removedParts || [])[0];
     if (part) return this._partLabel(entity);
-    return this._atJamb(entity) ? DOOR_REHANG_LABEL : null;
+    if (!this._atJamb(entity)) return null;
+    return this._doorwayBlocked(entity) ? DOOR_BLOCKED_LABEL : DOOR_REHANG_LABEL;
   }
 
   _nextPart(entity) {
@@ -662,6 +693,10 @@ export class InteractionSystem {
        * its jamb goes back on its hinges — Fixed again at its home pose, the clear width
        * back to gap − t. Free of charge: the preparation was paid taking it off. */
       if (isLeaf(e) && this._atJamb(e)) {
+        /* M23: something in the doorway — a box, a piece, a mover — and the leaf stays
+         * off. The prompt said 'doorway blocked' (describe), Q says the same, nothing moves:
+         * pinning a Fixed leaf through an occupant was the solver shoving it out (M11). */
+        if (this._doorwayBlocked(e)) return this._say(DOOR_BLOCKED_SAID);
         this.registry.hang(e, e.state.home);
         if (this.bus) {
           this.bus.emit(EVENTS.DOOR_STATE,
@@ -862,6 +897,9 @@ export class InteractionSystem {
  *  suites (m11 DL, m19 D4) can never disagree about the words. */
 export const DOOR_REMOVE_LABEL = 'take the door off its hinges';
 export const DOOR_REHANG_LABEL = 'hang the door back on its hinges';
+/** M23: the Q line and the notice when something stands where the leaf would hang. */
+export const DOOR_BLOCKED_LABEL = 'doorway blocked — clear it to hang the door';
+export const DOOR_BLOCKED_SAID = 'doorway blocked — the door stays off';
 
 /** Is this registry entity one of the house's door leaves? By its state, which main.js
  *  gives every leaf at spawn ({doorId, hung, home, rest} — plain data, §22.4). */

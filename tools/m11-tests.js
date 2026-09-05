@@ -198,6 +198,37 @@ function reset() {
 }
 
 try {
+/* ── M24. the title card's START button and controls list, pinned BEFORE the job starts ──
+ * Phase 11 build-side M24 put §21.2's brief on the title screen. The brief must not move the
+ * one button (m31 B2 reads these same numbers): measured at the harness viewport 1262×624
+ * with --ts 1, before this milestone, on 2026-09-05 — START x 533.63 y 311.42 w 194.75 h 39.00,
+ * the controls list x 282.00 y 398.42 w 698.00 h 96.56. Read here at the top, while the card
+ * is still up (O6 starts the job). */
+lines.push('--- M24. the title card\'s START and controls rects (pinned for m31 B2) ---');
+{
+  const tsWas = document.documentElement.style.getPropertyValue('--ts');
+  document.documentElement.style.setProperty('--ts', '1');
+  const card = document.querySelector('#title-screen .card');
+  void (card && card.offsetHeight);
+  const rect = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect() : null; };
+  const play = rect('#title-screen .play'), cols = rect('#title-screen .cols');
+  const near = (a, b, tol = 0.75) => Math.abs(a - b) <= tol;
+  const atHarness = window.innerWidth === 1262 && window.innerHeight === 624;
+  lines.push(`      viewport ${window.innerWidth}x${window.innerHeight}; START ${play && [play.left, play.top, play.width, play.height].map((v) => v.toFixed(2)).join(' ')}; ` +
+             `controls ${cols && [cols.left, cols.top, cols.width, cols.height].map((v) => v.toFixed(2)).join(' ')}`);
+  ok('M24-T0 the suite reads the title card at the harness viewport (1262×624)', atHarness, `${window.innerWidth}x${window.innerHeight}`);
+  ok('M24-T1 the START button is where it was before the brief: x 533.63 y 311.42 w 194.75 h 39.00 (±0.75)',
+     !!play && near(play.left, 533.63) && near(play.top, 311.42) && near(play.width, 194.75) && near(play.height, 39.00),
+     play && `${play.left.toFixed(2)} ${play.top.toFixed(2)} ${play.width.toFixed(2)} ${play.height.toFixed(2)}`);
+  ok('M24-T2 the controls list too: x 282.00 y 398.42 w 698.00 h 96.56 (±0.75)',
+     !!cols && near(cols.left, 282.00) && near(cols.top, 398.42) && near(cols.width, 698.00) && near(cols.height, 96.56),
+     cols && `${cols.left.toFixed(2)} ${cols.top.toFixed(2)} ${cols.width.toFixed(2)} ${cols.height.toFixed(2)}`);
+  const brief = document.querySelector('#title-screen .brief');
+  ok('M24-T3 the brief is on the title screen, outside the card (a sibling, never inside it)',
+     !!brief && !brief.hidden && !!card && !card.contains(brief));
+  if (tsWas) document.documentElement.style.setProperty('--ts', tsWas); else document.documentElement.style.removeProperty('--ts');
+}
+
 /* ── A. the two verbs exist and are bound (§9.2, §4.2) ───────────────────── */
 lines.push('--- A. the verbs (GDD §9.2, §4.2) ---');
 {

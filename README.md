@@ -151,6 +151,22 @@ paste for docs/PLAYTEST_NOTES.md. It is a static page with no build step, comput
 browser and nowhere else — zero requests beyond its own module imports; every threshold is
 `EVIDENCE` in src/config.js and is printed beside the table, so a reader can disagree with it.
 
+**The job before you start** (Phase 26, M24). The title card carries a job sheet read from the
+contract itself: payout, the time estimate the invoice bills against, the distance, what is in the
+house (by category, with the heaviest thing), every door's clear width with the doors on and the
+one item that does not fit its route intact (the couch — legs off), the road's three events, and
+the profit to beat once you have one. **The invoice reveals itself.** At settlement the major
+lines land one at a time and count up — revenue, labour, damage, fuel, what was left behind, fees,
+then PROFIT or LOSS — and the full breakdown opens under them; Space, a click or any pad button
+skips to the end, `?reveal=off` (or a reduced-motion OS setting) shows the sheet at once. Every
+number is the same either way: the reveal is a curtain over the ledger, never a second sum.
+**What happened** lists the run's own logged events — doors off or forced, legs off, drops, damage
+with its cost, marked walls, road events, callouts — with stamps. **Run it again** keeps your
+settings; tick "keep the tools on the truck" to start the next run with the tools you left in the
+cargo box.
+
+![Phase 26](docs/phase26-brief.png)
+
 **Sound.** The game is synthesised from nothing — no audio files, no fetches. Sound starts on the
 first click or key (the START button counts). Impacts thud by material and speed, a heavy carry
 strains and climbs in pitch as you lose your balance, a dolly's wheels are louder the closer they
@@ -164,8 +180,14 @@ disables the layer entirely.
 (living → kitchen) is 0.82 m wide with its 40 mm leaf hung and 0.86 m with it off; the bedroom
 door 0.87 / 0.91. With the screwdriver, **E** at a hung door takes it off its hinges (45 s of prep
 on the clock) and lays it beside the doorway; **Q** at the leaf hangs it back. A removed door is
-an ordinary 18 kg object: carry it, load it, lose it, break it — and the customer's review says so
-if the front-wall door came off. Replay hangs every door back.
+an ordinary 18 kg object: carry it, load it, lose it, dent it (a stock door survives a 1.5 m fall
+scratched, 14.40, not broken) — and the customer's review says so if the front-wall door came off.
+Or do not bother with the screwdriver (Phase 26, M23): shove something heavy into a hung door and
+its hinges tear out — the couch, both hands, is through in a second — and the FRAME goes on the
+bill as property damage, 140.00 against the screwdriver's 45 s (21.00 of two movers' labour). A
+knock that does not force it bends the frame once (40.00, a mark on the leaf); a box or a mover
+standing where the door hangs blocks hanging it back ("doorway blocked"). Replay hangs every door
+back.
 
 **Loose parts are real.** The screwdriver's parts come off as bodies (four 3.15 kg couch legs,
 two 5.25 kg wardrobe doors, shelf boards) that must also reach the truck: a couch whose legs are
@@ -185,7 +207,9 @@ behind and the job loses money, by design.
 the object's own lost momentum writes one property-damage entry at 1.6 per N·s (capped at 400
 per surface), with a notice naming the surface ("front wall — scuffed · 30.82"), a caption, a
 bounded scuff mark, the §15.1 line on the invoice and a review tag. Floors, the ground, the deck
-and the ramp are never billed; a landing that grazes a wall is a landing.
+and the ramp are never billed; a landing that grazes a wall is a landing. A door FRAME is the one surface with its own §8.3 row (Phase 26, M23): fixed charges (bent 40,
+forced 140) instead of the per-N·s rate, read from the leaf's side — a hung door is a Fixed body,
+so the thing shoving it loses no speed and its m·Δv reads nothing while it presses.
 
 **Nothing you lose stays lost.** A tool, a door leaf or a loose part that leaves the world — below
 the floor, past the edge of the plot, or at a position that stopped being a number — comes back
@@ -294,7 +318,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**3173 assertions across thirty suites, all passing** — plus a GPU-only suite that the
+**3451 assertions across thirty-two suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -342,8 +366,12 @@ closed the last §21.4 rows (reduced HUD, objective history, a hints switch, hig
 18:1) and a consistency pass (the aim ray ignores the shake, reattaching costs what removing
 cost, the cab prompt's count is the invoice's). Batch 10
 built the §26.7 evidence page (pasted run reports → the gate as a table, computed in the tester's
-browser) and the three-card first minute that the Comprehension signal measures. Batch 11 (forcing
-a hung door, priced on the frame; §21.2's brief and invoice reveal) is briefed in the plan.
+browser) and the three-card first minute that the Comprehension signal measures. Batch 11
+opened §3.3's brute-force door — a two-hand shove tears a hung leaf off in 1.00 s and bills the
+frame 140.00 against the screwdriver's 21.00, calibrated from the printed impulse trace — and closed
+§21.2 with a job sheet beside the title card, an invoice whose major lines land one at a time over
+the unchanged ledger, a recap from the run's own events and a retry that keeps the tools. Batch 12
+(the strap that launches a light box; a second consistency pass) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -506,7 +534,7 @@ mode is the same change seen from the other side.
 |---|---|---|
 | Four tools | `src/tools/` | Dolly (friction), blanket (impact tolerance), ramp (clearance), screwdriver (dimensions). Real world bodies with mass — §9.2's "tools are world objects". |
 | Tow speed limit | `src/player/grip.js` | You cannot walk faster than what you are towing can follow. A hand is a spring; walk past √(k/m)·maxStretch and the hold tears. |
-| Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs: since Phase 21 a wall, door frame or the truck body is billed the object's m·Δv above 12 N·s at 1.6 per N·s, capped at 400 per surface, from the narrow phase for the one step the object lost speed (`src/damage/damage.js`, `src/damage/surfaces.js`). A 9 kg box thrown at 4 m/s costs the front wall 30.82; floors, the ground, the deck and the ramp are never billed. |
+| Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs: since Phase 21 a wall, door frame or the truck body is billed the object's m·Δv above 12 N·s at 1.6 per N·s, capped at 400 per surface, from the narrow phase for the one step the object lost speed (`src/damage/damage.js`, `src/damage/surfaces.js`). A 9 kg box thrown at 4 m/s costs the front wall 30.82; floors, the ground, the deck and the ramp are never billed. Door frames (M23) are the exception that proves the seam: surfaces.js surfaceRow gives door_frame_<id> fixed charges, and damage.js reads the strain from the hung leaf's side of the narrow phase. |
 | Friction combine fix | `src/tools/tools.js` | An object's declared friction is averaged with the floor's. The dolly switches to `Min` so its 8.75× cut is not delivered as 1.3×. |
 
 **Measured:** couch hauled by one hand for 3 s — **0.34 m bare, 6.52 m on the dolly** (Phase 11 M10; Phase 6 measured 0.00 / 2.12). Fridge

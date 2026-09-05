@@ -349,6 +349,24 @@ export function leafRestPose(door, floorY = 0) {
   return { x, y: floorY + t / 2, z, rot, alongLen, acrossLen };
 }
 
+/**
+ * Where a FORCED door's mark goes (Phase 11 build-side M23; §8.4 "visual mark"): the hinge
+ * jamb — the end face of the wall run the hinges were screwed to, at hand height, with its
+ * normal pointing across the opening. The leaf itself has left for its rest pose by the time
+ * the frame's line posts, so the mark on the frame is the thing that stays. Plain data, like
+ * leafPose, so main.js can store it on the leaf's state as `hinge` (§22.4).
+ * @returns {{at:{x:number,y:number,z:number}, normal:{x:number,y:number,z:number}}}
+ */
+export function leafHingeMark(door, floorY = 0) {
+  const L = door.leaf, H = DOOR.leaf.height;
+  const jamb = door.centre + L.hinge * door.gap / 2;
+  const across = door.at;
+  const at = door.axis === 'x' ? { x: jamb, y: floorY + H / 2, z: across } : { x: across, y: floorY + H / 2, z: jamb };
+  // Into the opening: away from the jamb the leaf hung on.
+  const normal = door.axis === 'x' ? { x: -L.hinge, y: 0, z: 0 } : { x: 0, y: 0, z: -L.hinge };
+  return { at, normal };
+}
+
 /** The world AABB of a leaf at its hung pose or its rest pose, for placement checks. */
 export function leafAabb(door, pose, floorY = 0) {
   const L = door.leaf, t = L.t, len = DOOR.leaf.length, H = DOOR.leaf.height;

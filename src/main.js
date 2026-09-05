@@ -22,10 +22,10 @@
  */
 
 import { Game } from './game.js';
-import { Input, CONTEXTS, DEFAULT_SETTINGS, glyphFor, padLabel } from './core/input.js';
+import { Input, CONTEXTS, DEFAULT_SETTINGS, glyphFor, padLabel, PAD } from './core/input.js';   // PAD: M24 any-button reveal skip
 import { EventBus, EVENTS, PHASES } from './core/eventBus.js';
 import { createRenderer } from './render/renderer.js';
-import { buildScene, RAMP } from './render/scene.js';
+import { buildScene, RAMP, fitsThroughGap } from './render/scene.js';   // fitsThroughGap: M24 brief's access notes
 import { ThirdPersonCamera } from './render/camera.js';
 import { makeBlockout } from './render/playerBody.js';
 import { DebugOverlay } from './dev/debugOverlay.js';
@@ -34,23 +34,23 @@ import { PlayerController, LOCOMOTION } from './player/controller.js';
 import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
-import { overlappingZones, zoneAt, ZONES, ROOM as HOUSE_ROOM } from './world/house.js';
+import { overlappingZones, zoneAt, ZONES, ROOM as HOUSE_ROOM, ROUTES as HOUSE_ROUTES } from './world/house.js';   // ROUTES: M24 brief's access notes
 /* Phase 11 M11: the house's door leaves — records, poses and the effective clear widths. */
-import { INTERIOR_DOORS, doorById, leafDoors, leafPose, leafRestPose, hungClear, tightestOnRoute } from './world/house.js';
+import { INTERIOR_DOORS, doorById, leafDoors, leafPose, leafRestPose, leafHingeMark, hungClear, tightestOnRoute } from './world/house.js';   // leafHingeMark: M23
 import { ToolSystem, reassemble, clearFragments } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
-import { TRUCK_POSE, cargoInterior, cargoAnchors, cabPoint, roadEventForce } from './world/truck.js';   // cabPoint, roadEventForce: M16 shake
+import { TRUCK_POSE, cargoInterior, cargoAnchors, cabPoint, roadEventForce, insideCargo } from './world/truck.js';   // cabPoint, roadEventForce: M16 shake; insideCargo: M24 keep loadout
 import { DEST_ZONES, DEST_SHELL, insideDestination } from './world/destination.js';
 import { DamageSystem } from './damage/damage.js';
 import { Scuffs } from './render/scuffs.js';
-import { buildInvoice, reconcile, reviewFor, contributionStats } from './contract/invoice.js';
+import { buildInvoice, reconcile, reviewFor, contributionStats, legsDriven } from './contract/invoice.js';   // legsDriven: M24 brief's distance
 import { manifestSummary, tripStatus } from './contract/manifest.js';   // tripStatus: M13
 import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn, localToWorld } from './player/grip.js';
 import { Hud } from './ui/hud.js';
-import { InvoiceScreen } from './ui/invoiceScreen.js';
+import { InvoiceScreen, revealEnabledFrom } from './ui/invoiceScreen.js';   // revealEnabledFrom: M24 §21.2 reveal
 import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
@@ -253,10 +253,26 @@ async function boot() {
   for (const d of leafDoors(world.apertures)) {
     const home = leafPose(d);
     const rest = leafRestPose(d);
-    const e = registry.spawn('door_leaf_01', home, { manifest: false, state: { doorId: d.id, hung: false, home, rest } });
+    // hinge: where a FORCED door's mark goes — the jamb the hinges were screwed to (M23).
+    const hinge = leafHingeMark(d);
+    const e = registry.spawn('door_leaf_01', home, { manifest: false, state: { doorId: d.id, hung: false, home, rest, hinge } });
     registry.hang(e, home);
     leafEntities.set(d.id, e);
   }
+  /* M23 (§23.3 DOOR_STATE): the run record starts EXPLICIT. On the first step of every run
+   * (boot, and again after each contract reset) every leaf on its hinges announces 'hung' —
+   * so a run summary reads the doors' starting state instead of inferring it. `silent`
+   * keeps M9's caption layer out of it: four 'door on its hinges' captions greeting the
+   * player after START was why M11 never emitted it (audio.js _onEvent). */
+  let doorsAnnounced = false;
+  const announceDoors = (simTimeMs) => {
+    if (doorsAnnounced) return;
+    doorsAnnounced = true;
+    for (const e of leafEntities.values()) {
+      if (!e.state.hung) continue;
+      bus.emit(EVENTS.DOOR_STATE, { doorId: e.state.doorId, entityId: e.id, state: 'hung', reason: 'boot', silent: true }, simTimeMs);
+    }
+  };
   physics.primeQueries();
   /** Is this door's leaf on its hinges right now? The live predicate hungClear/tightestOnRoute take. */
   const leafHung = (doorId) => { const e = leafEntities.get(doorId); return !!(e && e.state.hung); };
@@ -307,7 +323,8 @@ async function boot() {
   attachDoorState();
   bus.on(EVENTS.DOOR_STATE, (e) => {
     const ds = game.state.doors;
-    if (!ds || e.state !== 'removed') return;
+    // A FORCED door is off its hinges too (M23): the same count, the same §15.2 tag.
+    if (!ds || (e.state !== 'removed' && e.state !== 'forced')) return;
     ds.removed[e.doorId] = (ds.removed[e.doorId] || 0) + 1;
     const d = doorById(e.doorId, world.apertures);
     if (d && d.leaf && d.leaf.front) ds.frontRemoved = true;
@@ -495,6 +512,17 @@ async function boot() {
   tools.releaseCarry = (tool) => {
     for (const s of interact.state.values()) if (s.carriedTool === tool.id) s.carriedTool = null;
   };
+  /* M23: what the hands are putting into an object this step — the sum of every grip's
+   * applied force on it, across movers. The door-frame pass (damage.js _strainFrames) reads
+   * it for a HELD object pressed against a hung leaf, because the leaf's own manifold reads
+   * only what the floor's friction left of the shove (DAMAGE.property.doorFrame.pressSpeedMax). */
+  damage.gripForceOf = (entity) => {
+    let n = 0;
+    for (const m of movers) {
+      for (const g of [m.grips.grips.left, m.grips.grips.right]) if (g && g.entityId === entity.id) n += g.lastApplied || 0;
+    }
+    return n;
+  };
 
   // ---- systems, in §22.3 order ----------------------------------------------------------
   game.addSystem('look', (state, stepMs, ctx) => {
@@ -662,6 +690,9 @@ async function boot() {
   /* Damage reads the velocities the solver produced, so it runs AFTER 'physics'. 'drive' is
    * registered further up, next to 'straps', for the opposite reason — see the note there. */
   game.addSystem('damage', (state, stepMs, ctx) => { damage.step(stepMs, ctx.simTimeMs); });
+
+  // M23: the doors' starting state on the record, once per run (see announceDoors).
+  game.addSystem('doorsAnnounce', (state, stepMs, ctx) => { announceDoors(ctx.simTimeMs); });
 
   /* §12.3 delivery bookkeeping. Runs after 'objects' because it consumes the settled flag
    * that step computes, and it only ever writes manifest rows — it observes entities and
@@ -883,6 +914,12 @@ async function boot() {
   }
   const divider = new SplitDivider(ui);
   const invoiceScreen = new InvoiceScreen(ui);
+  /* §21.2's reveal (M24): wall-time presentation over the sheet's own lines. Off on the
+   * harness's scratch page unless asked (?reveal=on, DEBUG.invoiceRevealInHarness), off
+   * under prefers-reduced-motion (the count-up is motion; the numbers are the same either
+   * way), `?reveal=off` for anyone who wants the sheet at once. */
+  invoiceScreen.revealEnabled = revealEnabledFrom(location.search, location.pathname) && !reducedMotion;
+  invoiceScreen.loadoutHook = true;   // resetContract honours { keepLoadout } (M24)
   const strapLines = new StrapLines(world.scene, straps, registry);
 
   /* §13.4's "compact job-start screen". It does NOT pause the clock — the world behind it
@@ -1082,6 +1119,10 @@ async function boot() {
   title.onSettings = () => settingsPanel.show();
   pauseScreen.onSettings = () => settingsPanel.show();
   pauseScreen.refresh();
+  /* §21.2's brief on the title card (M24): READ from the contract boot already built and the
+   * save already loaded (bestInvoice above) — the card never gates the clock and PICKUP is
+   * set where it always was (m31 boot-order pin). */
+  title.setBrief(briefFacts());
 
   const stamp = document.createElement('div');
   stamp.id = 'build-stamp';
@@ -1157,10 +1198,12 @@ async function boot() {
     const name = e.category === 'property'
       ? String(e.location || e.surfaceId || 'a surface')
       : String(e.defId || '').replace(/_\d+$/, '').replace(/_/g, ' ');
-    pendingNotices.push({
-      text: `${name} — ${e.band} · ${e.cost.toFixed(2)}`,
-      kind: 'damage',
-    });
+    /* A door frame's line (M23) says what happened to the door rather than a band:
+     * 'kitchen door forced off its hinges — 140.00' / 'kitchen door frame bent — 40.00'. */
+    const text = e.kind === 'door_frame'
+      ? `${name} ${e.band === 'forced' ? 'forced off its hinges' : 'frame bent'} — ${e.cost.toFixed(2)}`
+      : `${name} — ${e.band} · ${e.cost.toFixed(2)}`;
+    pendingNotices.push({ text, kind: 'damage' });
   });
   bus.on(EVENTS.STRAP_CHANGED, (e) => {
     // Only the states worth interrupting for. A strap going tensioned is not news.
@@ -1262,6 +1305,96 @@ async function boot() {
   /** §21.2's contract panel, as plain facts. ONE contract's facts, so every seat's HUD shows
    *  the same numbers; the phase word is state.phase verbatim, which is why §3.4's machine
    *  reaching TRANSIT and DELIVERY (Phase 11 plan, M1) is visible on screen at all. */
+  /** 'couch_3seat_01' -> 'couch 3seat' (the words every prompt uses, invoice.js wordsOf), for
+   *  a registry entity, a tool or a mover — the recap's names (M24). */
+  function wordsFor(id) {
+    const e = registry.get(id);
+    if (e) return String(e.defId || id).replace(/_\d+$/, '').replace(/_/g, ' ');
+    const t = tools.get ? tools.get(id) : null;
+    if (t) return String(t.defId || id).replace(/_\d+$/, '').replace(/_/g, ' ');
+    const mi = movers.findIndex((m) => m.id === id);
+    if (mi >= 0) { const s = seatOfMover(mi); return s >= 0 ? `mover P${s + 1}` : `mover ${id}`; }
+    return String(id);
+  }
+  /** A player/mover id -> its seat right now, or -1 (the recap's seat column, M24). */
+  function seatOfPlayer(id) {
+    const mi = movers.findIndex((m) => m.id === id);
+    return mi >= 0 ? seatOfMover(mi) : -1;
+  }
+
+  /**
+   * §21.2's BRIEF, as plain facts (M24): "payout, estimate, distance, manifest profile, access
+   * notes, hazards, and optional goals" — every one read from state or config, none authored
+   * here. The title card renders it (titleScreen.js briefHtml); m31 B1 asserts each value
+   * against the same sources. Read at boot, after the contract exists and the save is loaded.
+   */
+  function briefFacts(over = {}) {
+    const state = game.state;
+    const rows = state.manifest || [];
+    const byCategory = {};
+    const handling = {};
+    let heaviest = null;
+    const prep = [];
+    for (const row of rows) {
+      const e = registry.get(row.entityId);
+      const def = e && e.def;
+      if (!def) continue;
+      byCategory[def.category] = (byCategory[def.category] || 0) + 1;
+      if (row.handling) handling[row.handling] = (handling[row.handling] || 0) + 1;
+      if (!heaviest || def.mass > heaviest.mass) heaviest = { defId: def.id, name: wordsFor(e.id), mass: def.mass };
+      /* Access notes: a def whose disassembly SHRINKS it (the couch's legs, §7.1) against the
+       * tightest doorway on its way out (house.js tightestOnRoute with the leaves hung), with
+       * the two smallest dimensions as the cross-section (scene.js fitsThroughGap, m6 E14). */
+      for (const entry of def.disassembly || []) {
+        if (!entry.shrinksTo) continue;
+        const tightM = doors.tightestOnRoute(row.fromZone);
+        if (!Number.isFinite(tightM)) continue;
+        const two = (d) => { const a = [d.x, d.y, d.z].sort((p, q) => p - q); return [a[0], a[1]]; };
+        const [w0, h0] = two(def.dimensions);
+        const [w1, h1] = two(entry.shrinksTo);
+        const intact = fitsThroughGap(w0, h0, tightM);
+        const off = fitsThroughGap(w1, h1, tightM);
+        if (intact.fits) continue;   // an access NOTE is about what does not fit as it stands
+        const legs = ROUTES_OF(row.fromZone);
+        const doorId = legs.reduce((best, id) => (doors.hungClear(id) < doors.hungClear(best) ? id : best), legs[0]);
+        const d = doorId ? doors.doorById(doorId) : null;
+        prep.push({
+          defId: def.id, name: wordsFor(e.id), part: entry.part,
+          doorId: doorId || '', doorLabel: d ? d.label : String(doorId || ''), doorM: tightM,
+          intactFits: intact.fits, intactClearance: intact.clearance,
+          offFits: off.fits, offClearance: off.clearance,
+          leafM: d && d.leaf ? d.leaf.t : 0,
+        });
+      }
+    }
+    const doorList = doors.records().filter((d) => d.leaf).map((d) => ({
+      id: d.id, label: d.label, gap: d.gap, clear: doors.hungClear(d.id), from: d.from, to: d.to,
+    }));
+    const tightest = doorList.reduce((t, d) => (!t || d.clear < t.clear ? d : t), null);
+    const legs = legsDriven(state);
+    return {
+      contractId: state.contractId,
+      payout: ECONOMY.basePayout,
+      estimateMin: state.estimateMs / 60000,
+      legs,
+      distanceKm: legs * ECONOMY.routeDistanceKm,
+      manifest: { total: rows.length, byCategory, handling, heaviest },
+      doors: doorList,
+      prep,
+      hazards: route.route.map((ev) => ({ type: ev.type, label: ev.label, at: ev.at })),
+      tightest: tightest ? { id: tightest.id, label: tightest.label, clear: tightest.clear } : null,
+      goals: {
+        best: bestInvoice ? { profit: bestInvoice.profit, grade: bestInvoice.grade } : null,
+        oneTrip: ECONOMY.oneTripBonus,
+        roomAccuracy: ECONOMY.roomAccuracyBonus,
+      },
+      ...over,
+    };
+  }
+  /** The doorway legs from a room to the truck (house.js ROUTES), [] for an unknown room. A
+   *  declaration, not a const: briefFacts() runs at boot, above this line. */
+  function ROUTES_OF(roomId) { return (HOUSE_ROUTES[roomId] || []).slice(); }
+
   function contractFacts(summary = manifestSummary(game.state.manifest)) {
     return {
       phase: game.state.phase,
@@ -1343,8 +1476,14 @@ async function boot() {
       { date: new Date().toISOString(), walkthrough: walkthrough ? walkthrough.report() : null });   // walkthrough: M22
     storeRun(runSum);
     persist();
-    invoiceScreen.show(invoice, review, summary, stats,
-      { best: prevBest, isBest, runSummary: runSum, keptRuns: keptRuns.length });
+    invoiceScreen.show(invoice, review, summary, stats, {
+      best: prevBest, isBest, runSummary: runSum, keptRuns: keptRuns.length,
+      /* M24: the recap's words — entity ids to the words the prompts use, door ids to their
+       * labels, player ids to seats — and the head's contract name. Lookups only; the recap
+       * itself is built from runSum.events (invoiceScreen.js recapFrom). */
+      nameOf: wordsFor, doorLabel: (id) => { const d = doors.doorById(id); return d ? d.label : String(id); },
+      seatOf: seatOfPlayer, contractId: game.state.contractId,
+    });
     game.setPaused(true);
     input.releasePointerLock && input.releasePointerLock();
   }
@@ -1364,7 +1503,7 @@ async function boot() {
    * serializable data with no back-references, which is the property §22.4 wants; the price
    * is that whatever was attached to it has to be re-attached.
    */
-  function resetContract() {
+  function resetContract(opts = {}) {   // opts.keepLoadout: M24 (§21.2 "optionally preserves loadout")
     /* The run's record is taken FIRST — before the unwind below emits its own GRIP_ENDED
      * 'contract reset' and STRAP_CHANGED 'released' events — and closed on the recorder just
      * before game.reset() replaces the counters (M6, runLog.js closeRun). A settled run keeps
@@ -1470,6 +1609,12 @@ async function boot() {
     PHASE6_TOOL_SPAWNS.forEach((s, i) => {
       const t = [...tools.tools.values()][i];
       if (!t) return;
+      /* §21.2 "optionally preserves loadout" (M24): with { keepLoadout } from the sheet's
+       * checkbox, a tool that is INSIDE the cargo box stays where it is for the next run
+       * (dynamic, ordinary groups, velocity zeroed — everything but the teleport home). The
+       * straps are gone regardless: they bound cargo that is back in the house. */
+      const p = t.body.translation();
+      const keep = !!(opts.keepLoadout && insideCargo({ x: p.x, y: p.y, z: p.z }));
       t.body.setBodyType(physics.R.RigidBodyType.Dynamic, true);
       /* AND THE COLLISION GROUP. A carried tool is kinematic in `toolCarried`, which collides
        * with nothing including the ground (world.js); restoring the body type without the
@@ -1477,8 +1622,10 @@ async function boot() {
        * pressed through the floor for ever (tools have no §18.3 recovery). The sibling of the
        * Q put-down bug M1 fixed in interact._putDown. */
       t.collider.setCollisionGroups(GROUP_PRESETS.object);
-      t.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
-      t.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+      if (!keep) {
+        t.body.setTranslation({ x: s.x, y: s.y, z: s.z }, true);
+        t.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+      }
       t.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       t.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       t.body.wakeUp();
@@ -1489,9 +1636,9 @@ async function boot() {
     game.setPhase(PHASES.PICKUP);
   }
 
-  invoiceScreen.onReplay = () => {
+  invoiceScreen.onReplay = (opts = {}) => {
     invoiceScreen.hide();
-    resetContract();
+    resetContract(opts);   // { keepLoadout } from the sheet's checkbox (M24, §21.2)
     game.setPaused(false);
     hud.notice('new contract', 'good');
   };
@@ -1577,6 +1724,7 @@ async function boot() {
      * the grass, the bedroom floor. Like the tools, they are teleported home, so the M2
      * soak's counters stay equal run to run (m14 S4/S5, m19 D7). */
     doors.rehangAll('contract reset');
+    doorsAnnounced = false;   // M23: the next run's first step announces the hung leaves again
     physics.primeQueries();
   }
 
@@ -1649,6 +1797,18 @@ async function boot() {
       // A = confirm on a pad, which is the 'jump' binding; Enter/Space/click are the title's own.
       if (input.consumeShellEdge('jump', 0)) title.start();
       return;
+    }
+    /* M24: while the settlement's major lines are still landing, ANY pad button on any seat
+     * lands them all (§21.2 skip; Space/Enter/click are the sheet's own). The press is spent
+     * here — the pause edge it may also have raised is consumed too, so a Menu press that
+     * skipped the reveal does not unpause the game under the sheet. */
+    if (invoiceScreen.revealing) {
+      let skipped = false;
+      for (let s = 0; s < seatCount; s++) {
+        for (const b of Object.values(PAD)) if (input.consumeShellButton(s, b)) skipped = true;
+        if (skipped) input.consumeShellEdge('pause', s);
+      }
+      if (skipped) { invoiceScreen.skipReveal(); return; }
     }
     for (let s = 0; s < seatCount; s++) {
       /* A pad Menu (or seat 1's Esc) can pause while seat 0's mouse is still captured, which
@@ -1970,6 +2130,9 @@ async function boot() {
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,
+    /* M24: §21.2's brief, as the facts the title card rendered (m31 B1 asserts each against
+     * state and config; the card re-renders from a synthetic set to pin the goal line). */
+    briefFacts,
     recoveriesByKind,   // M15: the overlay's 'lost' row, for m23
     /* The house's doors (M11): the leaves, the live hung predicate, the effective clear
      * widths and the reset re-hang, so a suite can take a door off and measure the opening. */

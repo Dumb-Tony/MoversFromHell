@@ -525,6 +525,23 @@ lines.push('--- P10. an authored part must have a shape (GDD §24.4) ---');
   void DAMAGE; void piecesOf; void route; void tools;
 }
 
+/* ── M23 (Phase 11 build-side): the leaf's 'sturdy' band, as data ────────────────
+ * The door leaf moved from 'normal' to 'sturdy' (KNOWN_ISSUES M11: a 1.5 m drop broke a stock
+ * door); its fragments follow the parent's band, so M12's table needs a sturdy row too. The
+ * drop itself is tools/m30-force-tests.js D4. */
+lines.push('--- M23. door_leaf_01 is sturdy, and its fragments know it (GDD §8.3, §26.4) ---');
+{
+  const leafDef = OBJECT_DEFS.door_leaf_01;
+  eq('M23-P1 door_leaf_01.fragility is \'sturdy\'', leafDef.fragility, 'sturdy');
+  ok('M23-P1 …a real DAMAGE.fragility row, above the normal band\'s tolerance', !!DAMAGE.fragility.sturdy && DAMAGE.fragility.sturdy.impactSpeed > DAMAGE.fragility.normal.impactSpeed, JSON.stringify(DAMAGE.fragility.sturdy));
+  eq('M23-P1 …validateDef has nothing to say', validateDef(leafDef).length, 0);
+  eq('M23-P2 PARTS.brokenFragmentCount.sturdy is 2 (a broken leaf leaves two pieces)', PARTS.brokenFragmentCount.sturdy, 2);
+  const frag = derivedDefs().find((d) => d.fragmentOf && d.fragmentOf.defId === 'door_leaf_01');
+  ok('M23-P2 …and the leaf\'s derived fragment definition carries the sturdy band', !!frag && frag.fragility === 'sturdy', frag ? `${frag.id} ${frag.fragility}` : 'no fragment def listed');
+  ok('M23-P3 no other object moved bands: every non-leaf def is normal / fragile / extreme',
+     Object.values(OBJECT_DEFS).filter((d) => d.id !== 'door_leaf_01').every((d) => ['normal', 'fragile', 'extreme'].includes(d.fragility)));
+}
+
 } catch (e) {
   fails++;
   lines.push(`FAIL  suite threw  <- ${e && e.message}`);

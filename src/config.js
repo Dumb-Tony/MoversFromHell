@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 25,
-  label: 'phase-25',
+  phase: 26,
+  label: 'phase-26',
   date: '2026-09-05',
 });
 
@@ -635,7 +635,13 @@ export const DAMAGE = Object.freeze({
    *   TV dropped at 2.0         117 points -> broken, the full 900
    */
   fragility: {
-    sturdy:  { impactSpeed: 3.2, conditionPerMps: 14 },
+    /* 'sturdy' (Phase 11 build-side M23): a stock door leaf. No shipped object used the row
+     * before the leaf moved onto it (definitions.js door_leaf_01), so it is tuned for the
+     * one thing on it: a 1.5 m fall is sqrt(2 x 9.81 x 1.5) = 5.42 m/s -> (5.42 - 3.6) x 12
+     * = 21.9 points -> 78, 'scratched' (0.08 x 180 = 14.40 billed), where the normal curve
+     * read 100 -> 14 and billed the whole 180 (KNOWN_ISSUES M11). floorAfter15m is the
+     * documented floor that m30 D4 asserts against, not a number any system reads. */
+    sturdy:  { impactSpeed: 3.6, conditionPerMps: 12, floorAfter15m: 70 },
     normal:  { impactSpeed: 2.0, conditionPerMps: 26 },
     fragile: { impactSpeed: 1.1, conditionPerMps: 55 },
     extreme: { impactSpeed: 0.7, conditionPerMps: 90 },
@@ -665,9 +671,49 @@ export const DAMAGE = Object.freeze({
     ],
     decals: {
       max: 24,
-      size: { scuffed: 0.12, dented: 0.20, holed: 0.30 },
+      size: { scuffed: 0.12, dented: 0.20, holed: 0.30, bent: 0.16, forced: 0.24 },
       proud: 0.003,
       opacity: 0.35,
+    },
+    /* §3.3's brute-force branch at a hung door (Phase 11 build-side M23; §8.2 "replacement
+     * risk", §8.3 "static surfaces define material, durability, impact threshold, repair
+     * category, and maximum charge"). The door FRAME is the first surface with its own §8.3
+     * row (surfaces.js surfaceRow): FIXED charges instead of the per-N·s rate above, because
+     * what torn hinges and a jamb cost is not proportional to how hard they were pushed.
+     *
+     * WHY THE FRAME IS NOT READ AS m·Δv. A hung leaf is a Fixed body. MEASURED
+     * (tools/m30-force-tests.js D1, the printed trace): a two-hand couch shove presses the
+     * leaf for seconds while the couch's m·Δv reads 0.00 on every step after the first
+     * touch — the solver zeroes the approach velocity, so the object never "loses speed"
+     * while it presses (damage.js's own resting-contact rule). The frame's STRAIN is read
+     * from the LEAF's side instead, per step, in N·s (damage.js _strainFrames): the leaf's
+     * Σ|contactImpulse| as the floor, the hands' force × dt for a held object at rest
+     * against it (pressSpeedMax below), M14's own m·Δv for a hit the leaf took hardest —
+     * and only on steps whose force is at least forceN AND whose object is held or
+     * hitting: a box left 20 mm into the leaf after a throw reads a persistent 129-184 N (a
+     * solver phantom), the couch released against it 120 N — a lean is never a shove
+     * (§10.4). The strain lives in M14's aggregation window keyed entity|door_frame_<id>;
+     * DOOR.bentImpulseNs / DOOR.forceImpulseNs are the thresholds on it. */
+    doorFrame: {
+      /** N — the sustained shove below which the hinges take no strain. Measured: a one-hand
+       *  shove decays from 360 N to under 150 N in 0.4 s and the grip tears; a two-hand shove
+       *  holds 305-392 N; a resting object after a hit shows 120-184 N of solver phantom. */
+      forceN: 250,
+      /** §15.1's charge for hinges torn out and a jamb made good (§8.2 "replacement risk").
+       *  Set against the prepared cost: DOOR.removeSeconds (45 s) of two movers' labour is
+       *  45/60 x 14 x 2 = 21.00, so this is 6.7x the screwdriver — m30 D3 asserts the
+       *  brief's ">= 2x" floor from these numbers, never from a literal. */
+      chargeForced: 140,
+      /** The frame marked but the door still on: once per hung spell (state.frameBent). */
+      chargeBent: 40,
+      /** m/s — below this a held object touching the leaf is PRESSED, and the strain that
+       *  step is the hands' force, not the leaf's manifold. MEASURED: with both hands at
+       *  356 N each (712 N, resistedForce 710) the leaf's manifold read 231-243 N in one run
+       *  and 305-392 N in another — the floor's static friction takes a solver-ordered share
+       *  of a blocked push that real friction never would (the couch is not sliding). The
+       *  hands are the cause and the honest number; the leaf's read is kept as the floor of
+       *  the two. Above this speed the object is sliding along the leaf, not shoving it. */
+      pressSpeedMax: 0.05,
     },
   },
   /** §7.3 + §8.3: "aggregate repeated scrape contacts into one coherent damage event".
@@ -848,6 +894,33 @@ export const DOOR = Object.freeze({
   /** §8.2 "replacement risk": what the customer bills for a door leaf broken in transit
    *  (definitions.js door_leaf_01.replacementValue), between a bookshelf and a nightstand. */
   replacementValue: 180,
+
+  /* ── §3.3's brute-force branch (Phase 11 build-side M23) — see DAMAGE.property.doorFrame ──
+   * Thresholds on the frame's STRAIN: Σ of the leaf's contact impulse (N·s) over M14's
+   * aggregation window, from steps at or above DAMAGE.property.doorFrame.forceN by a held or
+   * hitting object. CALIBRATED, not guessed (tools/m30-force-tests.js prints the trace):
+   *   couch, legs on, both hands of seat 0, unbraced, from 0.15 m: first touch at 0.55 s
+   *   (42.3 N·s, 2539 N), then the hands hold 356 N each = 712 N on the pressed couch ->
+   *   11.9 N·s a step -> forceImpulseNs (400.4 N·s) at 1.00 s, 0.45 s of pressing in all;
+   *   forceWithinMs is the §3.3 budget D1 is asserted against, 4x that (D1 also asserts
+   *   under half of it). The leaf's own manifold meanwhile read 170-243 N (Σ 188 N·s): the
+   *   floor's static friction takes a solver-ordered share of a blocked push — see
+   *   DAMAGE.property.doorFrame.pressSpeedMax for why the hands are the number;
+   *   one hand: the grip tears after ~0.4 s of pressing, ~50-200 N·s — not forced, bent;
+   *   a 9 kg box thrown at 2 m/s from 0.16 m: 10.8 N·s in one step (646 N) — bent only;
+   *   at 6 m/s 54 N·s — still bent only. A 110 kg fridge at 4 m/s from 0.05 m stops dead
+   *   in one step: 427.9 N·s, forced, held by nobody. */
+  /** N·s of strain at which the hinges tear (the leaf comes off through registry.unhang). */
+  forceImpulseNs: 400,
+  /** N·s of strain at which the frame is marked and chargeBent posts, once per hung spell. */
+  bentImpulseNs: 8,
+  /** ms — §3.3 "possible enough to tempt": the sim time within which the calibrated shove
+   *  must force the door (asserted, m30 D1). */
+  forceWithinMs: 4000,
+  /** m — the hung pose's box is shrunk by this before the rehang occupancy sweep (interact.js
+   *  _doorwayBlocked), so the floor, the jamb it sits flush against and the header do not
+   *  count as blocking it. */
+  occupancyMargin: 0.01,
 });
 
 /** §10.3 straps. Validated: Phase 7. */
@@ -1024,6 +1097,44 @@ export const ECONOMY = Object.freeze({
    *  replacement value), this one is the contract's completion (§15.1 base "rewards
    *  completion and scope"). */
   leftBehindFee: 60,
+});
+
+/** §21.2 contract UX — Phase 11 build-side M24 (src/ui/invoiceScreen.js, src/ui/titleScreen.js).
+ *  "Invoice animates major lines, then exposes a complete static breakdown. Event recap uses
+ *  actual logged events." The reveal is PRESENTATION over invoice.js's lines: a major line is
+ *  a GROUP of the sheet's own line kinds summed — never a second calculation — and the count-up
+ *  is wall time (an injectable clock; the harness's performance.now() is frozen, KNOWN_ISSUES
+ *  Phase 18), so no number here changes what the ledger says. */
+export const INVOICE = Object.freeze({
+  reveal: Object.freeze({
+    /** Wall ms between one major line landing and the next (m31 V1: after k × stepMs exactly
+     *  k lines are visible). */
+    stepMs: 700,
+    /** Each line's count-up from 0 to its final amount, wall ms. ≤ stepMs, so lines land one
+     *  at a time; the eased value is monotone, so nothing shown is ever past the final. */
+    countMs: 560,
+    /** Redraw cadence while revealing (≈ 30 Hz; every tick re-reads the clock). */
+    tickMs: 33,
+    /** The major lines, in landing order. `kinds` are invoice.js LINE_KINDS strings (copied, so
+     *  config imports nothing — m31 V0 asserts every LINE_KINDS value sits in exactly one
+     *  group, which is what makes the groups sum to the profit). A group with no line this
+     *  run does not land; PROFIT (the invoice's own total) always lands last. */
+    majors: Object.freeze([
+      Object.freeze({ id: 'revenue',   label: 'revenue',          kinds: Object.freeze(['base contract', 'efficiency bonus', 'one-trip bonus', 'room accuracy', 'tips']) }),
+      Object.freeze({ id: 'labour',    label: 'labour',           kinds: Object.freeze(['labor time', 'overtime']) }),
+      Object.freeze({ id: 'furniture', label: 'furniture damage', kinds: Object.freeze(['furniture damage']) }),
+      Object.freeze({ id: 'property',  label: 'property damage',  kinds: Object.freeze(['property damage']) }),
+      Object.freeze({ id: 'road',      label: 'fuel / road',      kinds: Object.freeze(['vehicle/fuel', 'violations']) }),
+      Object.freeze({ id: 'left',      label: 'left behind',      kinds: Object.freeze(['items left behind', 'parts left behind']) }),
+      Object.freeze({ id: 'fees',      label: 'recovery fees',    kinds: Object.freeze(['recovery/service fees']) }),
+    ]),
+  }),
+  /** The settlement's 'What happened' list, built from the run recorder's events (runLog.js,
+   *  M6) — never from a second log. At most this many entries, the earliest kept … */
+  recapMax: 12,
+  /** … and at most this many per kind (door, part, drop, damage, property, road, recovery),
+   *  so a run with forty impacts still lists its one door and its one recovery. */
+  recapPerKind: 3,
 });
 
 /** The physical world's extent (Phase 11 build-side M15). ONE number: the side of the
@@ -1339,4 +1450,9 @@ export const DEBUG = Object.freeze({
    *  (`_smoketest-<port>.html`) unless a suite asks with ?walkthrough=1 — every DOM-shape
    *  assertion in m11/m15 would otherwise move. True here shows them in every harness run. */
   walkthroughInHarness: false,
+  /** M24: the settlement sheet's wall-time reveal (invoiceScreen.js) renders its FINAL state
+   *  at once on the harness's scratch pages unless a suite asks with ?reveal=on or flips
+   *  invoiceScreen.revealEnabled — every existing settlement assertion reads the sheet the
+   *  instant settle() returns. True here animates it in every harness run. */
+  invoiceRevealInHarness: false,
 });

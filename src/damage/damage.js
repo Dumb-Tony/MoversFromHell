@@ -31,10 +31,10 @@
  * (§8.4). Nothing in this file ends a contract. It records.
  */
 
-import { DAMAGE } from '../config.js';
+import { DAMAGE, DOOR } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
 import { conditionLossFor, impactToleranceOf, breakInto } from '../tools/tools.js';
-import { billable, labelFor } from './surfaces.js';
+import { billable, labelFor, surfaceRow, doorFrameTag } from './surfaces.js';
 
 /** §8.3's condition bands, as a lookup. Condition is 0..100 (§7.2). */
 export function bandFor(condition) {
@@ -86,12 +86,19 @@ export class DamageSystem {
     this._openProp = new Map();
     /** Scratch: the property keys touched this step, so the others can age. */
     this._touchedProp = new Set();
+    /** Scratch: entity id -> speed lost THIS step, for the door-frame pass (M23), which runs
+     *  after the entity loop and needs to know whether a pressing object is also hitting. */
+    this._lostBy = new Map();
     /** EXPANSION HOOK (§8.2 "protect with blankets/runners"): tags a future runner tool has
      *  covered. Consulted before billing; nothing writes it yet. */
     this.protectedSurfaces = new Set();
     /** EXPANSION HOOK (§8.4 repair/cover-up tools): a multiplier on a window's charge,
      *  `(window) => number`, default 1. Nothing sets it yet. */
     this.mitigation = null;
+    /** M23: `(entity) => N` — the force every grip on the object is applying this step,
+     *  summed (main.js wires it over the movers' grip records). The door-frame pass reads
+     *  it for a held object PRESSED against a hung leaf; null means "the leaf's read only". */
+    this.gripForceOf = null;
   }
 
   /* THE STATE IS RESOLVED ON EVERY ACCESS, NOT CAPTURED. game.reset() replaces game.state
@@ -122,6 +129,8 @@ export class DamageSystem {
     const broke = [];
     const touched = this._touchedProp;
     touched.clear();
+    const lostBy = this._lostBy;
+    lostBy.clear();
     for (const e of this.registry.entities.values()) {
       const v = e.body.linvel();
       const speed = Math.hypot(v.x, v.y, v.z);
@@ -130,6 +139,7 @@ export class DamageSystem {
 
       // Speed LOST this step. A held object being carried loses nothing; a dropped one does.
       const lost = prev - speed;
+      lostBy.set(e.id, lost);
       if (lost <= 0) { this._decayWindow(e, stepMs, simTimeMs); continue; }
 
       /* PROPERTY (M14) — before and INDEPENDENT of conditionLossFor: a sturdy couch at
@@ -193,6 +203,12 @@ export class DamageSystem {
         }, simTimeMs);
       }
     }
+
+    /* THE DOOR FRAMES (M23) — read from the LEAF's side, after every object has been
+     * looked at, because a hung leaf is a Fixed body and the object shoving it loses no
+     * speed while it presses (see _strainFrames). Before the decay, so a shove that is
+     * still on keeps its window open. */
+    this._strainFrames(stepMs, simTimeMs, touched, lostBy);
 
     // Property windows not touched this step age, and close at the window's end (M14).
     this._decayPropWindows(stepMs, simTimeMs, touched);
@@ -270,6 +286,13 @@ export class DamageSystem {
     const dot = n.x * (t.x - at.x) + n.y * (t.y - at.y) + n.z * (t.z - at.z);
     if (dot < 0) n = { x: -n.x, y: -n.y, z: -n.z };
 
+    this._feedPropWindow(e, tag, impulse, at, n, simTimeMs, touched);
+  }
+
+  /** Open or merge the property window for (entity, surface) — the ONE aggregation the
+   *  walls (M14, _attributeProperty) and the door frames (M23, _strainFrames) share. Same
+   *  DAMAGE.aggregationWindowMs / aggregationRadius, same line at the end. Returns the window. */
+  _feedPropWindow(e, tag, impulse, at, n, simTimeMs, touched) {
     const key = `${e.id}|${tag}`;
     let w = this._openProp.get(key);
     const near = w && Math.hypot(at.x - w.x, at.y - w.y, at.z - w.z) <= DAMAGE.aggregationRadius;
@@ -286,10 +309,159 @@ export class DamageSystem {
         /** §8.4 "player attribution when reliable": who held it at first contact. Recorded
          *  for the run summary (M6); never scored (§15.3). */
         heldBy: (e.state.grips || []).map((g) => g.playerId).filter((id) => id != null),
+        /** M23: a door frame's window carries the frame's state ('bent' | 'forced') once it
+         *  has one; its line posts the moment the state changes, never at the close. */
+        frameState: null, doorId: null, leafId: null,
       };
       this._openProp.set(key, w);
     }
     touched.add(key);
+    return w;
+  }
+
+  /* ── door frames: what the hung leaf took (M23; §3.3, §8.2, §8.3) ──────────────────────
+   *
+   * A hung leaf is a Fixed body (registry.hang). The object shoving it loses no speed while
+   * it presses — MEASURED (tools/m30-force-tests.js D1 prints the trace): a two-hand couch
+   * shove holds 305-392 N on the leaf for seconds while the couch's m·Δv reads 0.00 on every
+   * step after the first touch, the solver having zeroed the approach velocity — which is
+   * exactly the resting-contact rule the item ledger relies on. So the frame's strain is read
+   * from the LEAF's side of the narrow phase: Σ|contactImpulse| over its manifolds with each
+   * registry entity, per step, in N·s, and only on steps that are a SHOVE or a HIT:
+   *
+   *   force >= DAMAGE.property.doorFrame.forceN   the impulse as a force this step
+   *   AND (held OR hitting)                        a hand on the object, or the object
+   *                                                itself lost >= minStepImpulse of m·Δv
+   *
+   * Without the second gate a box left 20 mm into the leaf by a throw reads a persistent
+   * 129-184 N of solver phantom for ever and would tear the door off by sitting there
+   * (§10.4: no damage without a physical cause). Movers are kinematic and never in a
+   * Fixed body's manifolds, so a shoulder on the door does nothing — the screwdriver or a
+   * heavy object are the two ways through, as §3.3 asks.
+   *
+   * WHAT ONE STEP'S STRAIN IS. The leaf's manifold sum is the floor; two readings are honest
+   * where the solver is not, and the step takes the largest of the three:
+   *   PRESSED   a held object at rest against the leaf (speed under pressSpeedMax): the
+   *             HANDS' force × dt (gripForceOf). Measured: both hands at 356 N each put
+   *             712 N into the couch while the leaf's manifold read 231-243 N one run and
+   *             305-392 N another — the floor's static friction takes a solver-ordered
+   *             share of a push that is not sliding anywhere. The hands are the cause.
+   *   HIT       the object lost speed this step and the leaf is what it hit hardest (M14's
+   *             own ranking, _attributeProperty): the whole m·Δv, as a wall would get.
+   *             Measured: a 110 kg fridge at 6 m/s stopped dead (632 N·s of m·Δv) with a
+   *             first-step manifold of 14 N·s — a deep first-step penetration resolved by
+   *             position correction the manifold never reports.
+   * A lean is none of these and reads nothing (§10.4).
+   *
+   * The strain accumulates in the same window the walls use, keyed entity|door_frame_<id>
+   * (surfaces.js); at DOOR.bentImpulseNs the frame posts chargeBent once per hung spell
+   * (state.frameBent), at DOOR.forceImpulseNs the hinges go: the leaf leaves through
+   * registry.unhang to its rest pose — the removed door's own path, so hungClear, the
+   * recovery pass and the reset all see a removed leaf — DOOR_STATE 'forced' carries who
+   * held the object (or null for a thrown one), and the line posts chargeForced with the
+   * mark on the hinge jamb (house.js leafHingeMark, stored on the leaf's state by main.js),
+   * because the leaf itself is no longer where it was pressed.
+   */
+  _strainFrames(stepMs, simTimeMs, touched, lostBy) {
+    const world = this.physics.world;
+    if (!world || typeof world.contactPairsWith !== 'function') return;
+    const F = DAMAGE.property.doorFrame;
+    const dt = stepMs / 1000;
+    for (const leaf of this.registry.entities.values()) {
+      const ls = leaf.state;
+      if (!ls || !ls.hung || ls.doorId == null) continue;
+      const self = leaf.collider;
+      const hits = [];
+      world.contactPairsWith(self, (other) => {
+        const e = this.registry.fromCollider(other);
+        if (!e || e === leaf || (e.state && e.state.hung)) return;
+        let sum = 0, at = null, normal = null;
+        world.contactPair(self, other, (manifold, flipped) => {
+          const nc = manifold.numContacts();
+          for (let i = 0; i < nc; i++) sum += Math.abs(manifold.contactImpulse(i));
+          if (!normal) {
+            const n = manifold.normal();
+            // From the leaf toward the object: the manifold normal is from the pair's first
+            // collider, and here WE are the first unless flipped says otherwise.
+            normal = flipped ? { x: -n.x, y: -n.y, z: -n.z } : { x: n.x, y: n.y, z: n.z };
+            const ns = manifold.numSolverContacts();
+            if (ns > 0) {
+              let sx = 0, sy = 0, sz = 0, cnt = 0;
+              for (let i = 0; i < ns; i++) {
+                const p = manifold.solverContactPoint(i);
+                if (p) { sx += p.x; sy += p.y; sz += p.z; cnt++; }
+              }
+              if (cnt > 0) at = { x: sx / cnt, y: sy / cnt, z: sz / cnt };
+            }
+          }
+        });
+        if (!(sum > 0)) return;
+        const held = !!(e.state && e.state.grips && e.state.grips.length);
+        const mdv = e.body.mass() * (lostBy.get(e.id) || 0);
+        const hit = mdv >= DAMAGE.property.minStepImpulse;
+        if (!held && !hit) return;   // a lean, or the solver's resting phantom: not a shove
+        let strain = sum;
+        if (held && typeof this.gripForceOf === 'function') {
+          const v = e.body.linvel();
+          if (Math.hypot(v.x, v.y, v.z) <= F.pressSpeedMax) strain = Math.max(strain, this.gripForceOf(e) * dt);
+        }
+        if (hit && this._bestContactIs(e, other)) strain = Math.max(strain, mdv);
+        if (strain / dt < F.forceN) return;
+        hits.push({ e, sum: strain, at, normal });
+      });
+      // Outside the query callback: forcing flips the leaf's body type mid-world.
+      for (const h of hits) {
+        if (!ls.hung) break;
+        const t = h.e.body.translation();
+        const at = h.at || { x: t.x, y: t.y, z: t.z };
+        let n = h.normal || { x: 0, y: 1, z: 0 };
+        const dot = n.x * (t.x - at.x) + n.y * (t.y - at.y) + n.z * (t.z - at.z);
+        if (dot < 0) n = { x: -n.x, y: -n.y, z: -n.z };
+        const w = this._feedPropWindow(h.e, doorFrameTag(ls.doorId), h.sum, at, n, simTimeMs, touched);
+        w.doorId = ls.doorId;
+        w.leafId = leaf.id;
+        // Forced NOW — the doorway opens the moment the hinges go, not at the window's end.
+        // 'bent' is decided when the window closes (_closePropWindow), like a wall's line.
+        if (w.impulse >= DOOR.forceImpulseNs) this._forceLeaf(leaf, w, simTimeMs);
+      }
+    }
+  }
+
+  /** M14's ranking, asked from the leaf's side: is `target` the collider that pushed
+   *  hardest on `e` this step? If so the whole m·Δv is the leaf's, as a wall would take it. */
+  _bestContactIs(e, target) {
+    const world = this.physics.world;
+    let best = null, bestSum = 0;
+    world.contactPairsWith(e.collider, (other) => {
+      let s = 0;
+      world.contactPair(e.collider, other, (manifold) => {
+        const nc = manifold.numContacts();
+        for (let i = 0; i < nc; i++) s += Math.abs(manifold.contactImpulse(i));
+      });
+      if (s > bestSum) { bestSum = s; best = other; }
+    });
+    return !!best && best.handle === target.handle;
+  }
+
+  /** The hinges go (M23). The M11 unhang path, then the frame's line and the door's event. */
+  _forceLeaf(leaf, w, simTimeMs) {
+    const ls = leaf.state;
+    ls.frameBent = false;
+    const by = w.heldBy.length ? w.heldBy[0] : null;
+    this.registry.unhang(leaf, ls.rest || null);
+    w.frameState = 'forced';
+    if (ls.hinge && ls.hinge.at && ls.hinge.normal) {
+      w.at = { x: ls.hinge.at.x, y: ls.hinge.at.y, z: ls.hinge.at.z };
+      w.normal = { x: ls.hinge.normal.x, y: ls.hinge.normal.y, z: ls.hinge.normal.z };
+    }
+    this._openProp.delete(w.key);
+    this._postPropLine(w, simTimeMs);
+    if (this.bus) {
+      this.bus.emit(EVENTS.DOOR_STATE, {
+        doorId: ls.doorId, entityId: leaf.id, state: 'forced', by,
+        objectId: w.entityId, impulse: Number(w.impulse.toFixed(3)),
+      }, simTimeMs);
+    }
   }
 
   _decayPropWindows(stepMs, simTimeMs, touched) {
@@ -307,13 +479,32 @@ export class DamageSystem {
    *  threshold, or a capped surface) writes NOTHING: no line, no event, no notice, no mark. */
   _closePropWindow(w, simTimeMs) {
     this._openProp.delete(w.key);
+    /* A door frame's window (M23): the hit or shove did NOT force the door (a forcing deletes
+     * its window in _forceLeaf), so this is the "tempting, not yet" line — chargeBent, once
+     * per hung spell (state.frameBent, cleared when the door is forced and on reset), and
+     * only for a strain that reached DOOR.bentImpulseNs on a leaf still on its hinges. */
+    if (w.doorId != null) {
+      const leaf = this.registry.get(w.leafId);
+      if (!leaf || !leaf.state.hung || leaf.state.frameBent || w.impulse < DOOR.bentImpulseNs) return;
+      leaf.state.frameBent = true;
+      w.frameState = 'bent';
+    }
+    this._postPropLine(w, simTimeMs);
+  }
+
+  /** THE ONE PLACE a property line is written (M14, and the door frames of M23 through the
+   *  same door): the cap re-derived from the ledger, the §8.3 row's price — the per-N·s
+   *  rate, or a frame's fixed charge for the state it just reached — then the ledger push
+   *  and the DAMAGE_APPLIED event. A window that rounds to 0.00 writes NOTHING. */
+  _postPropLine(w, simTimeMs) {
     const P = DAMAGE.property;
+    const row = surfaceRow(w.surfaceId);
     const ledger = (this.state && this.state.ledger) ? this.state.ledger : null;
     if (ledger && !Array.isArray(ledger.propertyDamage)) ledger.propertyDamage = [];
     const lines = ledger ? ledger.propertyDamage : [];
     const already = lines.reduce((s, l) => s + (l.surfaceId === w.surfaceId ? l.cost : 0), 0);
     const room = Math.max(0, P.maxChargePerSurface - already);
-    let raw = propertyCost(w.impulse);
+    let raw = row.charges ? (row.charges[w.frameState] || 0) : propertyCost(w.impulse);
     if (typeof this.mitigation === 'function') raw *= this.mitigation(w);
     const cost = Number(Math.min(raw, room).toFixed(2));
     if (!(cost > 0)) return;
@@ -326,13 +517,16 @@ export class DamageSystem {
       defId: w.defId,
       impulse: Number(w.impulse.toFixed(3)),
       peakStepImpulse: Number(w.peak.toFixed(3)),
-      band: propertyBandFor(w.impulse).name,
+      band: row.charges ? w.frameState : propertyBandFor(w.impulse).name,
       cost,
       at: { x: Number(w.at.x.toFixed(2)), y: Number(w.at.y.toFixed(2)), z: Number(w.at.z.toFixed(2)) },
       normal: { x: Number(w.normal.x.toFixed(3)), y: Number(w.normal.y.toFixed(3)), z: Number(w.normal.z.toFixed(3)) },
       timeMs: w.startedAt,
       heldBy: w.heldBy.slice(),
     };
+    // A door frame's line names its kind and its door (M23), so the invoice, the recap and
+    // the suites can find it without parsing the surface id.
+    if (row.kind) { line.kind = row.kind; line.doorId = w.doorId; }
     if (ledger) lines.push(line);
     // The SAME event the item ledger uses; every listener branches on `category`.
     if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, { ...line, position: line.at }, simTimeMs);
@@ -399,6 +593,7 @@ export class DamageSystem {
     this._open.clear();
     this._openProp.clear();
     this._touchedProp.clear();
+    this._lostBy.clear();
     this._lastSpeed.clear();
     this.impactCount = 0;
     if (this.state && this.state.ledger) {
@@ -406,7 +601,10 @@ export class DamageSystem {
       if (Array.isArray(this.state.ledger.propertyDamage)) this.state.ledger.propertyDamage.length = 0;
       else this.state.ledger.propertyDamage = [];
     }
-    for (const e of this.registry.entities.values()) e.state.condition = 100;
+    for (const e of this.registry.entities.values()) {
+      e.state.condition = 100;
+      if (e.state.frameBent) e.state.frameBent = false;   // M23: a replay's frames are whole again
+    }
   }
 }
 

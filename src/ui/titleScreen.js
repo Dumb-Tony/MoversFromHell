@@ -18,9 +18,79 @@
  * observer while `visible`, because the Gamepad API has no events). Escape used to start it
  * too, and that was a bug rather than a convenience: main.js's shell also read Escape, both
  * listeners sit on window, and one keystroke started the job AND paused it.
+ *
+ * THE BRIEF (Phase 11 build-side M24 — §21.2 "Brief shows payout, estimate, distance, manifest
+ * profile, access notes, hazards, and optional goals"). The contract is built before this card
+ * is shown (main.js sets PICKUP at boot; the title never gates the clock, see above), so the
+ * card can READ it: main.js briefFacts() gathers the numbers from state and config and
+ * setBrief() renders them — never a prose constant. It is a job sheet pinned BESIDE the card
+ * (`#title-screen .brief`, absolutely positioned), not a block inside it: the card is centred
+ * vertically, so anything added inside it moves the START button and the controls list by
+ * half its height, and m31 B2 pins both rects to the pixel. On a viewport too narrow for the
+ * pair the sheet drops under the card (styles.css).
  */
 
 import { BUILD } from '../config.js';
+
+/** The words every prompt uses for a def id: 'couch_3seat_01' -> 'couch 3seat' (invoice.js). */
+const wordsOf = (id) => String(id || '').replace(/_\d+$/, '').replace(/_/g, ' ');
+const km = (n) => (Math.round(n * 10) / 10).toFixed(1);
+const m = (n) => Number(n).toFixed(2);
+const money = (n) => (n < 0 ? '−' : '') + Math.abs(n).toFixed(2);
+
+/**
+ * The brief as HTML, from main.js briefFacts(). PURE — exported so a suite can render a
+ * synthetic best (m31 B1) and so the markup has one home. Every row carries its number as a
+ * data attribute, so the suite asserts values, not prose.
+ * @param {object} f  see main.js briefFacts()
+ */
+export function briefHtml(f) {
+  if (!f) return '';
+  const man = f.manifest || {};
+  const cats = Object.entries(man.byCategory || {}).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const handling = Object.entries(man.handling || {}).sort((a, b) => b[1] - a[1]);
+  /* One line per hung door: its label and the clear width WITH the leaf on (house.js
+   *  hungClear); the leaf's thickness is the shared note under them. */
+  const doors = (f.doors || []).map((d) => `
+      <div class="brow bdoor" data-door="${esc(d.id)}" data-clear="${esc(m(d.clear))}" data-gap="${esc(m(d.gap))}">
+        <span>${esc(d.label)}</span><b>${esc(m(d.clear))} m</b></div>`).join('');
+  const leafT = (f.doors || []).find((d) => d.gap > d.clear);
+  const leafNote = leafT ? `<div class="btext bleaf" data-leaf="${esc(m(leafT.gap - leafT.clear))}">a door off its hinges frees ${esc(m(leafT.gap - leafT.clear))} m of that</div>` : '';
+  /* What does NOT fit its route intact, and what the screwdriver makes of it (§7.1, §3.3). */
+  const prep = (f.prep || []).map((p) => `
+      <div class="btext bprep" data-def="${esc(p.defId)}" data-part="${esc(p.part)}" data-door="${esc(p.doorId)}"
+           data-intact="${p.intactFits ? 1 : 0}" data-off="${p.offFits ? 1 : 0}" data-off-clearance="${esc(m(p.offClearance))}">
+        ${esc(p.name)} vs ${esc(p.doorLabel)} ${esc(m(p.doorM))} m: ${p.intactFits
+          ? `fits intact by ${esc(m(p.intactClearance))} m`
+          : `${esc(p.part)} off ${p.offFits ? `fits by ${esc(m(p.offClearance))} m` : 'still no fit'}`}</div>`).join('');
+  const hazards = (f.hazards || []).map((h) => `
+      <div class="btext bhaz" data-type="${esc(h.type)}" data-at="${esc(h.at)}">${esc(h.label)} — <b>${esc(wordsOfType(h.type))}</b> at ${esc(h.at)} s</div>`).join('');
+  const tight = f.tightest ? `
+      <div class="btext bhaz" data-type="door" data-door="${esc(f.tightest.id)}" data-clear="${esc(m(f.tightest.clear))}">
+        tight door: ${esc(f.tightest.label)} <b>${esc(m(f.tightest.clear))} m</b></div>` : '';
+  const g = f.goals || {};
+  const best = g.best
+    ? `<div class="btext bgoal" data-k="best" data-profit="${esc(Number(g.best.profit).toFixed(2))}" data-grade="${esc(g.best.grade || '')}">
+        beat your best: <b>${esc(money(g.best.profit))}</b> (${esc(g.best.grade || '?')})</div>`
+    : '<div class="btext bgoal" data-k="best" data-profit="">no best yet — the first settlement sets it</div>';
+  return `
+    <div class="bhead">THE JOB <span>${esc(f.contractId || '')}</span></div>
+    <div class="brow" data-k="payout" data-v="${esc(f.payout)}"><span>payout</span><b>${esc(money(f.payout))}</b></div>
+    <div class="brow" data-k="estimate" data-v="${esc(f.estimateMin)}"><span>estimate</span><b>${esc(Math.round(f.estimateMin))} min</b></div>
+    <div class="brow" data-k="distance" data-v="${esc(f.distanceKm)}" data-legs="${esc(f.legs)}"><span>distance</span><b>${esc(km(f.distanceKm))} km · ${esc(f.legs)} leg${f.legs === 1 ? '' : 's'}</b></div>
+    <div class="bsec">manifest</div>
+    <div class="btext bman" data-total="${esc(man.total || 0)}"><b>${esc(man.total || 0)} items</b> · ${cats.map(([c, n]) => `<span class="bcat" data-cat="${esc(c)}" data-n="${n}">${n} ${esc(c)}</span>`).join(', ')}</div>
+    ${handling.length ? `<div class="btext bhand">${handling.map(([h, n]) => `<span class="bhandling" data-h="${esc(h)}" data-n="${n}">${n} ${esc(h)}</span>`).join(' · ')}</div>` : ''}
+    ${man.heaviest ? `<div class="btext bheavy" data-def="${esc(man.heaviest.defId)}" data-kg="${esc(man.heaviest.mass)}">heaviest: ${esc(man.heaviest.name)} <b>${esc(man.heaviest.mass)} kg</b></div>` : ''}
+    <div class="bsec">access — clear widths, doors on</div>${doors}${leafNote}${prep}
+    <div class="bsec">hazards</div>${hazards}${tight}
+    <div class="bsec">optional</div>
+    ${best}
+    <div class="btext bgoal" data-k="bonus" data-one-trip="${esc(g.oneTrip)}" data-room="${esc(g.roomAccuracy)}">one trip <b>+${esc(g.oneTrip)}</b> · every room right <b>+${esc(g.roomAccuracy)}</b></div>`;
+}
+
+/** 'hardBrake' -> 'hard brake'. */
+function wordsOfType(t) { return String(t || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase(); }
 
 export class TitleScreen {
   constructor(root) {
@@ -67,9 +137,12 @@ export class TitleScreen {
           <span>${esc(BUILD.label)} · ${esc(BUILD.date)}</span>
           <span><b>Esc</b> / <b>Menu</b> pause · <b>F3</b> stats and the metre grid</span>
         </div>
-      </div>`;
+      </div>
+      <aside class="brief" aria-label="job brief" hidden></aside>`;
     root.appendChild(this.el);
 
+    /** The facts the brief was last rendered from (main.js briefFacts()); null until set. */
+    this.brief = null;
     this.onStart = null;
     /** §21.4: the settings panel is reachable BEFORE the job starts as well as from the pause
      *  card (Phase 11 build-side M4). main.js registers the panel's show(). */
@@ -94,6 +167,15 @@ export class TitleScreen {
   }
 
   get visible() { return !this._done; }
+
+  /** Render §21.2's brief from the facts main.js gathered (briefFacts). Null hides it. */
+  setBrief(facts) {
+    const el = this.el.querySelector('.brief');
+    this.brief = facts || null;
+    if (!el) return;
+    el.innerHTML = briefHtml(this.brief);
+    el.hidden = !this.brief;
+  }
 
   start() {
     if (this._done) return;
