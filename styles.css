@@ -1022,3 +1022,74 @@ body.coop #build-stamp { opacity: .45; }
 .hc #settlement .export-row, .hc #settlement .export-row .copy-note { opacity: 1; }
 .hc #build-stamp, .hc #debug-overlay .ev { color: var(--paper); }
 .hc #settlement .line.out .amt { color: var(--coral); }
+
+/* ---- the first-minute cards (Phase 11 build-side M22; §26.7, §21.3, §21.1) ---------------
+   src/ui/walkthrough.js. Bottom-LEFT, above the help line, out of the working area: the
+   middle third is where a doorway is judged and nothing may cover it. `bottom` is set by the
+   card itself from the help line's MEASURED top (walkthrough.js clearance), never here, so a
+   larger text size or high contrast cannot push the two into each other (m29 W1). The card
+   is pointer-inert like every HUD panel; only its ✕ takes a click. Every font size scales by
+   --ts (m16 U1). Same chip as the prompt's key (.prompt .key). */
+#walkthrough {
+  position: absolute;
+  left: 10px; bottom: 46px;
+  width: min(312px, 42vw);
+  padding: 7px 10px 8px;
+  background: rgba(23,21,34,.88);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--lime);
+  border-radius: 6px;
+  font: calc(12px * var(--ts))/1.45 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  pointer-events: none;
+  user-select: none;
+}
+#walkthrough[hidden] { display: none; }
+#walkthrough .wt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+#walkthrough .wt-n {
+  font: 700 calc(10px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+/* The device, in a word (§26.5): shown when the last device was a pad. */
+#walkthrough .wt-dev {
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font: 700 calc(9px * var(--ts))/1.6 Quicksand, system-ui, sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .75;
+}
+#walkthrough .wt-dev[hidden] { display: none; }
+#walkthrough .wt-skip {
+  margin-left: auto;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--paper);
+  font: 700 calc(11px * var(--ts))/1.5 ui-monospace, Consolas, monospace;
+  opacity: .7;
+  cursor: pointer;
+}
+#walkthrough .wt-skip:hover { opacity: 1; }
+#walkthrough .wt-skip:focus-visible { opacity: 1; outline: 2px solid var(--paper); outline-offset: 2px; }
+#walkthrough .wt-title { font: 700 calc(13px * var(--ts))/1.35 Quicksand, system-ui, sans-serif; }
+#walkthrough .wt-text { margin-top: 2px; opacity: .8; }
+#walkthrough .key {
+  display: inline-block;
+  min-width: 17px; padding: 0 5px;
+  background: var(--lime); color: #14180a;
+  border-radius: 3px;
+  font: 700 calc(11px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
+  text-align: center;
+  vertical-align: baseline;
+}
+/* High contrast (M19's rule): opaque, 2 px with 1 px less padding, nothing dimmed. */
+.hc #walkthrough { background: var(--panel); border-width: 2px; border-left-width: 3px; padding: 6px 9px 7px; }
+.hc #walkthrough .wt-text, .hc #walkthrough .wt-dev, .hc #walkthrough .wt-skip { opacity: 1; }
+/* The two chips in the head row set its height: their 2 px border is paired with a −1 px
+   vertical margin so the row, and the card's rect, do not grow (m29 W1z2: < 0.5 px). */
+.hc #walkthrough .wt-skip, .hc #walkthrough .wt-dev { border-width: 2px; margin-top: -1px; margin-bottom: -1px; }

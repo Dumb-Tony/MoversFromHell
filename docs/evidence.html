@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Movers From Hell — §26.7 evidence</title>
+<link rel="icon" href="data:,">
+<!--
+  The evidence page — Phase 11 build-side M21. GDD §25.2 Phase 12 "evidence report and Unity
+  go/revise/stop; fun proven, not feature count"; §26.7 the six signals; §27.3 the questions;
+  §22.5 reproducible reports from exported logs.
+
+  A STATIC page beside the game: GitHub Pages serves the repo root, so this file imports
+  ../src/telemetry/evidence.js over http the same way index.html imports src/main.js, and the
+  harness (tools/smoketest.ps1 serves the same root) opens it at /docs/evidence.html. No build
+  step, no framework, no fonts fetched, no request but its own module imports — every number
+  is computed in the tester's browser from what they pasted, and nothing leaves the machine.
+
+  Palette tokens are styles.css's, by value (this page does not load the game's stylesheet).
+-->
+<style>
+  :root {
+    --panel: #171522; --line: #332f47; --lime: #a8d93a; --violet: #8a7ff0;
+    --coral: #ff5a5a; --paper: #f2ead9; --amber: #f0b03a; --bg: #0d0c14;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--paper);
+    font: 13px/1.6 Quicksand, 'Baloo 2', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 26px 22px 60px; }
+  h1 { margin: 0; color: var(--lime); letter-spacing: .14em; font-size: 17px; font-weight: 700; }
+  h1 span { color: var(--paper); opacity: .55; letter-spacing: 0; font-weight: 400; font-size: 12px; margin-left: 10px; }
+  h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .1em; color: var(--violet); font-weight: 700; text-transform: uppercase; }
+  h2 small { color: var(--paper); opacity: .5; letter-spacing: 0; text-transform: none; font-weight: 400; margin-left: 8px; }
+  .lede { opacity: .75; max-width: 76ch; margin: 8px 0 0; }
+  section.card { margin-top: 18px; padding: 16px 18px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 18px 60px rgba(0,0,0,.6); }
+  textarea { width: 100%; background: rgba(0,0,0,.3); color: var(--paper); border: 1px solid var(--line);
+    border-radius: 5px; padding: 8px; font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  textarea:focus { outline: 1px solid var(--violet); }
+  #paste { height: 150px; }
+  #md { height: 220px; margin-top: 8px; }
+  #md[hidden] { display: none; }
+  .row { margin-top: 10px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  button { cursor: pointer; border-radius: 6px; font: 600 12px Quicksand, system-ui, sans-serif; }
+  button.primary { background: var(--lime); color: #14180a; border: 0; padding: 8px 18px; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.minor { background: transparent; color: var(--paper); border: 1px solid var(--line); padding: 6px 12px; }
+  button.minor:hover { border-color: var(--violet); }
+  .note { opacity: .6; font-size: 11px; }
+  #rejected { margin-top: 8px; color: var(--coral); font-size: 11px; }
+  #rejected:empty { display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-weight: 600; opacity: .55; font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 4px 8px 6px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px 7px 0; border-bottom: 1px solid rgba(51,47,71,.5); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  #signals td.sig { font-weight: 700; white-space: nowrap; }
+  #signals td.rule { opacity: .8; font-style: italic; max-width: 26ch; }
+  #signals td.measured { max-width: 40ch; }
+  #signals td.measured .sub { display: block; opacity: .5; font-size: 10px; margin-top: 3px; }
+  #signals td.runs { opacity: .6; font-size: 11px; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-weight: 700; font-size: 11px;
+    letter-spacing: .04em; white-space: nowrap; border: 1px solid var(--line); }
+  tr.v-pass .badge { background: var(--lime); color: #14180a; border-color: var(--lime); }
+  tr.v-notyet .badge { background: var(--amber); color: #1c1405; border-color: var(--amber); }
+  tr.v-nodata .badge { background: transparent; color: var(--paper); opacity: .55; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; }
+  .agg { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; border-bottom: 1px solid rgba(51,47,71,.5); padding: 4px 0; }
+  .agg span { opacity: .55; }
+  .agg b { font-variant-numeric: tabular-nums; text-align: right; }
+  .qblock { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(51,47,71,.6); }
+  .qblock .qtext { font-size: 12px; opacity: .9; }
+  .qblock .qid { color: var(--violet); font-weight: 700; margin-right: 6px; }
+  .bars { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 11px; }
+  .bars .anchor { opacity: .5; min-width: 7em; }
+  .bars .anchor.high { text-align: right; }
+  .bar { display: inline-flex; flex-direction: column; align-items: center; min-width: 34px; }
+  .bar i { display: block; width: 26px; background: var(--violet); border-radius: 3px 3px 0 0; }
+  .bar span { font-variant-numeric: tabular-nums; opacity: .8; }
+  .bar small { opacity: .45; }
+  .answers { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+  .answers li span { opacity: .5; margin-right: 6px; font-size: 11px; }
+  .empty { opacity: .45; font-size: 11px; }
+  pre#config { margin: 8px 0 0; padding: 10px; background: rgba(0,0,0,.3); border: 1px solid var(--line);
+    border-radius: 5px; font: 10px/1.45 ui-monospace, Consolas, monospace; overflow: auto; max-height: 260px; }
+  footer { margin-top: 24px; text-align: center; font-size: 10px; opacity: .4; }
+  a { color: var(--violet); }
+  #run-count { font-weight: 400; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>EVIDENCE <span>Movers From Hell · GDD §26.7 Fun Validation Gate</span></h1>
+    <p class="lede">Paste run reports here — the settlement sheet's <b>Copy run report (JSON)</b> button makes one
+      per contract. One report, many pasted one after another, or a JSON array all work. The six §26.7 signals,
+      the §27.3 answer histograms and the aggregate invoice, phase, drop and recovery numbers are computed in
+      <em>this</em> browser tab; nothing is uploaded and nothing is fetched. §25.2 Phase 12 decides Unity
+      go / revise / stop from this table: "fun proven, not feature count".</p>
+  </header>
+
+  <section class="card" id="paste-card">
+    <h2>Run reports <small>JSON from the settlement sheet</small></h2>
+    <textarea id="paste" spellcheck="false" aria-label="paste run reports" placeholder='{ "build": "phase-24", "counters": { … }, "questionnaire": { … }, "events": [ … ] }  — paste one or many'></textarea>
+    <div class="row">
+      <button type="button" id="add" class="primary">Add</button>
+      <button type="button" id="clear" class="minor">Clear</button>
+      <button type="button" id="copy-md" class="minor">Copy evidence report (Markdown)</button>
+      <span class="note" id="copy-note">the Markdown is what goes into docs/PLAYTEST_NOTES.md</span>
+    </div>
+    <textarea id="md" hidden spellcheck="false" aria-label="evidence report as Markdown"></textarea>
+    <div id="rejected"></div>
+  </section>
+
+  <section class="card">
+    <h2>Runs loaded <small id="run-count">none yet</small></h2>
+    <table id="runs">
+      <thead><tr>
+        <th>run</th><th>session</th><th>build</th><th>seed</th><th>date</th>
+        <th class="num">trips</th><th class="num">profit</th><th>complete</th><th class="num">answered</th><th>timings from</th>
+      </tr></thead>
+      <tbody id="run-rows"></tbody>
+    </table>
+    <div class="empty" id="runs-empty">Nothing loaded. Paste a report above and press Add.</div>
+  </section>
+
+  <section class="card">
+    <h2>§26.7 signals <small>minimum evidence before Unity commitment</small></h2>
+    <table id="signals">
+      <thead><tr><th>signal</th><th>minimum evidence (§26.7)</th><th>measured</th><th>verdict</th><th>runs</th></tr></thead>
+      <tbody id="signal-rows"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Aggregates <small>every run in the set</small></h2>
+    <div class="grid" id="aggregates"></div>
+  </section>
+
+  <section class="card">
+    <h2>§27.3 questions <small>the seven the sheet asks, with the sheet's end-words</small></h2>
+    <div id="questions"></div>
+  </section>
+
+  <section class="card">
+    <h2>How the table is read <small>stated so a reader can disagree with it</small></h2>
+    <ul id="notes" class="note" style="margin:0;padding-left:18px"></ul>
+    <details style="margin-top:8px">
+      <summary class="note" style="cursor:pointer">EVIDENCE thresholds (src/config.js)</summary>
+      <pre id="config"></pre>
+    </details>
+  </section>
+
+  <footer>Movers From Hell · docs/evidence.html · a static consumer of src/telemetry/evidence.js · zero external requests</footer>
+</main>
+
+<script type="module">
+  import { EVIDENCE } from '../src/config.js';
+  import { parseReports, evidenceFrom, evidenceMarkdown, VERDICT, QUESTION_COUNT } from '../src/telemetry/evidence.js';
+
+  const $ = (sel) => document.querySelector(sel);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const money = (v) => (v === null || v === undefined ? '—' : (v < 0 ? '−' : '') + Math.abs(v).toFixed(2));
+  const verdictClass = (v) => (v === VERDICT.PASS ? 'v-pass' : v === VERDICT.NOT_YET ? 'v-notyet' : 'v-nodata');
+
+  /** Everything the page holds: the raw pasted items (garbage included, so a reject is shown
+   *  beside what it was) and the last report computed from them. */
+  const items = [];
+  let parseRejects = [];
+  let last = null;
+
+  function render() {
+    last = evidenceFrom(items);
+    const ev = last;
+
+    // rejects: the parser's (not JSON) and the module's (JSON but not a report)
+    const rej = [
+      ...parseRejects.map((r) => `pasted text ${r.index + 1}: ${r.reason} — "${r.sample}"`),
+      ...ev.rejected.map((r) => `item ${r.index + 1}: ${r.reason}`),
+    ];
+    $('#rejected').innerHTML = rej.length ? `rejected ${rej.length}: ` + rej.map(esc).join(' · ') : '';
+
+    // runs
+    const sessionOf = {};
+    for (const s of ev.sessions) for (const id of s.runIds) sessionOf[id] = s.label;
+    $('#run-rows').innerHTML = ev.runs.map((r) => `
+      <tr class="run-row" data-run="${esc(r.id)}">
+        <td class="mono">${esc(r.id)}</td>
+        <td>${esc(sessionOf[r.id] || '')}</td>
+        <td class="mono">${esc(r.build)}</td>
+        <td class="mono">${esc(r.seed === null ? '—' : r.seed)}</td>
+        <td class="mono">${esc(r.date ? r.date.replace('T', ' ').slice(0, 16) : '—')}</td>
+        <td class="num">${r.trips}</td>
+        <td class="num">${esc(money(r.profit))}</td>
+        <td>${r.complete ? 'yes' : (r.delivered === null ? '—' : `${r.delivered}/${r.total}`)}</td>
+        <td class="num">${r.answered}/${QUESTION_COUNT}</td>
+        <td>${r.timingSource === 'events' ? `events (${r.eventsRecorded})` : r.timingSource === 'walkthrough' ? 'walkthrough stamps' : 'none — no event list'}</td>
+      </tr>`).join('');
+    $('#run-count').textContent = ev.runs.length ? `${ev.runs.length} run${ev.runs.length === 1 ? '' : 's'} · ${ev.sessions.length} session${ev.sessions.length === 1 ? '' : 's'} · ${ev.aggregates.builds.join(', ')}` : 'none yet';
+    $('#runs-empty').hidden = ev.runs.length > 0;
+
+    // the §26.7 table
+    $('#signal-rows').innerHTML = ev.signals.map((s) => `
+      <tr class="signal-row ${verdictClass(s.verdict)}" data-signal="${esc(s.id)}">
+        <td class="sig">${esc(s.label)}</td>
+        <td class="rule">${esc(s.rule)}</td>
+        <td class="measured">${esc(s.text)}<span class="sub">${esc(s.note || '')}</span></td>
+        <td><span class="badge">${esc(s.verdict)}</span></td>
+        <td class="runs mono">${esc(s.runIds.join(' ') || '—')}</td>
+      </tr>`).join('');
+
+    // aggregates
+    const a = ev.aggregates;
+    const fmtMap = (m) => { const ks = Object.keys(m); return ks.length ? ks.map((k) => `${k} ${m[k]}`).join(', ') : '—'; };
+    const aggs = [
+      ['runs', `${a.runs}${a.rejected ? ` (+${a.rejected} rejected)` : ''}`],
+      ['completion', a.runs ? `${a.complete}/${a.runs} = ${Math.round((a.completionRate || 0) * 100)}%` : '—'],
+      ['mean profit', `${money(a.profit.mean)}${a.profit.n ? ` (min ${money(a.profit.min)}, max ${money(a.profit.max)})` : ''}`],
+      ['trips', Object.keys(a.trips).length ? Object.entries(a.trips).map(([t, c]) => `${t} × ${c}`).join(', ') : '—'],
+      ['replays in the set', `${a.restarted}`],
+      ['phase means (s)', Object.keys(a.phases).length ? Object.entries(a.phases).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ') : '—'],
+      ['furniture damage lines', `${money(a.damage.furnitureTotal)} · ${a.damage.damageEvents} events`],
+      ['property damage lines', `${money(a.damage.propertyTotal)} · ${a.damage.propertyEvents} events`],
+      ['left behind', `${money(a.damage.leftBehindTotal)} in ${a.damage.leftBehindRuns} run(s) · parts ${money(a.damage.partsLeftTotal)}`],
+      ['recoveries by kind', `${a.recoveries}: ${fmtMap(a.recoveriesByKind)}`],
+      ['drops by reason', `${a.drops} of ${a.grips} grips: ${fmtMap(a.dropsByReason)}`],
+      ['worst cargo shift', a.worstShift.bins.map((b) => `${b.label} × ${b.count}`).join(', ') + (a.worstShift.max === null ? '' : ` · max ${a.worstShift.max.toFixed(3)} m`)],
+      ['straps', `placed ${a.straps.placed}, tensioned ${a.straps.tensioned}, overstressed ${a.straps.overstressed}, failed ${a.straps.failed}`],
+      ['runs without an event list', `${a.eventsMissing}`],
+      ['walkthrough key reported', `${a.walkthroughReported}`],
+    ];
+    $('#aggregates').innerHTML = aggs.map(([k, v]) => `<div class="agg"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+
+    // §27.3 histograms
+    const h = ev.histograms;
+    $('#questions').innerHTML = h.questions.map((q) => {
+      if (q.kind === 'scale') {
+        const peak = Math.max(1, ...q.counts);
+        const bars = q.counts.map((c, i) => `<div class="bar"><span>${c}</span><i style="height:${Math.round(4 + 36 * c / peak)}px${c ? '' : ';opacity:.25'}"></i><small>${i + h.scaleMin}</small></div>`).join('');
+        return `<div class="qblock" data-q="${esc(q.id)}"><div class="qtext"><span class="qid">${esc(q.id)}</span>${esc(q.text)}
+          <span class="note"> · n=${q.answered}${q.mean === null ? '' : ` · mean ${q.mean.toFixed(2)}`}</span></div>
+          <div class="bars"><span class="anchor low">${esc(q.low)}</span>${bars}<span class="anchor high">${esc(q.high)}</span></div></div>`;
+      }
+      const list = q.answers.length
+        ? `<ul class="answers">${q.answers.map((x) => `<li><span class="mono">${esc(x.runId)}</span>${esc(x.text)}</li>`).join('')}</ul>`
+        : '<div class="empty">no answers yet</div>';
+      return `<div class="qblock" data-q="${esc(q.id)}"><div class="qtext"><span class="qid">${esc(q.id)}</span>${esc(q.text)}<span class="note"> · ${q.answered} answer${q.answered === 1 ? '' : 's'}</span></div>${list}</div>`;
+    }).join('');
+
+    // how it is read
+    const notes = [
+      'Input contract: M6\'s run report (src/telemetry/runLog.js buildRunSummary). This page reads it and never changes it.',
+      ...ev.signals.map((s) => `${s.label}: ${s.note}`),
+      'The save\'s kept runs are compact (no event list): they count for every signal except Comprehension, which needs the first grip and first load stamps — from the events, or from the walkthrough key when the first-minute cards were shown.',
+      'A verdict is PASS, NOT YET or no data. "Most" is strictly more than half of the runs measured; "at least half" is inclusive.',
+    ];
+    $('#notes').innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
+    $('#config').textContent = JSON.stringify(EVIDENCE, null, 2);
+  }
+
+  function add(text) {
+    const p = parseReports(text);
+    items.push(...p.items);
+    parseRejects = parseRejects.concat(p.rejected.map((r) => ({ ...r, index: r.index + parseRejects.length })));
+    render();
+    return { added: p.items.length, rejected: p.rejected.length };
+  }
+  function clear() {
+    items.length = 0;
+    parseRejects = [];
+    $('#paste').value = '';
+    $('#md').hidden = true;
+    $('#md').value = '';
+    $('#copy-note').textContent = 'the Markdown is what goes into docs/PLAYTEST_NOTES.md';
+    render();
+  }
+  function markdown() {
+    return evidenceMarkdown(last || evidenceFrom(items), { date: new Date().toISOString().slice(0, 10) });
+  }
+  /** The invoiceScreen.js copy pattern: the textarea is filled FIRST, so the text exists whether
+   *  or not the clipboard is allowed; a refused write unhides it, selected. */
+  function copyMarkdown() {
+    const ta = $('#md'), note = $('#copy-note');
+    const text = markdown();
+    ta.value = text;
+    const fallback = () => {
+      ta.hidden = false;
+      try { ta.focus(); ta.select(); } catch (e) { /* no selection API here */ }
+      note.textContent = 'clipboard refused — the Markdown is selected below, copy it by hand';
+    };
+    let p = null;
+    try { p = (navigator.clipboard && navigator.clipboard.writeText) ? navigator.clipboard.writeText(text) : null; } catch (e) { p = null; }
+    if (p && typeof p.then === 'function') {
+      p.then(() => { note.textContent = `copied — ${text.length} characters of Markdown`; ta.hidden = false; }).catch(fallback);
+    } else fallback();
+    return text;
+  }
+
+  $('#add').addEventListener('click', () => {
+    const r = add($('#paste').value);
+    if (r.added > 0) $('#paste').value = '';
+    $('#copy-note').textContent = r.added ? `added ${r.added} report${r.added === 1 ? '' : 's'}${r.rejected ? `, ${r.rejected} rejected` : ''}` : (r.rejected ? `${r.rejected} rejected — see below` : 'nothing to add');
+  });
+  $('#clear').addEventListener('click', clear);
+  $('#copy-md').addEventListener('click', copyMarkdown);
+
+  /** For tools/m28-evidence-tests.js (E5) and for anyone scripting a session. */
+  window.__EVIDENCE = {
+    get runs() { return items.slice(); },
+    get last() { return last; },
+    add, clear, markdown, copyMarkdown,
+    EVIDENCE,
+  };
+  render();
+</script>
+</body>
+</html>

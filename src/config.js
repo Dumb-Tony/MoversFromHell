@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 24,
-  label: 'phase-24',
+  phase: 25,
+  label: 'phase-25',
   date: '2026-09-05',
 });
 
@@ -412,6 +412,24 @@ export const CONTRACT = Object.freeze({
    *  it (m11 O6). 30 s: long enough to have walked the house and looked at the truck, short
    *  enough to reach a tester before the first minute is over. */
   stallHintMs: 30000,
+});
+
+/** §26.7 Comprehension "most players move a box and identify the next objective without
+ *  coaching" / §25.2 Phase 11 "onboarding" / §21.3 first steps — Phase 11 build-side M22,
+ *  src/ui/walkthrough.js. Three cards, each dismissed by DOING the thing (the first grip by
+ *  seat 0, the first item loaded, then the objective line taking over), never by a button;
+ *  a ✕ skips. Shell state (the card and the shell key `walkthroughSeen`), never game.state,
+ *  and never in the harness unless a suite asks (?walkthrough=1 or DEBUG.walkthroughInHarness). */
+export const WALKTHROUGH = Object.freeze({
+  /** How long the third card ("now the rest — the panel says what is next") stays after the
+   *  first load, in SIM time, before it retires on its own; the first delivery retires it
+   *  sooner. 20 s: long enough to read once and glance at the objective line it points to,
+   *  short enough that a player who drove straight off is not still being told. */
+  step3Ms: 20000,
+  /** The gap the card keeps above the help line it sits over (px, at --ts 1; the card's
+   *  bottom is measured from the help line's live height, so a larger text size or high
+   *  contrast cannot push the two into each other — m29 W1). */
+  clearancePx: 8,
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */
@@ -1172,6 +1190,11 @@ export const SETTINGS = Object.freeze({
     reducedHud: false,
     highContrast: false,
     hints: true,
+    /** §26.7 / §21.3 first-minute cards (Phase 11 build-side M22, walkthrough.js): true once
+     *  the three cards retired or were skipped in this browser — the card is never shown to a
+     *  player who has done it (a settings-card checkbox unticks it). Hints off hides the cards
+     *  too, without touching this. */
+    walkthroughSeen: false,
   },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
@@ -1231,6 +1254,61 @@ export const TELEMETRY = Object.freeze({
   questionnaire: { scaleMin: 1, scaleMax: 5 },
 });
 
+/** §26.7 Fun Validation Gate as DATA — Phase 11 build-side M21 (src/telemetry/evidence.js,
+ *  docs/evidence.html). §25.2 Phase 12 decides Unity go/revise/stop from 'an evidence report',
+ *  and this block is what the report scores against.
+ *
+ *  `rules` are the GDD's six minimum-evidence cells VERBATIM (GDD.md §26.7; m28 E3 pins them
+ *  against the document, not against this file). Everything else is the threshold the page
+ *  reads each signal at, from M6's run reports (runLog.js buildRunSummary — the input
+ *  contract this never changes). The GDD's quantifiers: "most" is STRICTLY more than `most`,
+ *  "at least half" is `half` INCLUSIVE; "rank highly" and "not dominant" are the numbers
+ *  below, and the page prints them beside every verdict so a reader can disagree with them. */
+export const EVIDENCE = Object.freeze({
+  rules: Object.freeze({
+    comprehension: 'Most players move a box and identify the next objective without coaching',
+    emergentStory: 'Most groups recount an unscripted event afterward',
+    learning: 'Second run changes route, pack, tool, or coordination',
+    replayIntent: 'At least half voluntarily replay or ask for more',
+    corePreference: 'Carrying/packing/transport consequences rank highly',
+    friction: 'Control confusion and unrecoverable bugs are not dominant',
+  }),
+  most: 0.5,
+  half: 0.5,
+  /** Comprehension, from the report's events (GRIP_STARTED, CARGO_STATE loaded) or, when
+   *  the compact stored run has no events, from M22's walkthrough stamps (step1Ms = first
+   *  grip, step2Ms = first load). The stall hint is NOT an event, so "before the stall hint"
+   *  is its deadline: firstGripMs equals CONTRACT.stallHintMs — a grip after that had the
+   *  coaching §26.7 says they must not need. A load inside two minutes of sim time is the
+   *  "move a box" half of the cell. */
+  comprehension: { firstGripMs: 30000, firstLoadMs: 120000 },
+  /** Learning pairs a tester's first and second run (sessions: consecutive reports whose
+   *  `restarts` climbs — there is no identity by design, §27.4) and calls the second run
+   *  changed when any of these moves by at least the delta: trips (route), straps placed or
+   *  worst cargo shift (pack), tool changes (tool). `minFraction` of pairs must change. */
+  learning: { tripsDelta: 1, strapsDelta: 1, toolDelta: 1, shiftDeltaM: 0.10, minFraction: 0.5 },
+  /** Replay intent per run: q7 at or above `q7Yes` on the 1..5 scale, OR restarts >= 1. */
+  replayIntent: { q7Yes: 4 },
+  /** Core preference: the mean of each of these §27.3 scales must reach `minMean`. */
+  corePreference: { questions: Object.freeze(['q3', 'q4', 'q5']), minMean: 3.5 },
+  /** Friction: recoveries per run, drops per grip, and the fraction of runs whose q1 answer
+   *  mentions one of `words` — all three at or under their cap. */
+  friction: Object.freeze({
+    maxRecoveriesPerRun: 1.0, maxDropsPerGrip: 0.5, maxMentionFraction: 0.5,
+    words: Object.freeze(['stuck', 'control', 'bug', 'glitch', 'confus', 'broken', 'lost']),
+  }),
+  /** Invoice line kinds the aggregates sum (invoice.js LINE_KINDS, copied so the static page
+   *  imports nothing but config and the question table; m28 E3 asserts they agree). */
+  lineKinds: Object.freeze({
+    damage: 'furniture damage', property: 'property damage',
+    leftBehind: 'items left behind', partsLeft: 'parts left behind',
+  }),
+  /** Worst-cargo-shift histogram edges, metres (the last bin is "past the last edge"). */
+  shiftBinsM: Object.freeze([0.05, 0.25, 0.50]),
+  /** Caps on report strings echoed back into the page. */
+  textLimits: Object.freeze({ label: 40, sample: 60 }),   // sample: chars of a rejected paste shown beside its reason
+});
+
 /** §22.5 debug + performance instrumentation. Validated: Phase 0. */
 export const DEBUG = Object.freeze({
   /** OFF in the shipping build (Phase 11 build-side M3): it shipped ON for fifteen phases,
@@ -1257,4 +1335,8 @@ export const DEBUG = Object.freeze({
   softlockActionsMin: 6,
   softlockActionsMax: 12,
   softlockDriveSessions: 3,
+  /** M22: the first-minute cards (walkthrough.js) are OFF on the harness's scratch pages
+   *  (`_smoketest-<port>.html`) unless a suite asks with ?walkthrough=1 — every DOM-shape
+   *  assertion in m11/m15 would otherwise move. True here shows them in every harness run. */
+  walkthroughInHarness: false,
 });

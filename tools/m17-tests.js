@@ -34,6 +34,7 @@ import { DEST_ZONES } from '../src/world/destination.js';
 import { LINE_KINDS } from '../src/contract/invoice.js';
 import { load, save, sanitiseRuns, SAVE_KEY } from '../src/core/save.js';
 import { RunRecorder, createTelemetryCounters, countEvent, compactRun } from '../src/telemetry/runLog.js';
+import { walkthroughReport } from '../src/telemetry/runLog.js';   // M22: the summary's walkthrough key
 import { QUESTIONS, readAnswers } from '../src/ui/questionnaire.js';
 
 const lines = [];
@@ -301,6 +302,25 @@ lines.push('--- R2. the run summary round-trips and names every §27.4 signal --
      Array.isArray(s.events) && s.events !== recorder.events && s.events.length === recorder.events.length);
   ok('R2d game.state.telemetry (counters included) is plain serializable data (§22.4)',
      (() => { try { const t = JSON.parse(JSON.stringify(game.state.telemetry)); return typeof t.counters.grips === 'number'; } catch (e) { return false; } })());
+}
+
+/* ── M22 (Phase 11 build-side): R2's key list gains `walkthrough` ─────────────────
+ * §26.7 Comprehension: the run summary says whether the first-minute cards were shown and
+ * when each retired (m29 W7 pins the values). On this harness page the cards are not built
+ * (no ?walkthrough=1, DEBUG.walkthroughInHarness false), so the record reads { shown: false }
+ * — the shape M21's evidence page must tolerate either way. */
+lines.push('--- M22. the run summary names the first-minute cards (m29 W7 has the numbers) ---');
+{
+  const rt = JSON.parse(JSON.stringify(M.runSummary()));
+  ok('M22-R2g the summary carries a `walkthrough` key beside phases, counters, complete, restarts, questionnaire',
+     'walkthrough' in rt && ['phases', 'counters', 'complete', 'restarts', 'questionnaire'].every((k) => k in rt));
+  deep('M22-R2h …reading { shown: false } on the harness page (the cards are not built here)', rt.walkthrough, { shown: false });
+  ok('M22-R2i …and the card is not in the DOM at all (no ?walkthrough= in this boot)',
+     M.walkthrough && M.walkthrough.enabled === false && !document.getElementById('walkthrough'), String(M.walkthrough && M.walkthrough.enabled));
+  deep('M22-R2j walkthroughReport() normalises: nothing → { shown: false }', walkthroughReport(null), { shown: false });
+  deep('M22-R2k …a shown card → the four keys, stamps rounded to the ms, a missing stamp null',
+       walkthroughReport({ shown: true, step1Ms: 1234.56, step2Ms: null, step3Ms: undefined }),
+       { shown: true, step1Ms: 1235, step2Ms: null, step3Ms: null });
 }
 
 /* ── R3. grips and drops agree with the events ────────────────────────────── */

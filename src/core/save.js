@@ -19,8 +19,9 @@
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
  *   runs         §27.4's local run records (Phase 11 build-side M6): the last
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
- *                completion, restarts and the §27.3 questionnaire answers — never the event
- *                lists. "Deletable": the settlement sheet's 'clear responses' empties it.
+ *                completion, restarts, the §27.3 questionnaire answers and (M22) the first-
+ *                minute cards' block — never the event lists. "Deletable": the settlement
+ *                sheet's 'clear responses' empties it.
  *   bindings     §21.4 "full remapping" (Phase 11 build-side M18): the DIFFERENCES from the
  *                shipped binding tables, per seat, context and action — never the whole
  *                table, so a default this build changes wins for every action the player
@@ -176,7 +177,21 @@ export function sanitiseRun(obj) {
     eventsRecorded: finite(obj.eventsRecorded, 0),
     eventsDropped: finite(obj.eventsDropped, 0),
     questionnaire,
+    /* M22: the first-minute cards' block (runLog.js walkthroughReport's two shapes), kept
+     * through save() AND load() so the evidence page (M21, evidence.js) can read the stamps
+     * from a kept run after a reload, not only from a Copy export (m29 W7i). A record without
+     * the key (a pre-M22 save) reads null — "not reported" — never a guessed { shown: false }. */
+    walkthrough: sanitiseWalkthrough(obj.walkthrough),
   };
+}
+
+/** M22: `{ shown: false }`, `{ shown: true, step1Ms, step2Ms, step3Ms }` (whole sim ms, null
+ *  for a card that never retired), or null when the record carries no such key. */
+export function sanitiseWalkthrough(w) {
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return null;
+  if (!w.shown) return { shown: false };
+  const stamp = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v)));
+  return { shown: true, step1Ms: stamp(w.step1Ms), step2Ms: stamp(w.step2Ms), step3Ms: stamp(w.step3Ms) };
 }
 
 /** Clamp the shell's numbers to SETTINGS.ranges and the tier to SETTINGS.tiers. The
@@ -204,6 +219,8 @@ export function sanitiseShell(obj, { reducedMotion = false } = {}) {
   for (const k of ['reducedHud', 'highContrast', 'hints']) {
     if (typeof obj[k] === 'boolean') out[k] = obj[k];
   }
+  // M22: the first-minute cards' seen flag — a boolean or the default (false: show them).
+  if (typeof obj.walkthroughSeen === 'boolean') out.walkthroughSeen = obj.walkthroughSeen;
   return out;
 }
 

@@ -1,0 +1,1543 @@
+[
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:00:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 5833,
+    "phases": {
+      "briefing": 0,
+      "pickup": 5833,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 1,
+      "drops": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "impacts": 2,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 1,
+        "unloaded": 1,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 1,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 23,
+    "total": 23,
+    "roomCorrect": 23,
+    "complete": true,
+    "invoice": {
+      "income": 1430,
+      "costs": 60.44,
+      "profit": 1369.56,
+      "grade": "A",
+      "score": 95.7,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "17.9 min under a 18 min estimate"
+        },
+        {
+          "kind": "one-trip bonus",
+          "amount": 180,
+          "detail": "everything in one trip"
+        },
+        {
+          "kind": "room accuracy",
+          "amount": 90,
+          "detail": "23/23 in the right room"
+        },
+        {
+          "kind": "labor time",
+          "amount": -2.72,
+          "detail": "0.1 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -13.44,
+          "detail": "1 leg x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "furniture damage",
+          "amount": -41.6,
+          "detail": "2 damage events"
+        },
+        {
+          "kind": "property damage",
+          "amount": -2.68,
+          "detail": "1 impact on 1 surface"
+        }
+      ]
+    },
+    "review": {
+      "text": "There is a new mark on the hallway wall. It is exactly couch height.",
+      "tags": [
+        "marked_the_walls",
+        "minor_damage",
+        "every_room_right"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 23,
+      "strapsPlaced": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "heaviestMoved": 9,
+      "trips": 1
+    },
+    "restarts": 0,
+    "questionnaire": {
+      "q1": "tried the couch through the door",
+      "q2": 4,
+      "q3": 4,
+      "q4": 2,
+      "q5": 5,
+      "q6": "the fridge fell off the ramp",
+      "q7": 2
+    },
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "entityId": "box_small_01#7",
+        "relVelocity": 2.949391983723513,
+        "position": {
+          "x": 3.3977205753326416,
+          "y": 0.24999871850013733,
+          "z": -4.399968147277832
+        },
+        "materials": [
+          "cardboard",
+          "container"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "localPoint": {
+          "x": 4.303013022708425e-7,
+          "y": 0.25000002205069666,
+          "z": 0.23248830662137351
+        },
+        "type": "GRIP_STARTED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "reason": "released",
+        "type": "GRIP_ENDED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "entityId": "box_small_01#7",
+        "defId": "box_small_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.3,
+        "band": "scratched",
+        "peakSpeed": 2.949,
+        "cost": 3.2,
+        "at": {
+          "x": 3.4,
+          "y": 0.25,
+          "z": -4.4
+        },
+        "timeMs": 333.33333333333337,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 616.6666666666666
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": true,
+        "trip": 1,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1233.3333333333333
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": false,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1516.6666666666679
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "relVelocity": 0.9768061352259274,
+        "position": {
+          "x": 19.504291534423828,
+          "y": 0.7091132402420044,
+          "z": -5.533248424530029
+        },
+        "materials": [
+          "glass",
+          "decor"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 3683.333333333322
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.1,
+        "band": "scratched",
+        "peakSpeed": 0.977,
+        "cost": 38.4,
+        "at": {
+          "x": 19.5,
+          "y": 0.71,
+          "z": -5.53
+        },
+        "timeMs": 3683.333333333322,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "category": "property",
+        "surfaceId": "partition_destWallBack",
+        "location": "destWallBack wall",
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "impulse": 13.675,
+        "peakStepImpulse": 13.675,
+        "band": "scuffed",
+        "cost": 2.68,
+        "at": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "normal": {
+          "x": 0,
+          "y": 0,
+          "z": -1
+        },
+        "timeMs": 3683.333333333322,
+        "heldBy": [],
+        "position": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 5833.33333333335
+      }
+    ]
+  },
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:06:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 333,
+    "phases": {
+      "briefing": 0,
+      "pickup": 333,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 1,
+      "drops": 1,
+      "recoveries": 0,
+      "damageEvents": 1,
+      "propertyEvents": 0,
+      "impacts": 1,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 0,
+        "unloaded": 0,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 2,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 0,
+    "total": 23,
+    "roomCorrect": 0,
+    "complete": false,
+    "invoice": {
+      "income": 1160,
+      "costs": 1423.68,
+      "profit": -263.68,
+      "grade": "F",
+      "score": 23.7,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "18.0 min under a 18 min estimate"
+        },
+        {
+          "kind": "labor time",
+          "amount": -0.16,
+          "detail": "0.0 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -40.32,
+          "detail": "3 legs x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "furniture damage",
+          "amount": -3.2,
+          "detail": "1 damage event"
+        },
+        {
+          "kind": "items left behind",
+          "amount": -1380,
+          "detail": "23 of 23 not delivered @ 60 each"
+        }
+      ]
+    },
+    "review": {
+      "text": "I am not sure they made anything on this. That is not my problem.",
+      "tags": [
+        "cost_them_money",
+        "items_left_behind",
+        "extra_trip"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 0,
+      "strapsPlaced": 0,
+      "recoveries": 0,
+      "damageEvents": 1,
+      "propertyEvents": 0,
+      "heaviestMoved": 9,
+      "trips": 2
+    },
+    "restarts": 1,
+    "questionnaire": {
+      "q1": "got stuck in the doorway with the wardrobe",
+      "q2": 3,
+      "q3": 5,
+      "q4": 3,
+      "q5": 4,
+      "q6": "two trips",
+      "q7": 3
+    },
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "entityId": "box_small_01#7",
+        "relVelocity": 2.94881479930974,
+        "position": {
+          "x": 3.3984830379486084,
+          "y": 0.2499995082616806,
+          "z": -4.400811195373535
+        },
+        "materials": [
+          "cardboard",
+          "container"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "localPoint": {
+          "x": 4.303013022708425e-7,
+          "y": 0.25000002205069666,
+          "z": 0.23248830662137351
+        },
+        "type": "GRIP_STARTED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "reason": "dropped",
+        "type": "GRIP_ENDED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "entityId": "box_small_01#7",
+        "defId": "box_small_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.3,
+        "band": "scratched",
+        "peakSpeed": 2.949,
+        "cost": 3.2,
+        "at": {
+          "x": 3.4,
+          "y": 0.25,
+          "z": -4.4
+        },
+        "timeMs": 333.33333333333337,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 333.33333333333337
+      }
+    ]
+  },
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:12:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 5917,
+    "phases": {
+      "briefing": 0,
+      "pickup": 5917,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 1,
+      "drops": 0,
+      "recoveries": 3,
+      "damageEvents": 3,
+      "propertyEvents": 1,
+      "impacts": 3,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 1,
+        "unloaded": 1,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 1,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 23,
+    "total": 23,
+    "roomCorrect": 23,
+    "complete": true,
+    "invoice": {
+      "income": 1430,
+      "costs": 267.48,
+      "profit": 1162.52,
+      "grade": "A",
+      "score": 88.6,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "17.9 min under a 18 min estimate"
+        },
+        {
+          "kind": "one-trip bonus",
+          "amount": 180,
+          "detail": "everything in one trip"
+        },
+        {
+          "kind": "room accuracy",
+          "amount": 90,
+          "detail": "23/23 in the right room"
+        },
+        {
+          "kind": "labor time",
+          "amount": -2.76,
+          "detail": "0.1 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -13.44,
+          "detail": "1 leg x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "furniture damage",
+          "amount": -113.6,
+          "detail": "3 damage events"
+        },
+        {
+          "kind": "property damage",
+          "amount": -2.68,
+          "detail": "1 impact on 1 surface"
+        },
+        {
+          "kind": "recovery/service fees",
+          "amount": -135,
+          "detail": "3 recovery callouts"
+        }
+      ]
+    },
+    "review": {
+      "text": "At one point they had to call someone to get something back.",
+      "tags": [
+        "needed_a_callout",
+        "marked_the_walls",
+        "minor_damage"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 23,
+      "strapsPlaced": 0,
+      "recoveries": 3,
+      "damageEvents": 3,
+      "propertyEvents": 1,
+      "heaviestMoved": 110,
+      "trips": 1
+    },
+    "restarts": 2,
+    "questionnaire": {
+      "q1": "legs off the couch",
+      "q2": 5,
+      "q3": 4,
+      "q4": 3,
+      "q5": 5,
+      "q6": "the dolly",
+      "q7": 5
+    },
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "entityId": "box_small_01#7",
+        "relVelocity": 2.9505700123238294,
+        "position": {
+          "x": 3.3987274169921875,
+          "y": 0.25000137090682983,
+          "z": -4.400707244873047
+        },
+        "materials": [
+          "cardboard",
+          "container"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "localPoint": {
+          "x": 4.303013022708425e-7,
+          "y": 0.25000002205069666,
+          "z": 0.23248830662137351
+        },
+        "type": "GRIP_STARTED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "reason": "released",
+        "type": "GRIP_ENDED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "entityId": "box_small_01#7",
+        "defId": "box_small_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.3,
+        "band": "scratched",
+        "peakSpeed": 2.951,
+        "cost": 3.2,
+        "at": {
+          "x": 3.4,
+          "y": 0.25,
+          "z": -4.4
+        },
+        "timeMs": 333.33333333333337,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 616.6666666666666
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": true,
+        "trip": 1,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1233.3333333333333
+      },
+      {
+        "entityId": "wardrobe_01#17",
+        "reason": "m28 evidence",
+        "fee": 45,
+        "kind": "object",
+        "newTransform": {
+          "x": -4.300156116485596,
+          "y": 1.1199639987945558,
+          "z": -5.899343967437744
+        },
+        "type": "RECOVERY",
+        "simTimeMs": 1500.0000000000011
+      },
+      {
+        "entityId": "fridge_01#8",
+        "reason": "m28 evidence",
+        "fee": 45,
+        "kind": "object",
+        "newTransform": {
+          "x": 3.998095750808716,
+          "y": 0.9949681711196899,
+          "z": -8.198286056518555
+        },
+        "type": "RECOVERY",
+        "simTimeMs": 1500.0000000000011
+      },
+      {
+        "entityId": "tv_55_01#2",
+        "reason": "m28 evidence",
+        "fee": 45,
+        "kind": "object",
+        "newTransform": {
+          "x": -4.3040618896484375,
+          "y": 0.499975289106369,
+          "z": -4.319350719451904
+        },
+        "type": "RECOVERY",
+        "simTimeMs": 1500.0000000000011
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": false,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1600.0000000000016
+      },
+      {
+        "entityId": "tv_55_01#2",
+        "relVelocity": 0.7928034669066651,
+        "position": {
+          "x": 19.47421646118164,
+          "y": 0.39995285868644714,
+          "z": -3.950387477874756
+        },
+        "materials": [
+          "glass",
+          "electronics"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 1600.0000000000016
+      },
+      {
+        "entityId": "tv_55_01#2",
+        "defId": "tv_55_01",
+        "conditionBefore": 100,
+        "conditionAfter": 91.6,
+        "band": "scratched",
+        "peakSpeed": 0.793,
+        "cost": 72,
+        "at": {
+          "x": 19.47,
+          "y": 0.4,
+          "z": -3.95
+        },
+        "timeMs": 1600.0000000000016,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 2316.666666666668
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "relVelocity": 0.9768061352259274,
+        "position": {
+          "x": 19.504291534423828,
+          "y": 0.7091132402420044,
+          "z": -5.533248424530029
+        },
+        "materials": [
+          "glass",
+          "decor"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 3766.6666666666547
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.1,
+        "band": "scratched",
+        "peakSpeed": 0.977,
+        "cost": 38.4,
+        "at": {
+          "x": 19.5,
+          "y": 0.71,
+          "z": -5.53
+        },
+        "timeMs": 3766.6666666666547,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4483.333333333326
+      },
+      {
+        "category": "property",
+        "surfaceId": "partition_destWallBack",
+        "location": "destWallBack wall",
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "impulse": 13.675,
+        "peakStepImpulse": 13.675,
+        "band": "scuffed",
+        "cost": 2.68,
+        "at": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "normal": {
+          "x": 0,
+          "y": 0,
+          "z": -1
+        },
+        "timeMs": 3766.6666666666547,
+        "heldBy": [],
+        "position": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4483.333333333326
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 5916.666666666685
+      }
+    ]
+  },
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:18:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 833,
+    "phases": {
+      "briefing": 0,
+      "pickup": 833,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 0,
+      "drops": 0,
+      "recoveries": 0,
+      "damageEvents": 0,
+      "propertyEvents": 0,
+      "impacts": 0,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 0,
+        "unloaded": 0,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 1,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 0,
+    "total": 23,
+    "roomCorrect": 0,
+    "complete": false,
+    "invoice": {
+      "income": 1160,
+      "costs": 1393.83,
+      "profit": -233.83,
+      "grade": "F",
+      "score": 25,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "18.0 min under a 18 min estimate"
+        },
+        {
+          "kind": "labor time",
+          "amount": -0.39,
+          "detail": "0.0 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -13.44,
+          "detail": "1 leg x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "items left behind",
+          "amount": -1380,
+          "detail": "23 of 23 not delivered @ 60 each"
+        }
+      ]
+    },
+    "review": {
+      "text": "I am not sure they made anything on this. That is not my problem.",
+      "tags": [
+        "cost_them_money",
+        "items_left_behind",
+        "nothing_broken"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 0,
+      "strapsPlaced": 0,
+      "recoveries": 0,
+      "damageEvents": 0,
+      "propertyEvents": 0,
+      "heaviestMoved": 0,
+      "trips": 1
+    },
+    "restarts": 0,
+    "questionnaire": null,
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 833.3333333333328
+      }
+    ]
+  },
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:24:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 5833,
+    "phases": {
+      "briefing": 0,
+      "pickup": 5833,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 1,
+      "drops": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "impacts": 2,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 1,
+        "unloaded": 1,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 1,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 23,
+    "total": 23,
+    "roomCorrect": 23,
+    "complete": true,
+    "invoice": {
+      "income": 1430,
+      "costs": 60.44,
+      "profit": 1369.56,
+      "grade": "A",
+      "score": 95.7,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "17.9 min under a 18 min estimate"
+        },
+        {
+          "kind": "one-trip bonus",
+          "amount": 180,
+          "detail": "everything in one trip"
+        },
+        {
+          "kind": "room accuracy",
+          "amount": 90,
+          "detail": "23/23 in the right room"
+        },
+        {
+          "kind": "labor time",
+          "amount": -2.72,
+          "detail": "0.1 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -13.44,
+          "detail": "1 leg x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "furniture damage",
+          "amount": -41.6,
+          "detail": "2 damage events"
+        },
+        {
+          "kind": "property damage",
+          "amount": -2.68,
+          "detail": "1 impact on 1 surface"
+        }
+      ]
+    },
+    "review": {
+      "text": "There is a new mark on the hallway wall. It is exactly couch height.",
+      "tags": [
+        "marked_the_walls",
+        "minor_damage",
+        "every_room_right"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 23,
+      "strapsPlaced": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "heaviestMoved": 9,
+      "trips": 1
+    },
+    "restarts": 1,
+    "questionnaire": null,
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "entityId": "box_small_01#7",
+        "relVelocity": 2.9488164538290635,
+        "position": {
+          "x": 3.3984830379486084,
+          "y": 0.2499995231628418,
+          "z": -4.400811195373535
+        },
+        "materials": [
+          "cardboard",
+          "container"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "localPoint": {
+          "x": 4.303013022708425e-7,
+          "y": 0.25000002205069666,
+          "z": 0.23248830662137351
+        },
+        "type": "GRIP_STARTED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "reason": "released",
+        "type": "GRIP_ENDED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "entityId": "box_small_01#7",
+        "defId": "box_small_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.3,
+        "band": "scratched",
+        "peakSpeed": 2.949,
+        "cost": 3.2,
+        "at": {
+          "x": 3.4,
+          "y": 0.25,
+          "z": -4.4
+        },
+        "timeMs": 333.33333333333337,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 616.6666666666666
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": true,
+        "trip": 1,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1233.3333333333333
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": false,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1516.6666666666679
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "relVelocity": 0.9768061352259274,
+        "position": {
+          "x": 19.504291534423828,
+          "y": 0.7091132402420044,
+          "z": -5.533248424530029
+        },
+        "materials": [
+          "glass",
+          "decor"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 3683.333333333322
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.1,
+        "band": "scratched",
+        "peakSpeed": 0.977,
+        "cost": 38.4,
+        "at": {
+          "x": 19.5,
+          "y": 0.71,
+          "z": -5.53
+        },
+        "timeMs": 3683.333333333322,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "category": "property",
+        "surfaceId": "partition_destWallBack",
+        "location": "destWallBack wall",
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "impulse": 13.675,
+        "peakStepImpulse": 13.675,
+        "band": "scuffed",
+        "cost": 2.68,
+        "at": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "normal": {
+          "x": 0,
+          "y": 0,
+          "z": -1
+        },
+        "timeMs": 3683.333333333322,
+        "heldBy": [],
+        "position": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 5833.33333333335
+      }
+    ]
+  },
+  {
+    "build": "phase-24",
+    "date": "2026-09-05T10:30:00.000Z",
+    "contractId": "suburban_starter",
+    "seed": 4072177255,
+    "phase": "settlement",
+    "elapsedWorkMs": 5833,
+    "phases": {
+      "briefing": 0,
+      "pickup": 5833,
+      "secure": 0,
+      "transit": 0,
+      "delivery": 0,
+      "settlement": 0
+    },
+    "counters": {
+      "grips": 1,
+      "drops": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "impacts": 2,
+      "straps": {
+        "placed": 0,
+        "tensioned": 0,
+        "overstressed": 0,
+        "failed": 0,
+        "released": 0
+      },
+      "cargo": {
+        "loaded": 1,
+        "unloaded": 1,
+        "shifted": 0,
+        "measured": 0
+      },
+      "roadEvents": 0,
+      "toolChanges": 0,
+      "partChanges": 0,
+      "piecesCreated": 0,
+      "piecesLeftBehind": 0,
+      "trips": 1,
+      "worstCargoShift": 0,
+      "shiftByEvent": {
+        "hardBrake": 0,
+        "sharpTurn": 0,
+        "speedBump": 0
+      }
+    },
+    "delivered": 23,
+    "total": 23,
+    "roomCorrect": 23,
+    "complete": true,
+    "invoice": {
+      "income": 1430,
+      "costs": 60.44,
+      "profit": 1369.56,
+      "grade": "A",
+      "score": 95.7,
+      "lines": [
+        {
+          "kind": "base contract",
+          "amount": 900,
+          "detail": "contract completed"
+        },
+        {
+          "kind": "efficiency bonus",
+          "amount": 260,
+          "detail": "17.9 min under a 18 min estimate"
+        },
+        {
+          "kind": "one-trip bonus",
+          "amount": 180,
+          "detail": "everything in one trip"
+        },
+        {
+          "kind": "room accuracy",
+          "amount": 90,
+          "detail": "23/23 in the right room"
+        },
+        {
+          "kind": "labor time",
+          "amount": -2.72,
+          "detail": "0.1 min x 2 movers @ 14/min"
+        },
+        {
+          "kind": "vehicle/fuel",
+          "amount": -13.44,
+          "detail": "1 leg x 4.2 km @ 3.2/km"
+        },
+        {
+          "kind": "furniture damage",
+          "amount": -41.6,
+          "detail": "2 damage events"
+        },
+        {
+          "kind": "property damage",
+          "amount": -2.68,
+          "detail": "1 impact on 1 surface"
+        }
+      ]
+    },
+    "review": {
+      "text": "There is a new mark on the hallway wall. It is exactly couch height.",
+      "tags": [
+        "marked_the_walls",
+        "minor_damage",
+        "every_room_right"
+      ]
+    },
+    "stats": {
+      "itemsDelivered": 23,
+      "strapsPlaced": 0,
+      "recoveries": 0,
+      "damageEvents": 2,
+      "propertyEvents": 1,
+      "heaviestMoved": 9,
+      "trips": 1
+    },
+    "restarts": 2,
+    "questionnaire": null,
+    "walkthrough": {
+      "shown": false
+    },
+    "eventsDropped": 0,
+    "events": [
+      {
+        "contractId": "suburban_starter",
+        "seed": 4072177255,
+        "type": "SIM_RESET",
+        "simTimeMs": 0
+      },
+      {
+        "from": "briefing",
+        "to": "pickup",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 0
+      },
+      {
+        "entityId": "box_small_01#7",
+        "relVelocity": 2.94881479930974,
+        "position": {
+          "x": 3.3984830379486084,
+          "y": 0.2499995082616806,
+          "z": -4.400811195373535
+        },
+        "materials": [
+          "cardboard",
+          "container"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "localPoint": {
+          "x": 4.303013022708425e-7,
+          "y": 0.25000002205069666,
+          "z": 0.23248830662137351
+        },
+        "type": "GRIP_STARTED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "playerId": "p0",
+        "hand": "right",
+        "entityId": "box_small_01#6",
+        "reason": "released",
+        "type": "GRIP_ENDED",
+        "simTimeMs": 333.33333333333337
+      },
+      {
+        "entityId": "box_small_01#7",
+        "defId": "box_small_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.3,
+        "band": "scratched",
+        "peakSpeed": 2.949,
+        "cost": 3.2,
+        "at": {
+          "x": 3.4,
+          "y": 0.25,
+          "z": -4.4
+        },
+        "timeMs": 333.33333333333337,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 616.6666666666666
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": true,
+        "trip": 1,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1233.3333333333333
+      },
+      {
+        "entityId": "box_small_01#6",
+        "loaded": false,
+        "type": "CARGO_STATE",
+        "simTimeMs": 1516.6666666666679
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "relVelocity": 0.9768061352259274,
+        "position": {
+          "x": 19.504291534423828,
+          "y": 0.7091132402420044,
+          "z": -5.533248424530029
+        },
+        "materials": [
+          "glass",
+          "decor"
+        ],
+        "type": "IMPACT",
+        "simTimeMs": 3683.333333333322
+      },
+      {
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "conditionBefore": 100,
+        "conditionAfter": 75.1,
+        "band": "scratched",
+        "peakSpeed": 0.977,
+        "cost": 38.4,
+        "at": {
+          "x": 19.5,
+          "y": 0.71,
+          "z": -5.53
+        },
+        "timeMs": 3683.333333333322,
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "category": "property",
+        "surfaceId": "partition_destWallBack",
+        "location": "destWallBack wall",
+        "entityId": "mirror_framed_01#20",
+        "defId": "mirror_framed_01",
+        "impulse": 13.675,
+        "peakStepImpulse": 13.675,
+        "band": "scuffed",
+        "cost": 2.68,
+        "at": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "normal": {
+          "x": 0,
+          "y": 0,
+          "z": -1
+        },
+        "timeMs": 3683.333333333322,
+        "heldBy": [],
+        "position": {
+          "x": 19.5,
+          "y": 1.37,
+          "z": -5.07
+        },
+        "type": "DAMAGE_APPLIED",
+        "simTimeMs": 4399.999999999991
+      },
+      {
+        "from": "pickup",
+        "to": "settlement",
+        "validation": {
+          "ok": true
+        },
+        "type": "CONTRACT_PHASE",
+        "simTimeMs": 5833.33333333335
+      }
+    ]
+  }
+]

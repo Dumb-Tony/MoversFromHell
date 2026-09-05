@@ -72,6 +72,8 @@ import { updateRimCamera } from './render/materials.js';
 import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT, ECONOMY, TELEMETRY, WORLD } from './config.js';   // WORLD: M15
 import { TRUCK, AUDIO } from './config.js';   // M16: the shake's road severities and the impact silence threshold
 import { DEBUG } from './config.js';   // M19: DEBUG.historyLen bounds the pause card's notice history
+import { WALKTHROUGH } from './config.js';   // M22: the first-minute cards' clearance above the help line
+import { Walkthrough, walkthroughEnabledFrom } from './ui/walkthrough.js';   // M22: the first-minute cards
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -430,6 +432,9 @@ async function boot() {
     // handler — otherwise seating a player through the API leaves the screen telling the
     // truth about a build that no longer exists.
     refreshHelp();
+    // M22: a second seat RETIRES the first-minute cards for the run (§21.1's split view has no
+    // room, and both seats know the game) — they do not come back when the seat empties (m29 W5).
+    if (walkthrough && seatCount > 1) walkthrough.retire('coop');
     return seatCount;
   }
   /** The boom for the current seating: §4.1's shortened co-op boom is a property of the split,
@@ -749,6 +754,10 @@ async function boot() {
   /* Declared before the stall-hint system below reads it (assigned with the HUDs further down):
    * a `const` there was a TDZ hazard for any boot-time frame — review minor, M5. */
   let shownDevice = [];
+  /* M22: the first-minute cards (walkthrough.js), assigned after the help line exists below;
+   * declared here for the same TDZ reason. While a card is up at step 1 or 2 the stall timer
+   * does not count — one voice at a time, suppressed at the source (m29 W6). */
+  let walkthrough = null;
   game.addSystem('stallHint', (state, stepMs) => {
     if (!stallHint.armed || stallHint.done || state.phase !== PHASES.PICKUP) return;
     /* §21.4 Cognition "optional hints" (M19): the shell's hints switch disarms the timer AT
@@ -757,6 +766,7 @@ async function boot() {
      * stopped; once per run still holds. */
     for (const m of movers) if (hasAnyGrip(state.players[m.id])) { stallHint.done = true; return; }
     if (!shell.hints) return;   // after the grip check: a grip retires the hint whether or not hints are on (M19 review)
+    if (walkthrough && walkthrough.coaching) return;   // M22: a first-minute card is up at step 1 or 2 — it is the hint
     stallHint.ms += stepMs;
     if (stallHint.ms < CONTRACT.stallHintMs) return;
     stallHint.done = true; stallHint.fired = true;
@@ -888,6 +898,8 @@ async function boot() {
     pauseScreen.refresh();
     // The stall timer counts from the moment the job starts, not from the page load.
     stallHint.armed = true; stallHint.ms = 0;
+    // M22: so do the first-minute cards — the title's own reading time is not step 1's.
+    if (walkthrough) walkthrough.arm();
   };
 
   /* §21.4's solo pause, made VISIBLE (Phase 11 build-side M3). The clock has paused correctly
@@ -978,6 +990,7 @@ async function boot() {
         if (Number.isFinite(v)) {
           shell.uiScale = Math.min(r.max, Math.max(r.min, v));
           document.documentElement.style.setProperty('--ts', String(shell.uiScale));
+          if (walkthrough) walkthrough.relayout();   // M22: the help line's height follows --ts
         }
       }
       if (Object.prototype.hasOwnProperty.call(shellPatch, 'cameraDistance')) {
@@ -1022,6 +1035,11 @@ async function boot() {
         access = true;
       }
       if (access) applyAccessibility();
+      /* M22: the first-minute cards' seen flag. Its consumer is the card itself (walkthrough.js
+       * reads shell.walkthroughSeen when a run arms and on every frame): ticked while a card
+       * is up takes the card down for the run; unticked shows them again at the next START or
+       * restart (m29 W3). 'Defaults' unticks it with the rest of SHELL_DEFAULTS. */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'walkthroughSeen')) shell.walkthroughSeen = !!shellPatch.walkthroughSeen;
       persist();
     },
     reset() {
@@ -1057,6 +1075,7 @@ async function boot() {
     document.body.classList.toggle('hc', !!shell.highContrast);
     for (const el of [title.el, pauseScreen.el, invoiceScreen.el, settingsPanel.el]) el.classList.toggle('hc', !!shell.highContrast);
     interact.hints = !!shell.hints;
+    if (walkthrough) walkthrough.relayout();   // M22: .hc restyles the help line the card sits on
   }
   applyAccessibility();
   // Reachable from the title card and the pause card (§21.4; INDEX "settings panel").
@@ -1096,9 +1115,37 @@ async function boot() {
         `${g('jump', 0)} jump · <b>${grab(0)}</b> · <b>${g('interact', 0)} use</b> · ` +
         `<b>${g('context', 0)} undo</b> · ${g('swapMover', 0)} swap mover · ` +
         `${g('recover', 0)} recover · <b>${join} two players</b> · ${g('pause', 0)} pause · F3`;
-    if (html !== helpHtml) { helpHtml = html; help.innerHTML = html; }
+    if (html !== helpHtml) { helpHtml = html; help.innerHTML = html; if (walkthrough) walkthrough.relayout(); }   // relayout: M22
   }
   refreshHelp();
+
+  /* ---- the first-minute cards (Phase 11 build-side M22; §26.7 Comprehension, §21.3) -------
+   * walkthrough.js: three cards bottom-left above the help line, each retired by the real
+   * event — seat 0's first grip, the first load, then the objective line taking over after
+   * WALKTHROUGH.step3Ms or the first delivery. Shell state (§22.4), built only where
+   * walkthroughEnabledFrom says: never on the harness's scratch page unless a suite asks with
+   * ?walkthrough=1 (m29). It yields to every pause-shaped screen and to hints off (M19);
+   * co-op retires it for the run (setSeats); the shell key walkthroughSeen keeps it off for
+   * good once the third card retired or the ✕ skipped them. Armed by title.onStart and by
+   * resetContract; drawn by the game observer below and by feedHuds, so a suite that feeds
+   * the HUD feeds this. Its bottom is MEASURED from the help line's live top, so text size
+   * and high contrast cannot push the two together (m29 W1) — measured once, then again only
+   * after a resize, a help-line rewrite or a --ts / .hc change (walkthrough.relayout, called
+   * from refreshHelp, the uiScale apply and applyAccessibility), never per frame (m29 W1z4). */
+  walkthrough = new Walkthrough(ui, {
+    enabled: walkthroughEnabledFrom(location.search, location.pathname),
+    bus,
+    glyphs: () => input.glyphsFor(0, shownDevice[0]),
+    seat0Player: () => moverOfSeat(0).id,
+    suppressed: () => title.visible || pauseScreen.visible || invoiceScreen.visible || settingsPanel.open || !shell.hints,
+    coop: () => seatCount > 1,
+    seen: () => !!shell.walkthroughSeen,
+    delivered: () => game.state.manifest.some((r) => r.delivered),
+    clearance: () => (window.innerHeight - help.getBoundingClientRect().top) + WALKTHROUGH.clearancePx,
+    onSeen: () => { shell.walkthroughSeen = true; persist(); },
+  });
+  // The M3 shell-observer pattern: runs at the end of every game.frame(), paused or not.
+  game.subscribe(() => walkthrough.frame(game.clock.simTimeMs));
 
   /* ---- events the player should SEE (§8.4, §10.3) ---------------------------------------
    * §8.4: "At impact: material sound, visual mark, optional haptic pulse, and ONE SMALL COST
@@ -1293,7 +1340,7 @@ async function boot() {
      * invoice/review/stats the sheet shows (runLog.js buildRunSummary), stored compact in
      * the save (§27.4), handed to the sheet for the Copy button and the §27.3 form (M6). */
     const runSum = buildRunSummary(game.state, invoice, review, summary, stats, recorder,
-      { date: new Date().toISOString() });
+      { date: new Date().toISOString(), walkthrough: walkthrough ? walkthrough.report() : null });   // walkthrough: M22
     storeRun(runSum);
     persist();
     invoiceScreen.show(invoice, review, summary, stats,
@@ -1438,6 +1485,7 @@ async function boot() {
     });
     physics.primeQueries();
     resetStallHint();          // once per RUN: the new contract gets its own first minute
+    if (walkthrough) walkthrough.arm();   // M22: the cards too, unless this browser has seen them
     game.setPhase(PHASES.PICKUP);
   }
 
@@ -1477,7 +1525,7 @@ async function boot() {
       strapsPlaced: strapsPlacedTotal, recoveries: recoveryCount(), heaviestMoved: heaviestMoved(),
     });
     return buildRunSummary(game.state, null, null, summary, stats, recorder,
-      { date: new Date().toISOString() });
+      { date: new Date().toISOString(), walkthrough: walkthrough ? walkthrough.report() : null });   // walkthrough: M22
   }
   /** What the Copy button would export right now: the settled record with the live §27.3
    *  answers, or the run so far. */
@@ -1756,6 +1804,7 @@ async function boot() {
         h.setCaption('');
       }
     }
+    if (walkthrough) walkthrough.refresh();   // M22: the card's glyphs follow the shown device
   }
 
   /**
@@ -1916,6 +1965,8 @@ async function boot() {
     /* M19: the notice drain the loop runs (so a suite can run it too), the pause card's
      * history ring it feeds, and whether ?hc=1 forced high contrast at this boot. */
     drainNotices, noticeHistory, hcForced,
+    /* M22: the first-minute cards — shell state a suite reads and drives (m29). */
+    walkthrough,
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,

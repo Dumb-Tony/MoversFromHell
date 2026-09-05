@@ -114,6 +114,13 @@ const ROWS = Object.freeze({
       note: 'Every notice already leads with a glyph and every state carries a word; this makes the panels opaque over a bright scene. ?hc=1 in the address forces it on.' },
     { key: 'hints', label: `Hints — the ${Math.round(CONTRACT.stallHintMs / 1000)} s “how to grab” nudge and the → room on each item`, kind: 'check',
       note: 'Off silences the stall hint (it never fires, not merely hidden) and drops the room suffix from the prompt. The objective line stays.' },
+    /* §26.7 / §21.3 first-minute cards (Phase 11 build-side M22; walkthrough.js). The shell key
+     * is walkthroughSeen — set by the cards themselves when the third retires or the ✕ skips
+     * them — and this row is its NEGATION (`invert`: the box shows !value and writes !checked):
+     * ticked means show the cards at the next START THE JOB or restart. The control carries
+     * data-invert="1", so the m16 U2 walk reads the box and its consumer in the box's sense. */
+    { key: 'walkthroughSeen', invert: true, label: 'Show the first-minute cards again — the three “grab · carry · load” cards at the start of a job', kind: 'check',
+      note: 'They untick this themselves once you finish or skip them. Ticked, they show at the next START THE JOB or restart. Hints off hides them too; co-op never shows them.' },
   ],
 });
 
@@ -140,7 +147,7 @@ export class SettingsPanel {
       if (d.kind === 'check') {
         return `
       <label class="set-row set-check">
-        <input type="checkbox" data-setting="${d.key}">
+        <input type="checkbox" data-setting="${d.key}"${d.invert ? ' data-invert="1"' : ''}>
         <span>${d.label}</span>
       </label>${d.note ? `<p class="set-note">${d.note}</p>` : ''}`;
       }
@@ -187,7 +194,9 @@ export class SettingsPanel {
       const key = c.dataset.setting;
       const ev = c.type === 'range' ? 'input' : 'change';
       c.addEventListener(ev, () => {
-        const v = c.type === 'checkbox' ? c.checked : (c.type === 'range' ? Number(c.value) : c.value);
+        const d = this._defs.get(key);
+        // An inverted row (M22 `invert`) writes the negation of the box; the store never knows.
+        const v = c.type === 'checkbox' ? (d && d.invert ? !c.checked : c.checked) : (c.type === 'range' ? Number(c.value) : c.value);
         this.store.apply({ [key]: v });
         this._syncOne(key);
       });
@@ -418,7 +427,7 @@ export class SettingsPanel {
     if (!c) return;
     const v = this.store.values()[key];
     const d = this._defs.get(key);
-    if (c.type === 'checkbox') c.checked = !!v;
+    if (c.type === 'checkbox') c.checked = d && d.invert ? !v : !!v;   // invert: M22
     else c.value = String(v);
     const out = c.parentElement.querySelector('.set-v');
     if (out) out.textContent = d && d.fmt && typeof v === 'number' ? d.fmt(v) : '';

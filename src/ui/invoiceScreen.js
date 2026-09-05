@@ -137,6 +137,8 @@ export class InvoiceScreen {
         <div class="export-row">
           <button type="button" class="minor" data-act="copy">Copy run report (JSON)</button>
           <span class="copy-note">phases, grips, drops, damage, straps, cargo shift, your answers — stays on this machine</span>
+          <a class="evidence" href="docs/evidence.html" target="_blank" rel="noopener"
+             style="color: var(--violet)" title="paste run reports, read the §26.7 gate as a table">open the evidence page ↗</a>
         </div>
         <textarea class="export" hidden spellcheck="false" aria-label="run report"></textarea>
         <div class="kept"><span>${esc(keptLine(keptCount))}</span>

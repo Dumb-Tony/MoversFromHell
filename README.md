@@ -92,6 +92,15 @@ Resume, Restart the contract, and Settings. Click the card to resume and re-capt
 after an Esc/Menu resume, click once to look around again. `F3` toggles the developer overlay
 and the metre grid (off by default).
 
+**The first minute** (Phase 25, M22). The first time this browser starts a job, three small
+cards bottom-left walk you through the one thing that matters: look at a box and hold LMB (LT on
+a pad), carry it out to the truck, then the NEXT line takes over. Each card goes when you DO it,
+not when you click; the ✕ skips them; Settings → Reading the screen → tick "Show the first-minute
+cards again" to see them at the next job. They never show in two-player, and turning Hints off
+hides them. While a card is up the 30 s stall nudge stays quiet — one voice at a time.
+
+![Phase 25](docs/phase25-walkthrough.png)
+
 ## Settings
 
 A settings card is reachable from the title card (**Settings** under START THE JOB) and from
@@ -129,6 +138,18 @@ completion, the session's restart count, your answers, and every event of the ru
 stamp. If the clipboard is refused (plain http, an embedded pane) the report is already selected
 in the box under the button. The last six run records and your answers are kept in this browser
 only; **clear responses** deletes them.
+
+**The evidence page — reading a session against §26.7** (Phase 25, M21). `docs/evidence.html`
+(live: **https://dumb-tony.github.io/MoversFromHell/docs/evidence.html**; the settlement sheet's
+export row links to it) takes any number of pasted run reports — one, several one after another,
+or a JSON array — and renders GDD §26.7's Fun Validation Gate as a table: the six signals with
+their minimum-evidence cells quoted verbatim, the measured value, PASS / NOT YET / no data, and
+the runs behind each; under it the aggregates (completion, mean profit, trips, phase means,
+damage and property lines, recoveries by kind, drops by reason, worst cargo shift) and the §27.3
+answer histograms with the sheet's end-words. **Copy evidence report (Markdown)** produces the
+paste for docs/PLAYTEST_NOTES.md. It is a static page with no build step, computed in your
+browser and nowhere else — zero requests beyond its own module imports; every threshold is
+`EVIDENCE` in src/config.js and is printed beside the table, so a reader can disagree with it.
 
 **Sound.** The game is synthesised from nothing — no audio files, no fetches. Sound starts on the
 first click or key (the START button counts). Impacts thud by material and speed, a heavy carry
@@ -273,7 +294,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**2837 assertions across twenty-eight suites, all passing** — plus a GPU-only suite that the
+**3173 assertions across thirty suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -319,8 +340,10 @@ proved §26.3 with three packs of the same six items driven the whole route (LOW
 0.135 m) and closed §21.4's last Input row with a Rebind on every on-foot action. Batch 9
 closed the last §21.4 rows (reduced HUD, objective history, a hints switch, high contrast at
 18:1) and a consistency pass (the aim ray ignores the shake, reattaching costs what removing
-cost, the cab prompt's count is the invoice's). Batch 10 (the evidence page for §26.7; a
-three-card first minute) is briefed in the plan.
+cost, the cab prompt's count is the invoice's). Batch 10
+built the §26.7 evidence page (pasted run reports → the gate as a table, computed in the tester's
+browser) and the three-card first minute that the Comprehension signal measures. Batch 11 (forcing
+a hung door, priced on the frame; §21.2's brief and invoice reveal) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 

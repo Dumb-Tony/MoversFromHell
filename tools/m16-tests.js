@@ -134,8 +134,9 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     // M9 (Phase 11 build-side): the shell carries the three bus levels and the captions switch.
     // M16: …and the camera-shake switch (a non-default, so the round-trip is real).
     // M19: …and the reduced-HUD, high-contrast and hints switches (all three off their defaults).
+    // M22: …and the first-minute cards' seen flag (true: off its default).
     shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false,
-             reducedHud: true, highContrast: true, hints: false },
+             reducedHud: true, highContrast: true, hints: false, walkthroughSeen: true },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
     // M18: the §21.4 remap section — the DIFF from the shipped bindings (m26 B6 fills it; empty here).
@@ -434,6 +435,11 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     reducedHud:         () => huds[0].reduced,
     highContrast:       () => document.body.classList.contains('hc'),
     hints:              () => M.interact.hints,
+    // M22 (Phase 11 build-side): the first-minute cards' seen flag, at its consumer — the
+    // card reads it when a run arms (walkthrough.js arm(); m29 W3 drives the row for real).
+    // The row is 'Show the first-minute cards again': the key's NEGATION (settings.js `invert`,
+    // data-invert="1" on the control), so the consumer is read in the box's sense.
+    walkthroughSeen:    () => !M.walkthrough.seen,
   };
   const keys = M.settingsPanel.keys();
   eq('U2 the card has exactly one control per consumer', keys.slice().sort().join(','), Object.keys(consumers).sort().join(','));
@@ -467,7 +473,9 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
                 Math.abs(s.shell.cameraDistance - M.rig.distance) < 1e-9; })(), JSON.stringify(load()));
   panel().querySelector('[data-act="defaults"]').click();
   const offDefault = Object.entries(consumers).filter(([k, get]) => {
-    const d = k in DEFAULT_SETTINGS ? DEFAULT_SETTINGS[k] : SHELL_DEFAULTS[k];
+    const d0 = k in DEFAULT_SETTINGS ? DEFAULT_SETTINGS[k] : SHELL_DEFAULTS[k];
+    // M22: an inverted row (data-invert) is read in the box's sense, so its default is too.
+    const d = typeof d0 === 'boolean' && control(k) && control(k).dataset.invert === '1' ? !d0 : d0;
     const v = get();
     return typeof d === 'number' ? Math.abs(v - d) > 1e-9 : v !== d;
   }).map(([k]) => k);

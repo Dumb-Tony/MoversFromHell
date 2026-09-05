@@ -258,9 +258,23 @@ export function buildRunSummary(state, invoice, review, summary, stats, recorder
     restarts: recorder ? recorder.restarts : 0,
     /** §27.3 answers, or null until the tester answers (questionnaire.js). */
     questionnaire: opts.questionnaire || null,
+    /** M22 (§26.7 Comprehension): the first-minute cards this run — { shown: false }, or
+     *  { shown: true, step1Ms, step2Ms, step3Ms } with the SIM time each card retired (null
+     *  for a card that never did: skipped, or the run ended first). Shell state handed in
+     *  through opts (walkthrough.js report()), so the evidence page (M21) can compare
+     *  time-to-first-grip with and without the cards. */
+    walkthrough: walkthroughReport(opts.walkthrough),
     eventsDropped: recorder ? recorder.dropped : 0,
     events: recorder ? recorder.events.slice() : [],
   };
+}
+
+/** M22: normalise a walkthrough report to exactly the two shapes above. Pure; exported so
+ *  a suite can pin the shape without a card (m29 W7, m17 M22). */
+export function walkthroughReport(w) {
+  if (!w || !w.shown) return { shown: false };
+  const ms = (v) => (Number.isFinite(Number(v)) && v !== null ? mm(v) : null);
+  return { shown: true, step1Ms: ms(w.step1Ms), step2Ms: ms(w.step2Ms), step3Ms: ms(w.step3Ms) };
 }
 
 /** The summary without its event list and invoice lines — what the save keeps. */
