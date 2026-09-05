@@ -21,6 +21,7 @@
  */
 
 import { SIM, TOOLS, DAMAGE, PLAYER, GRIP, CARRY } from '../src/config.js';
+import { RECOVERY } from '../src/config.js';   // Phase 11 build-side M15, section M15
 import { OBJECT_DEFS, PHASE5_SPAWNS, validateDef } from '../src/objects/definitions.js';
 import { TOOL_DEFS, PHASE6_TOOL_SPAWNS, validateAllToolDefs } from '../src/tools/definitions.js';
 import {
@@ -1118,12 +1119,52 @@ lines.push('--- F. tools do not erase physics (GDD §9.1, §2.1) ---');
 }
 emit('running...');
 
+/* ── M15. the §18.3 pass tools never had (Phase 11 build-side M15: GDD §18.3, §26.6) ────
+ *
+ * Sections B-F above drive the tools through this suite's own step() (physics + registry
+ * only), so the new ToolSystem.step never ran during them — B's and D's numbers are what
+ * they were by construction. This section runs the pass explicitly: silent for tools on the
+ * plot, and a callout for one dropped into the void, through the same detach the game uses. */
+lines.push('--- M15. tools recover from out of bounds (Phase 11 build-side M15) ---');
+{
+  releaseAll();
+  eq('M15-1 ToolSystem.step is the §18.3 pass, and every tool carries a rack-slot home', typeof tools.step,
+     'function');
+  ok('M15-1 …equal to its PHASE6_TOOL_SPAWNS row',
+     [...tools.tools.values()].every((t, i) => { const s = PHASE6_TOOL_SPAWNS[i]; return t.home && t.home.x === s.x && t.home.y === s.y && t.home.z === s.z; }));
+  const graceSteps = Math.ceil(RECOVERY.outOfBoundsGraceSeconds * 1000 / STEP) + 2;
+  // Every tool where sections A-F left it, all on the plot: the pass must stay silent.
+  const before = tools.recoveryCount();
+  for (let k = 0; k < graceSteps; k++) tools.step(STEP);
+  eq('M15-2 the pass is silent for tools on the plot (0 callouts over a full grace)', tools.recoveryCount() - before, 0);
+  // The dolly under the couch, then dropped into the void: the couch gets its friction back
+  // through detachDolly (B12's restore), and the dolly is on its rack.
+  const dolly = toolByDef('dolly_flat_01');
+  const couch = byDef('couch_3seat_01');
+  if (dolly && couch) {
+    tools.attachDolly(dolly, couch);
+    const countBefore = M.recoveryCount();
+    dolly.body.setTranslation({ x: 0, y: RECOVERY.toolFloorY - 40, z: 0 }, true);
+    for (let k = 0; k < graceSteps; k++) { physics.clearForces(); physics.step(); registry.step(STEP); tools.step(STEP); }
+    const p = posOf(dolly);
+    ok('M15-3 a dolly dropped into the void is back on its rack after the grace, detached, the couch\'s friction restored (B12\'s number)',
+       Math.abs(p.x - dolly.home.x) < 0.05 && Math.abs(p.z - dolly.home.z) < 0.05 && p.y > RECOVERY.toolFloorY &&
+       dolly.state.attachedTo === null && couch.state.dollyId === null &&
+       Math.abs(couch.collider.friction() - couch.def.physics.friction) < 1e-6,
+       `at (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}) attachedTo ${dolly.state.attachedTo} mu ${couch.collider.friction()}`);
+    eq('M15-4 …and recoveryCount() bills it (one callout, the tools\' share)', M.recoveryCount() - countBefore, 1);
+    eq('M15-4 …on the tool itself', dolly.state.recoveries, 1);
+  }
+}
+emit('running...');
+
 /* ── G. integration (§26.6) ──────────────────────────────────────────────── */
 lines.push('--- G. integration (GDD §26.6) ---');
 {
   releaseAll();
   for (const [i, m] of movers.entries()) placeMover(m, 0, 5 + i * 1.4);
   const bodiesBefore = physics.stats.bodies;
+  const toolCallouts = tools.recoveryCount();
   for (let f = 0; f < 90; f++) M.game.frame(16.7);
   ok('G1 no bodies leak over 90 real frames with tools live',
      physics.stats.bodies === bodiesBefore, `${bodiesBefore} -> ${physics.stats.bodies}`);
@@ -1132,6 +1173,8 @@ lines.push('--- G. integration (GDD §26.6) ---');
   ok('G3 state stays JSON-serializable',
      (() => { try { JSON.parse(JSON.stringify(game.state)); return true; } catch (e) { return false; } })());
   ok('G4 no error banner appeared during the suite', !document.getElementById('error-banner'));
+  eq('G5 (M15) the tool pass ran through those 90 frames and recovered nothing — the tools are all on the plot',
+     tools.recoveryCount() - toolCallouts, 0);
 }
 
 } catch (e) {

@@ -586,3 +586,71 @@ With the eight done and batch 4 (audio, hand-frame damping) in flight, the two r
 - The pointer-lock look must be untouched: any shake on yaw/pitch feels like input loss.
 - Co-op: each seat has its own rig; the bus observer must map the event to the seat(s) it concerns (the truck's driver seat for road events, the nearest mover for impacts).
 
+
+## Batch 8 addendum — §26.3's three packs and §21.4's full remapping (added 2026-09-04)
+
+Two more acceptance lines with a build-side half: §26.3 asks for three pack arrangements that differ observably on turn, brake and bump (two are measured today, over one brake), and §21.4 lists full remapping first among the input requirements while every seam for it — bindings as data, a conflict checker, prompts derived from the live table, a persisted settings card — already exists.
+
+### M17 — Three packs, three drives — §26.3 proven with numbers, and the pack-quality curve tuned so they differ on screen
+
+*GDD:* §26.3 'Three different pack arrangements yield observably different turn, brake, and bump results'; 'A tensioned strap reduces relative motion and damage'; 'Unsecured tall/heavy cargo can tip or slide for visible reasons'; §11.3 road events; §10.2 pack quality; §12.2 bad packing has understandable consequences; §27.5 tuning: strap stiffness/rating, road-event severity  
+*Size:* ~5 h · *depends on:* M13, M14, M6
+
+**Why.** m8 measured exactly two arrangements — one strapped, one not — over one hard brake (README: unstrapped worst shift 1.645 m, strapped 0.141 m). §26.3 asks for THREE arrangements that differ observably on turn, brake AND bump, and for tall/heavy cargo that tips for visible reasons. Nothing today asserts that a heavy item high on a stack behaves differently from the same item low, that a sharp turn does anything a brake does not, or that the pack-quality number the HUD shows predicts the shift the drive produces. Since Phase 21 the route can be driven twice and property damage is billed for a load that hits the headboard, so the drive's consequences now have prices; the pack that produces them must be measurably different or the whole §12.2 promise is a single anecdote.
+
+**Scope.** (1) NEW tools/m25-packs-tests.js: three authored packs of the same six items in the cargo box — LOW (heavy low, light on top, strapped), TALL (fridge upright at the tail, boxes stacked three high, unstrapped), SLIDE (everything on the deck, nothing strapped, heavy at the headboard end) — each driven through the full PROTOTYPE_ROUTE with game.frame() (1681 frames), sampling cargo.snapshotPositions/shiftSince at each ROAD_FORCE (hardBrake, sharpTurn, speedBump) and at arrival, and the fridge's tilt. Assert numbers, not orderings alone: LOW worst shift < 0.20 m; SLIDE worst shift > 1.0 m and its worst event is the brake; TALL tips (tilt > 45°) on the turn or the bump, never on LOW; every pair of packs differs by > 0.3 m on at least one event; pack quality reported before departure orders the three packs the same way their measured shift does (Spearman over three points = 1). (2) src/cargo/cargo.js packQuality(): if the ordering assertion fails, tune the quality formula (mass height, unsecured fraction, tail loading) in config CARGO until it predicts — the number the HUD shows must be the number the drive punishes. (3) src/drive/route.js / config TRUCK.roadEvents: if no event distinguishes turn from brake in the measured packs, adjust the lateral/longitudinal composition of the three events (severity kept) so a sharp turn slides sideways and a brake slides forward — assert the axis of each pack's shift per event. (4) Property damage from a load hitting the headboard on a brake (M14): assert SLIDE bills the truck body ≥ 1 entry and LOW bills none. (5) The invoice stats and the run summary carry worstCargoShift per event (extend M6's counters: shiftByEvent {hardBrake, sharpTurn, speedBump}). (6) Docs numbers: the three packs' table goes in docsNotes for README's measured line.
+
+**Files:** src/cargo/cargo.js, src/drive/route.js, src/config.js, src/main.js, src/telemetry/runLog.js, tools/m8-tests.js, tools/m17-tests.js · **new:** tools/m25-packs-tests.js
+
+**Reuse.** m8-tests.js's pack/brake fixture and cargo.snapshotPositions/shiftSince (Phase 8), m11 D's strap placement, m21's route-driving loop (Phase 21), the M6 counters. AirportBaggageCrew's cargo-shift assertions if any (grep 'shift' in C:/Dev/AirportBaggageCrew/tools) — cite if copied.
+
+**Acceptance tests.**
+- m25 K1: the three packs are the SAME six item ids in three arrangements (assert the id sets equal), each inside the cargo interior AABB at departure, each settled (velocities < 0.01) before the route starts.
+- m25 K2 LOW: worst shift over the whole route < 0.20 m; no item leaves the box; fridge tilt < 5°; no property line against the truck.
+- m25 K3 SLIDE: worst shift > 1.0 m, the worst event is hardBrake, the shift's dominant axis is the truck's forward axis (|Δz| > 2·|Δx|), and ≥ 1 property-damage entry against a truck surface exists at arrival.
+- m25 K4 TALL: the fridge tilts > 45° on sharpTurn or speedBump (name which) and the shift on sharpTurn has a lateral component (|Δx| > 0.3 m); LOW's fridge never tilts > 5°.
+- m25 K5 pairwise: for every pair of packs, some event's worst shift differs by > 0.30 m; and no two packs share the same worst event AND the same axis (three observably different stories).
+- m25 K6 prediction: cargo.packQuality() before departure orders LOW > TALL > SLIDE (or LOW > SLIDE > TALL — assert the SAME order as the measured worst shifts, ascending), and the HUD's cargo band words differ for at least two of the three.
+- m25 K7 straps: SLIDE with two straps added (m11 D pattern) → worst shift < 0.5 m and no truck property line (a tensioned strap reduces relative motion and damage).
+- m25 K8: runSummary().counters.shiftByEvent has the three keys with the measured metres (± 1e-3 of the suite's own samples); m17 R2's key list extended accordingly.
+- m8 all existing assertions unchanged in meaning; m8's two-arrangement numbers re-measured and quoted if the road-event composition changed (say so); m9, m10, m11, m14, m21 ALL-PASS (a route composition change must not move m21's 28000 ms legs).
+- Suite budget: three routes = 5043 frames plus the strapped rerun (≤ 7000 frames total, inside the virtual-time budget as m21's 7368 already is).
+
+**Risks.**
+- Retuning packQuality or the road-event composition moves numbers m8 and README quote — re-measure and return them in docsNotes; never hand-edit.
+- A fridge tipping in the box can wedge and produce large impulses; cap the sample loop's per-step reads and never assert on a NaN.
+- The route's three events are authored in TRUCK.roadEvents with severities m21 relies on for timing — change composition (direction), not timing.
+- Three full routes in one suite: keep every other frame free of sampling work; the m14 soak is the wall-time reference (6804 frames in ~8 s).
+
+### M18 — Rebind any action — §21.4's 'full remapping' on the settings card, validated by the conflict checker, per seat, persisted
+
+*GDD:* §21.4 Accessibility baseline, Input row: 'Full remapping, hold/toggle grip, sensitivity/deadzone, invert axes' (the first item is the only one still missing); §21.2 'a retry keeps settings'; §4.4 controller parity; §26.5 'both input mappings'; §26.6 'save/settings reject incompatible versions safely'  
+*Size:* ~5 h · *depends on:* M3, M4, M5
+
+**Why.** Bindings are data (SEAT_BINDINGS in src/core/input.js), bindingConflicts() already validates a table at runtime, glyphFor() (M5) derives every prompt from the live table, and the settings card (M4) persists a schema-gated blob — everything a remapper needs exists except the remapper. §21.4 lists full remapping first among the input requirements, and a two-seat keyboard layout is exactly where a tester will want to move a key. This is the last §21.4 Input item and it is mostly UI over seams already built and tested.
+
+**Scope.** (1) src/core/input.js: `rebind(seat, context, action, token)` → validates the token shape (KeyCode string, 'Mouse<n>', 'P<seat>B<i>' pad token), builds the candidate table, runs bindingConflicts(); on conflict returns { ok: false, conflicts } and changes nothing; on success installs the table and returns { ok: true }; `resetBindings(seat)`; `bindingTable()` (a plain serializable copy) and `applyBindings(table)` (validated, used by the loader). (2) src/core/save.js: a sixth-level shell/bindings key: `bindings` (only the DIFFERENCES from the defaults, per seat and context, so a default change in a later build wins for untouched actions), migrated and sanitised (unknown actions dropped, conflicts dropped with a console.info). (3) src/ui/settings.js: a 'Controls' group listing every action per seat with its current glyphs (from glyphFor) and a Rebind button that enters capture (next key, mouse button or pad button pressed becomes the token; Escape cancels), a Reset row; conflicts shown inline by naming the other action, never silently. (4) The help line and every prompt already follow the table through glyphFor — assert it. (5) Pad parity: capture accepts a pad press through the same slot-keyed edge path M3 built (_padSlotPrev). (6) config.js INPUT.remap: captureTimeoutMs, reserved tokens (Escape, F3 and the join button cannot be bound).
+
+**Files:** src/core/input.js, src/core/save.js, src/ui/settings.js, src/main.js, src/config.js, styles.css, tools/m16-tests.js, tools/m0-tests.js · **new:** tools/m26-rebind-tests.js
+
+**Reuse.** This project's bindingConflicts() and SEAT_BINDINGS (input.js), glyphFor (M5), the shell-edge capture path (M3, _shellPending / consumeShellEdge), the settings card rows and save/migrate (M4). AirportBaggageCrew has a remap? grep 'rebind' in C:/Dev/AirportBaggageCrew/src — copy the capture flow if it exists and say so.
+
+**Acceptance tests.**
+- m26 B1: rebind(0, 'foot', 'interact', 'KeyF') → ok; input.isDown('interact', 0) after a KeyF keydown === true and after KeyE === false; glyphFor('interact', 0, 'kbm') === 'F'; the HUD prompt chip reads F after one feedHuds.
+- m26 B2: rebind(0, 'foot', 'interact', 'KeyW') (W is move forward) → { ok: false, conflicts: [...names 'moveForward'] } and the table is unchanged (deep-equal before/after); bindingConflicts() stays empty.
+- m26 B3: seat 1 rebinding to a seat-0 key (rebind(1, 'foot', 'interact', 'KeyE')) → refused with the cross-seat conflict named (the checker's existing rule).
+- m26 B4: reserved tokens: rebind(0, 'foot', 'jump', 'Escape') and 'F3' → refused with reason 'reserved'; the join button (COOP.joinPad) likewise.
+- m26 B5: pad: rebind(0, 'foot', 'gripLeft', 'P0B4') → ok; a stubbed Standard Gamepad holding button 4 (m15 P7h pattern) → isDown('gripLeft', 0) true; glyphFor('gripLeft', 0, 'pad') === 'LB'.
+- m26 B6: persistence: after two rebinds save() → the blob's bindings key holds exactly two diffs; load() on a fresh Input applies them (isDown reflects the new keys); a blob with an unknown action or a conflicting pair loads with those entries dropped and no throw; schema 0 → defaults.
+- m26 B7: resetBindings(0) → deep-equals the defaults; the blob's diff for seat 0 is empty after save.
+- m26 B8 capture UI: click Rebind on 'interact' → the row shows 'press a key…'; dispatch KeyG on window → the row shows G and the table has KeyG; Escape during capture cancels and leaves the table unchanged; capture times out after INPUT.remap.captureTimeoutMs of sim time.
+- m26 B9: while capture is open, the game does NOT act on the pressed key (a KeyG capture never fires 'interact'; Escape in capture never pauses — m15 P5's pause path is untouched).
+- m16 U2's consumption walk covers the Controls rows (each row's consumer is the live table); m0 B-series (default bindings) unchanged; m12 K (glyphs) unchanged; m11 all green.
+- Regression: m0, m11, m12, m15, m16 ALL-PASS.
+
+**Risks.**
+- Capture must swallow the captured key from the game AND from the pause/title listeners for that one keydown (the M3/M6 stopPropagation lessons).
+- Persist diffs, not the whole table, or a later default change silently loses to a stale save.
+- Pad tokens are per physical slot vs seat (M3's lesson): capture on a pad must map the slot to the seat being rebound.
+- m0's binding assertions pin the defaults — the remapper must never mutate DEFAULT_BINDINGS/SEAT_BINDINGS in place (clone).
+

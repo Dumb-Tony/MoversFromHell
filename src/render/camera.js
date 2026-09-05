@@ -13,11 +13,31 @@
  * The asymmetric lerp is the §4.1 "compress smoothly" requirement made concrete: pull IN
  * fast (a wall must never be seen through) and ease OUT slowly (so walking past a doorway
  * does not fling the camera).
+ *
+ * CAMERA SHAKE (Phase 11 build-side M16; §21.4 Motion, §26.5 "camera shake … exist[s]",
+ * §11.3 road events are felt, §8.4 feedback without a second HUD element). A damped-spring
+ * OFFSET on the eye — three metres-valued components in the rig's FLAT frame (x right, y up,
+ * z forward, yaw only) plus a small pitch/roll — that `nudge()` adds to and `update()`
+ * integrates on SIM time (setClock) with the exact solution of the damped oscillator, so the
+ * same nudge reads the same at 60 and 144 Hz. It is applied AFTER the boom solve and BEFORE
+ * its own collision probe, for two reasons the brief names: added before the solve it would
+ * feed the asymmetric distance lerp (a 30/s pull-in and a 4/s ease-out would smear a 5 Hz
+ * wobble into a lurch), and without the second probe a nudge toward a wall would put the eye
+ * inside it. It NEVER touches yaw or pitch — those are the player's pointer-lock axes, and a
+ * shake on them reads as input loss (m24 K6). Both caps (maxOffset, maxRot) are on the
+ * running value, not the sum of nudges (m24 K4). At rest the offset is exactly zero and the
+ * second probe is skipped, so a still camera renders byte-identically to the build before
+ * shake existed (the m13/m15 shots). `shakeEnabled` (the §26.5 switch, from the settings
+ * store) makes nudge() a no-op and clears whatever was in flight.
+ *
+ * No copy: AirportBaggageCrew\src\render\fx.js records "No screen shake … there is no
+ * settings screen until M5" and never got one, so this is the first in Dev\.
  */
 
 import { RENDER } from '../config.js';
 
 const C = RENDER.camera;
+const S = C.shake;
 
 export class ThirdPersonCamera {
   /** @param {THREE.PerspectiveCamera} camera
@@ -35,6 +55,20 @@ export class ThirdPersonCamera {
     this._eye = new THREE.Vector3();
     this._smoothed = new THREE.Vector3(0, C.height, 0);
     this._first = true;
+
+    /* ---- shake state (M16). Offsets in the flat frame, metres; rotation in radians. ---- */
+    this.shakeEnabled = true;
+    this._shake = { x: 0, y: 0, z: 0 };
+    this._shakeV = { x: 0, y: 0, z: 0 };
+    this._rot = { pitch: 0, roll: 0 };
+    this._rotV = { pitch: 0, roll: 0 };
+    this._shakeEye = new THREE.Vector3();
+    /** Sim-time source (ms) — set by setClock; without one the shake runs on frame time. */
+    this._clock = null;
+    this._shakeLastMs = null;
+    this._sinceSimS = 0;
+    /** True when the last update's second probe had to pull the shaken eye out of a wall. */
+    this.shakeClamped = false;
   }
 
   /** @param {{x:number,y:number}} lookDelta  consumed from Input, already sensitivity-scaled */
@@ -50,6 +84,109 @@ export class ThirdPersonCamera {
 
   setDistance(d) {
     this.distance = Math.max(C.distanceMin, Math.min(C.distanceMax, d));
+  }
+
+  /* ── shake (M16) ───────────────────────────────────────────────────────────────── */
+
+  /** Integrate the shake on SIM time: `clock` is the GameClock (simTimeMs, paused). The
+   *  camera is presentation and the rest of update() stays on frame time; the shake reads the
+   *  sim clock so a suite can drive game.frame() and read the rig after one update, exactly
+   *  as the shot scripts do (performance.now() is frozen under the harness). */
+  setClock(clock) { this._clock = clock || null; this._shakeLastMs = null; this._sinceSimS = 0; }
+
+  /** The §26.5 switch. Off clears whatever is in flight, so the camera is still at once. */
+  setShakeEnabled(on) {
+    this.shakeEnabled = !!on;
+    if (!this.shakeEnabled) this.clearShake();
+    return this.shakeEnabled;
+  }
+
+  clearShake() {
+    const o = this._shake, v = this._shakeV;
+    o.x = o.y = o.z = 0; v.x = v.y = v.z = 0;
+    this._rot.pitch = this._rot.roll = 0;
+    this._rotV.pitch = this._rotV.roll = 0;
+    this.shakeClamped = false;
+  }
+
+  /**
+   * Add to the shake offset. `impulse` is metres in the rig's FLAT frame: x right, y up,
+   * z forward (the direction the camera faces, flattened). `rot` is milliradians — a
+   * number rolls; `{pitch, roll}` does both (pitch < 0 dips the view). Both are capped on
+   * the running value (S.maxOffset on the length, S.maxRot per axis). A no-op while the
+   * switch is off. Returns whether anything was added.
+   */
+  nudge(impulse = {}, rot) {
+    if (!this.shakeEnabled) return false;
+    const o = this._shake;
+    o.x += num(impulse.x); o.y += num(impulse.y); o.z += num(impulse.z);
+    clampLength(o, S.maxOffset);
+    if (rot !== undefined && rot !== null) {
+      const r = typeof rot === 'number' ? { roll: rot } : rot;
+      this._rot.pitch = clampAbs(this._rot.pitch + num(r.pitch) * 1e-3, S.maxRot);
+      this._rot.roll = clampAbs(this._rot.roll + num(r.roll) * 1e-3, S.maxRot);
+    }
+    return true;
+  }
+
+  /** nudge() with a WORLD-frame vector (metres), projected onto the flat frame — what a bus
+   *  observer has when the event carries a truck-frame or world position. */
+  nudgeWorld(vec = {}, rot) {
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    const x = num(vec.x), y = num(vec.y), z = num(vec.z);
+    // right = (c, 0, -s), forward = (-s, 0, -c) — the same basis forwardFlat/rightFlat give.
+    return this.nudge({ x: x * c - z * s, y, z: -x * s - z * c }, rot);
+  }
+
+  /** The current offset, flat frame, metres (a copy). Zero when at rest. */
+  shakeOffset() { const o = this._shake; return { x: o.x, y: o.y, z: o.z }; }
+  shakeMagnitude() { const o = this._shake; return Math.sqrt(o.x * o.x + o.y * o.y + o.z * o.z); }
+  /** The current rotational part, radians (a copy). */
+  shakeRot() { return { pitch: this._rot.pitch, roll: this._rot.roll }; }
+
+  /** How much time the shake should integrate for this update. Sim time when the sim moved;
+   *  frame time once the sim has been still for S.simStallS (paused, or a suite that steps
+   *  physics without the clock), so a shake never freezes mid-air — and never double-counts
+   *  on a display that draws two frames per sim step. */
+  _shakeDt(dtSeconds) {
+    if (!this._clock) return Math.max(0, dtSeconds || 0);
+    const now = this._clock.simTimeMs;
+    if (this._shakeLastMs === null) { this._shakeLastMs = now; this._sinceSimS = 0; return 0; }
+    const simDt = (now - this._shakeLastMs) / 1000;
+    this._shakeLastMs = now;
+    if (simDt > 0) { this._sinceSimS = 0; return simDt; }
+    this._sinceSimS += Math.max(0, dtSeconds || 0);
+    return this._sinceSimS > S.simStallS ? Math.max(0, dtSeconds || 0) : 0;
+  }
+
+  /** Exact damped-oscillator step for every component (see the header). */
+  _integrateShake(dt) {
+    if (dt <= 0) return;
+    const o = this._shake, v = this._shakeV;
+    const wn = Math.sqrt(S.stiffness);
+    const zeta = Math.min(0.999, S.damping / (2 * wn));   // underdamped by construction
+    const a = zeta * wn;
+    const wd = wn * Math.sqrt(1 - zeta * zeta);
+    const e = Math.exp(-a * dt), cs = Math.cos(wd * dt), sn = Math.sin(wd * dt);
+    const step = (x, vx) => [
+      e * (x * cs + ((vx + a * x) / wd) * sn),
+      e * (vx * cs - ((wn * wn * x + a * vx) / wd) * sn),
+    ];
+    let r;
+    r = step(o.x, v.x); o.x = r[0]; v.x = r[1];
+    r = step(o.y, v.y); o.y = r[0]; v.y = r[1];
+    r = step(o.z, v.z); o.z = r[0]; v.z = r[1];
+    clampLength(o, S.maxOffset);
+    r = step(this._rot.pitch, this._rotV.pitch); this._rot.pitch = clampAbs(r[0], S.maxRot); this._rotV.pitch = r[1];
+    r = step(this._rot.roll, this._rotV.roll); this._rot.roll = clampAbs(r[0], S.maxRot); this._rotV.roll = r[1];
+    // Declare rest: a spring that is 10 µm out and crawling is a spring at zero. Without this
+    // the second probe would run forever after the first nudge of a session.
+    if (Math.abs(o.x) < S.restOffset && Math.abs(o.y) < S.restOffset && Math.abs(o.z) < S.restOffset &&
+        Math.abs(v.x) < S.restVelocity && Math.abs(v.y) < S.restVelocity && Math.abs(v.z) < S.restVelocity) {
+      o.x = o.y = o.z = 0; v.x = v.y = v.z = 0;
+    }
+    if (Math.abs(this._rot.pitch) < S.restOffset && Math.abs(this._rotV.pitch) < S.restVelocity) { this._rot.pitch = 0; this._rotV.pitch = 0; }
+    if (Math.abs(this._rot.roll) < S.restOffset && Math.abs(this._rotV.roll) < S.restVelocity) { this._rot.roll = 0; this._rotV.roll = 0; }
   }
 
   /** @param {{x,y,z}} focus  the point to orbit — player shoulder in Phase 1+
@@ -93,7 +230,35 @@ export class ThirdPersonCamera {
     if (len > 1e-5) dir.multiplyScalar(this._currentDistance / len);
     this.camera.position.copy(this.target).add(dir);
     if (this.camera.position.y < 0.22) this.camera.position.y = 0.22;  // never below ground
+
+    /* ---- shake (M16): after the boom solve, before its own probe ------------------------
+     * The offset applied this frame is the spring's state as it stands — a nudge that
+     * arrived during the sim frame just stepped shows in full on this update and decays from
+     * the next (m24 K2 reads the peak on the first update). The eye is then probed from the
+     * target again, so a nudge toward a wall is clamped exactly as the boom would be. The
+     * camera keeps looking at the UNSHIFTED target: a translated eye tracking a fixed subject
+     * swings the frame by offset/boom radians — the visible part of a jolt — without a single
+     * change to yaw or pitch. */
+    this.shakeClamped = false;
+    const o = this._shake;
+    if (o.x !== 0 || o.y !== 0 || o.z !== 0) {
+      const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+      const eye = this._shakeEye.set(
+        this.camera.position.x + c * o.x - s * o.z,
+        this.camera.position.y + o.y,
+        this.camera.position.z - s * o.x - c * o.z,
+      );
+      this.shakeClamped = camOcclude(this.target, eye, this.colliders);
+      if (eye.y < RENDER.camera.eyeFloorY) eye.y = RENDER.camera.eyeFloorY;
+      this.camera.position.copy(eye);
+    }
     this.camera.lookAt(this.target);
+    if (this._rot.pitch !== 0 || this._rot.roll !== 0) {
+      // Local axes after lookAt: X right, Z the view axis. Pitch dips or lifts, roll tilts.
+      this.camera.rotateX(this._rot.pitch);
+      this.camera.rotateZ(this._rot.roll);
+    }
+    this._integrateShake(this._shakeDt(dtSeconds));
     return hit;
   }
 
@@ -142,4 +307,16 @@ export function camOcclude(from, to, colliders) {
     return true;
   }
   return false;
+}
+
+/* ── shake helpers (M16) ─────────────────────────────────────────────────────────── */
+
+function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function clampAbs(v, cap) { return v > cap ? cap : v < -cap ? -cap : v; }
+/** Scale a {x,y,z} down to `cap` length in place — a cap, not a per-axis clip, so a
+ *  diagonal nudge keeps its direction. */
+function clampLength(o, cap) {
+  const len = Math.sqrt(o.x * o.x + o.y * o.y + o.z * o.z);
+  if (len > cap && len > 0) { const k = cap / len; o.x *= k; o.y *= k; o.z *= k; }
+  return o;
 }

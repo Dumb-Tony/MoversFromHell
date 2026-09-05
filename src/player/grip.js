@@ -294,6 +294,19 @@ export class GripSystem {
     for (const h of HANDS) if (this.grips[h]) this.release(h, reason, simTimeMs);
   }
 
+  /** Let go of ONE entity, whichever hands are on it (M15; §18.3). The registry calls this
+   *  through main.js before it teleports a held body out of the void — reason 'lost', so
+   *  the run record can tell a recovery's release from a slip or a tear. Returns how many
+   *  grips let go (0 when this mover was not holding it). */
+  releaseEntity(entityId, reason = 'lost', simTimeMs = 0) {
+    let n = 0;
+    for (const h of HANDS) {
+      const g = this.grips[h];
+      if (g && g.entityId === entityId) { this.release(h, reason, simTimeMs); n++; }
+    }
+    return n;
+  }
+
   /** The §6.2 force cap for ONE of this mover's hands on `entity`: every multiplier §6.2
    *  names (brace, hand count, wet surface, the object's own grip, §5.2 exertion), min'd
    *  against the GRIP.maxAccel half of the §6.4 bound, then split between this mover's

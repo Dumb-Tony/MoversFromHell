@@ -60,6 +60,10 @@ export class DebugOverlay {
       // unreadable, and hides which of the two is which.
       ['input', `${s.inputContext} · ${g.input ? devices(g.input) : '—'}${g.input && g.input.pointerLocked ? ' · locked' : ''}`],
       ['carry', extra.carry || '—'],
+      // M16: the camera-shake offset per seat (mm), '(off)' when the §26.5 switch is off.
+      ['shake', extra.shake || '—'],
+      // §18.3 callouts this run, by what was lost (M15): what the invoice's recovery line will say.
+      ['lost', extra.lost ? lostRow(extra.lost) : '—'],
       ['session', `${Object.keys(s.players).length} player(s) · seed ${s.seed} · ${s.paused ? 'PAUSED' : 'running'}`],
       ['build', `${BUILD.label} · ${BUILD.date}`],
     ];
@@ -80,6 +84,12 @@ export class DebugOverlay {
 function fmt(ms) {
   const t = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** 'lost' row (M15): the recoveries this run by kind — main.js recoveriesByKind(). Exported
+ *  so m23 can assert the text without a DOM. */
+export function lostRow(k) {
+  return `${k.total} this run · movers ${k.movers} · objects ${k.objects} · fixtures ${k.fixtures} · pieces ${k.pieces} · tools ${k.tools}`;
 }
 
 /** Which device each seated player is actually using (§26.5 — the HUD draws a glyph set per

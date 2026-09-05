@@ -166,6 +166,19 @@ per surface), with a notice naming the surface ("front wall — scuffed · 30.82
 bounded scuff mark, the §15.1 line on the invoice and a review tag. Floors, the ground, the deck
 and the ramp are never billed; a landing that grazes a wall is a landing.
 
+**Nothing you lose stays lost.** A tool, a door leaf or a loose part that leaves the world — below
+the floor, past the edge of the plot, or at a position that stopped being a number — comes back
+after the same four-second grace as an object (§18.3): a tool to its rack slot (detached from
+whatever it was under, folded up if it was deployed, out of your hands if you were carrying it),
+a removed door leaf to where it was laid down, a piece to beside wherever its parent is now.
+Every callout is billed on the invoice and shown on the F3 overlay's "lost" row. A seeded sweep
+of forty random sessions over the common verbs, with three things thrown into the void each,
+proves no common sequence produces an unrecoverable soft lock (§26.6).
+
+**Camera shake** is on the settings card: a small damped nudge on hard brakes, sharp turns, speed
+bumps, nearby impacts and your own knockdown — never on your look — and it starts off when your
+system prefers reduced motion.
+
 ## Test it
 
 ```bash
@@ -229,7 +242,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**2068 assertions across twenty-three suites, all passing** — plus a GPU-only suite that the
+**2333 assertions across twenty-five suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -267,7 +280,10 @@ parts left behind. Batch 6 made §26.1's invoice honest: a crew can drive back f
 (fuel per leg, the time on the clock, "trip 2" on the HUD, every item left behind priced at 60),
 and a wall, a door frame or the truck body that an object hits hard enough writes one
 property-damage entry with a notice, a caption, a bounded scuff and the §15.1 line. Batch 7
-(soft-lock recovery and a randomised sweep; camera shake with its switch) is briefed in the plan.
+closed the last two §26 lines a build can close alone: tools, door leaves and loose parts recover
+from out of bounds mid-run, a seeded sweep of forty random sessions proves no common sequence
+produces an unrecoverable soft lock, and camera shake exists with the switch §26.5 names. Batch 8
+(three packs for §26.3; full remapping for §21.4) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -547,6 +563,9 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
+- **The grab ray's origin follows the shaken camera** for up to 0.6 s after a nudge (its direction
+  does not); the seat that feels road events is the one whose mover stood nearest the cab when
+  the drive began; shake intensity is on/off only.
 - **Nothing is uploaded, ever.** The project rule is zero external requests, so §27.4's
   "opt-in upload" is the Copy button; a playtest group sends the pasted JSON by hand. The
   recorder's frame cost was measured in a real Chrome (0.03 ms per step at worst), not in the

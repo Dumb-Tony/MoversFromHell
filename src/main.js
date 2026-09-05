@@ -40,7 +40,7 @@ import { INTERIOR_DOORS, doorById, leafDoors, leafPose, leafRestPose, hungClear,
 import { ToolSystem, reassemble, clearFragments } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
-import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
+import { TRUCK_POSE, cargoInterior, cargoAnchors, cabPoint, roadEventForce } from './world/truck.js';   // cabPoint, roadEventForce: M16 shake
 import { DEST_ZONES, DEST_SHELL, insideDestination } from './world/destination.js';
 import { DamageSystem } from './damage/damage.js';
 import { Scuffs } from './render/scuffs.js';
@@ -54,7 +54,7 @@ import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
-import { load as loadSave, save as writeSave, SHELL_DEFAULTS } from './core/save.js';
+import { load as loadSave, save as writeSave, SHELL_DEFAULTS, reducedMotionPreferred } from './core/save.js';
 import { RunRecorder, buildRunSummary, compactRun } from './telemetry/runLog.js';
 import { GameAudio, audioEnabledFrom, directionGlyph } from './audio/audio.js';
 import { InteractionSystem } from './player/interact.js';
@@ -69,7 +69,8 @@ import { createPost, postModeFromLocation } from './render/post.js';
 import { present } from './render/present.js';
 import { ContactBlobs } from './render/contactBlobs.js';
 import { updateRimCamera } from './render/materials.js';
-import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT, ECONOMY, TELEMETRY } from './config.js';
+import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT, ECONOMY, TELEMETRY, WORLD } from './config.js';   // WORLD: M15
+import { TRUCK, AUDIO } from './config.js';   // M16: the shake's road severities and the impact silence threshold
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -87,7 +88,11 @@ async function boot() {
    * never thrown from (save.js). Its settings go to the Input's constructor, its shell values
    * to the CSS variable and the camera rigs below, its best invoice to the settlement sheet.
    * Nothing in it enters game.state. */
-  const saved = loadSave();
+  /* §21.4 Motion (M16): the OS's prefers-reduced-motion, read once, decides the DEFAULT of
+   * the camera-shake switch for a save that carries no choice — recorded on the api and the
+   * card, never fought (a saved choice wins; Defaults on the card restores this reading). */
+  const reducedMotion = reducedMotionPreferred();
+  const saved = loadSave({ reducedMotion });
   /* Quality tier before the scene, because it decides how many shadow maps get built. See
    * detectRenderTier — shadow passes are ~100x more expensive in software than lights are.
    * A saved tier forces it ('applies on reload' on the settings card); ?tier= still wins, so
@@ -108,7 +113,8 @@ async function boot() {
   // ---- physics ------------------------------------------------------------------------
   const R = await initPhysics();
   const physics = new PhysicsWorld(R);
-  physics.addGround();
+  // The ground's side is config's WORLD.groundSizeM (M15): RECOVERY.bounds derives from it.
+  physics.addGround(WORLD.groundSizeM);
   /* Kept (M14): {body, collider, tag} per static, and physics.staticTags / tagOf() beside it,
    * so the damage system can say WHAT an object hit — §8.4's "location". */
   const statics = physics.addStaticFromColliders(world.colliders);
@@ -332,6 +338,10 @@ async function boot() {
       ? camera
       : new THREE.PerspectiveCamera(RENDER.fov, 1, RENDER.near, RENDER.far);
     const moverRig = new ThirdPersonCamera(cam, world.colliders);
+    // M16: the shake integrates on the sim clock (the harness freezes performance.now()) and
+    // starts from the saved §26.5 switch. The rest of the rig stays on frame time.
+    moverRig.setClock(game.clock);
+    moverRig.setShakeEnabled(shell.cameraShake);
     // Each mover has its OWN grip system. attachTo wires the forced-release hook, so being
     // knocked down drops what that mover was holding — and only what THAT mover was holding.
     const gripSys = new GripSystem(physics, registry, moverRig, cam, bus, controller).attachTo(controller);
@@ -343,6 +353,11 @@ async function boot() {
       };
     }
   }
+  /* §18.3 recovery of a HELD body lets every hand go first (M15, grip.js releaseEntity):
+   * the registry knows bodies, the movers know hands, and this is the seam between them. */
+  registry.releaseHolds = (entity, reason) => {
+    for (const m of movers) m.grips.releaseEntity(entity.id, reason, game.clock.simTimeMs);
+  };
   /* ---- seats (Phase 12) -------------------------------------------------------------------
    * A SEAT is a person: an input, a viewport, a camera and a HUD. A MOVER is a body in the
    * world. They are deliberately not the same thing, and keeping them separate is what lets
@@ -447,6 +462,11 @@ async function boot() {
      * counts contractFacts() gives the objective line, so the prompt and the line agree. */
     tripStatus: () => tripStatus(game.state.manifest, registry),
   });
+  /* A tool the §18.3 pass takes out of a mover's hands (M15, tools.js dropCarried) is
+   * forgotten on the mover's side too, or interact.step would keep dragging it along. */
+  tools.releaseCarry = (tool) => {
+    for (const s of interact.state.values()) if (s.carriedTool === tool.id) s.carriedTool = null;
+  };
 
   // ---- systems, in §22.3 order ----------------------------------------------------------
   game.addSystem('look', (state, stepMs, ctx) => {
@@ -605,6 +625,8 @@ async function boot() {
 
   // After the step, because it reads post-step velocities to decide "settled" (§12.3).
   game.addSystem('objects', (state, stepMs) => { registry.step(stepMs); });
+  // §18.3 for the four tools (M15) — the registry's pass, for the bodies it never sees.
+  game.addSystem('tools', (state, stepMs) => { tools.step(stepMs); });
 
   // §10.2's "settling inside the closed volume" reads the flag registry.step just set.
   game.addSystem('cargo', (state, stepMs, ctx) => { cargo.step(stepMs, ctx.simTimeMs); });
@@ -930,10 +952,17 @@ async function boot() {
         shell.captions = !!shellPatch.captions;
         for (const h of huds) h.setCaptionsEnabled(shell.captions);
       }
+      /* §26.5 camera shake (M16): every rig's switch, at once — off also clears a shake in
+       * flight, so the camera is still the moment the box is unticked (m24 K5). */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'cameraShake')) {
+        shell.cameraShake = !!shellPatch.cameraShake;
+        for (const m of movers) m.rig.setShakeEnabled(shell.cameraShake);
+      }
       persist();
     },
     reset() {
-      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS });
+      // M16: 'Defaults' restores the OS reading for the shake switch, not a bare true.
+      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion });
     },
   };
   const settingsPanel = new SettingsPanel(ui, settingsStore);
@@ -1001,6 +1030,90 @@ async function boot() {
   bus.on(EVENTS.ROAD_FORCE, (e) => {
     pendingNotices.push({ text: e.label, kind: 'warn' });
   });
+
+  /* ---- camera shake sources (Phase 11 build-side M16; §21.4 Motion, §26.5, §11.3, §8.4) --
+   * Read-only OBSERVERS of the bus — never a system, never game.state. A nudge is a
+   * presentation offset on ONE seat's rig (camera.js), applied after the boom solve and
+   * probed against the walls; the rig's own switch (shell.cameraShake) makes it a no-op.
+   *
+   * WHICH SEAT. Road events reach the DRIVING seat only (the m12 co-op assertion): the seat
+   * whose mover pressed E at the cab. The CONTRACT_PHASE event carries no mover id, so the
+   * driver is recorded at the moment the phase turns to TRANSIT as the seated mover nearest
+   * the cab point — a press needs the mover within TOOLS.interactRange + 0.6 m of it
+   * (interact.js probe), and in solo the one seat is the crew. Impacts reach every seat whose
+   * mover is within shake.impactRange of the hit, ∝ relVelocity above the audio's own silence
+   * threshold (AUDIO.impact.minVelocity), attenuated by distance. A knockdown reaches its own
+   * seat once, read on the render frame (there is no knockdown event; shakeFrame below). */
+  const SHAKE = RENDER.camera.shake;
+  const shakeDriver = { mover: -1 };
+  bus.on(EVENTS.CONTRACT_PHASE, (e) => {
+    if (e.to !== PHASES.TRANSIT) return;
+    const cab = cabPoint();
+    let best = -1, bestD = Infinity;
+    for (let s = 0; s < seatCount; s++) {
+      const m = moverOfSeat(s);
+      const p = m.controller.position;
+      const d = Math.hypot(cab.x - p.x, cab.z - p.z);
+      if (d < bestD) { bestD = d; best = movers.indexOf(m); }
+    }
+    shakeDriver.mover = best;
+  });
+  bus.on(EVENTS.ROAD_FORCE, (e) => {
+    const ev = TRUCK.roadEvents[e.roadType];
+    if (!ev) return;
+    const sev = ev.severity;
+    // In solo the one seat is the crew whatever mover it is on; in co-op only the driver's.
+    const seat = seatCount === 1 ? 0 : seatOfMover(shakeDriver.mover);
+    if (seat < 0) return;
+    const rig = moverOfSeat(seat).rig;
+    // The same truck-frame direction the cargo's pseudo-force takes (truck.js): a brake
+    // throws forward (+Z, TRUCK_POSE.yaw is 0), a turn sideways, a bump up.
+    const f = roadEventForce(e.roadType, 1);
+    if (!f) return;
+    const len = Math.hypot(f.x, f.y, f.z) || 1;
+    const k = SHAKE.road * sev / len;
+    const r = rig.rightFlat();
+    const sideways = (f.x * r.x + f.z * r.z) / len;   // which way, in the rig's own frame
+    const mrad = SHAKE.roadRotMrad * sev;
+    const rot = e.roadType === 'hardBrake' ? { pitch: -mrad }
+              : e.roadType === 'sharpTurn' ? { roll: -Math.sign(sideways || 1) * mrad }
+              : { pitch: mrad * RENDER.camera.shake.bumpRotFraction };
+    rig.nudgeWorld({ x: f.x * k, y: f.y * k, z: f.z * k }, rot);
+  });
+  bus.on(EVENTS.IMPACT, (e) => {
+    const v = Number(e.relVelocity) || 0;
+    const minV = AUDIO.impact.minVelocity, fullV = AUDIO.impact.fullVelocity;
+    if (v <= minV || !e.position) return;
+    const strength = Math.min(1, (v - minV) / Math.max(1e-6, fullV - minV));
+    for (let s = 0; s < seatCount; s++) {
+      const m = moverOfSeat(s);
+      const p = m.controller.position;
+      const dx = e.position.x - p.x, dy = e.position.y - p.y, dz = e.position.z - p.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > SHAKE.impactRange) continue;
+      const att = 1 - d / SHAKE.impactRange;
+      const amp = SHAKE.impact * strength * att * att;
+      if (amp <= 0) continue;
+      // Mostly the floor's jolt (up), with a push away from the hit.
+      const h = Math.hypot(dx, dz);
+      const ax = h > 1e-6 ? -dx / h : 0, az = h > 1e-6 ? -dz / h : 0;
+      m.rig.nudgeWorld({ x: ax * amp * SHAKE.impactAway, y: amp, z: az * amp * SHAKE.impactAway });
+    }
+  });
+  /** The knockdown source, on the render frame: one nudge per knockdown, on the seat whose
+   *  mover went down (controller.knockdowns is the count; there is no bus event for it). */
+  const knockdownsSeen = new Map();
+  function shakeFrame() {
+    for (let s = 0; s < seatCount; s++) {
+      const m = moverOfSeat(s);
+      const n = m.controller.knockdowns;
+      const seen = knockdownsSeen.get(m.id);
+      if (seen !== undefined && n > seen) {
+        m.rig.nudge({ x: 0, y: -SHAKE.knockdown, z: 0 }, { roll: SHAKE.knockdownRotMrad });
+      }
+      knockdownsSeen.set(m.id, n);
+    }
+  }
   bus.on(EVENTS.STRAP_CHANGED, (e) => { if (e.state === 'slack' && e.strapId) strapsPlacedTotal++; });
   bus.on(EVENTS.RECOVERY, () => {
     pendingNotices.push({ text: 'recovery callout — a fee at settlement', kind: 'warn' });
@@ -1209,6 +1322,8 @@ async function boot() {
       t.state.attachedTo = null;
       t.state.carriedBy = null;
       t.state.geometry = null;
+      t.state.recoveries = 0;      // M15: recoveries are billed per run, tools included
+      t.state.outOfBoundsMs = 0;
     }
     PHASE6_TOOL_SPAWNS.forEach((s, i) => {
       const t = [...tools.tools.values()][i];
@@ -1242,7 +1357,23 @@ async function boot() {
     let n = 0;
     for (const e of registry.entities.values()) n += e.state.recoveries || 0;
     for (const m of movers) n += m.controller.recoveries || 0;
+    n += tools.recoveryCount();   // M15: a lost tool is a callout too
     return n;
+  }
+  /** The same tally split by what was lost — the overlay's 'lost' row (M15, §22.5). Every
+   *  kind sums to recoveryCount(), which is what the invoice bills. */
+  function recoveriesByKind() {
+    const k = { movers: 0, objects: 0, fixtures: 0, pieces: 0, tools: 0, total: 0 };
+    for (const m of movers) k.movers += m.controller.recoveries || 0;
+    for (const e of registry.entities.values()) {
+      const n = e.state.recoveries || 0;
+      if (e.state.partOf || e.state.fragmentOf) k.pieces += n;
+      else if (e.manifest === false) k.fixtures += n;
+      else k.objects += n;
+    }
+    k.tools = tools.recoveryCount();
+    k.total = k.movers + k.objects + k.fixtures + k.pieces + k.tools;
+    return k;
   }
   /** The run so far, from live state — no invoice yet (M6, runLog.js). */
   function liveRunSummary() {
@@ -1564,6 +1695,7 @@ async function boot() {
 
     /* ---- per-seat presentation. READS state and never writes it (§22.2). ---------------- */
     const rects = layoutFor(seatCount, canvas.clientWidth || 0, canvas.clientHeight || 0);
+    shakeFrame();   // M16: a knockdown this frame nudges its own seat before the rigs solve
     for (let s = 0; s < seatCount; s++) {
       const me = moverOfSeat(s);
       me.rig.update(game.state.players[me.id].position, dt);
@@ -1602,6 +1734,8 @@ async function boot() {
       bodies: physics.stats.bodies,
       constraints: physics.stats.constraints,
       contacts: physics.stats.contacts,
+      lost: recoveriesByKind(),   // M15: §18.3 callouts this run, by kind
+
       // §5.1/§5.2 made visible: what you are holding, how close to falling over, how tired.
       // Both movers, so you can see what the one you are NOT driving is doing (§6.4).
       carry: movers.map((m, i) => {
@@ -1609,6 +1743,12 @@ async function boot() {
         return `${s >= 0 ? (seatCount > 1 ? 'P' + (s + 1) : '>') : ' '}${m.id} ` +
           `${m.controller.carriedMass.toFixed(0)}kg ` +
           `x${m.controller.loadSpeedMult.toFixed(2)} bal ${m.controller.imbalance.toFixed(2)}`;
+      }).join('  ·  '),
+      // M16: the camera shake offset per seat, in millimetres, and whether the switch is on.
+      shake: Array.from({ length: seatCount }, (_, s) => {
+        const r = moverOfSeat(s).rig;
+        return `${seatCount > 1 ? 'P' + (s + 1) + ' ' : ''}${(r.shakeMagnitude() * 1000).toFixed(1)} mm` +
+          `${r.shakeEnabled ? '' : ' (off)'}${r.shakeClamped ? ' clamped' : ''}`;
       }).join('  ·  '),
     });
 
@@ -1651,6 +1791,10 @@ async function boot() {
     settingsPanel, settingsStore,
     get bestInvoice() { return bestInvoice; },
     get shellSettings() { return { ...shell }; },
+    /* Camera shake (M16): the boot's prefers-reduced-motion reading, the render loop's
+     * knockdown source and which mover is the recorded driver — so a suite can drive one
+     * frame of it headlessly (m24). */
+    reducedMotion, shakeFrame, shakeDriver: () => shakeDriver.mover,
     /* The notice queue and the contract panel's facts, because the render loop that drains
      * one and feeds the other never runs under headless Chrome (1-3 rAF callbacks total). A
      * suite asserts the 'arrived' notice and the phase word through these. */
@@ -1662,6 +1806,7 @@ async function boot() {
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,
+    recoveriesByKind,   // M15: the overlay's 'lost' row, for m23
     /* The house's doors (M11): the leaves, the live hung predicate, the effective clear
      * widths and the reset re-hang, so a suite can take a door off and measure the opening. */
     doors,

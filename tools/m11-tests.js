@@ -1278,6 +1278,40 @@ lines.push('--- DL. the door verbs keep their promises (M11: GDD §8.2, §9.2, �
 }
 emit('running...');
 
+/* ── M15. a lost screwdriver is not a soft lock (Phase 11 build-side M15: GDD §26.6, §18.3, §9.2) ──
+ *
+ * The verb that reached every disassembly and every door was one dropped tool from being
+ * unreachable for the rest of the run. Lose the screwdriver, drive the game's own frames,
+ * and the prompt at the rack has to offer it again — PROMISED == DELIVERED, after a loss. */
+lines.push('--- M15. a lost screwdriver comes back, and the verb is reachable again (Phase 11 build-side M15) ---');
+{
+  reset();
+  const sd = toolByDef('screwdriver_01');
+  const countBefore = M.recoveryCount();
+  sd.body.setTranslation({ x: 0, y: -50, z: 0 }, true);
+  sd.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  sd.body.wakeUp();
+  for (let i = 0; i < RECOVERY.maxFrames + 30; i++) M.game.frame(FRAME);
+  const p = posOf(sd);
+  ok('M15-1 the screwdriver is back on its rack slot within RECOVERY.maxFrames of game.frame(), dynamic, in the object group',
+     Math.abs(p.x - sd.home.x) < 0.05 && Math.abs(p.z - sd.home.z) < 0.05 && p.y > RECOVERY.toolFloorY && sd.body.isDynamic() &&
+     sd.collider.collisionGroups() === GROUP_PRESETS.object,
+     `at (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}) home (${sd.home.x}, ${sd.home.y}, ${sd.home.z})`);
+  eq('M15-2 recoveryCount() counts the callout (the invoice will bill it, tools included)', M.recoveryCount() - countBefore, 1);
+  // Walked up to from open ground, exactly as section C reaches the rack (the slot sits inside
+  // the deck block's footprint; a camera snapped straight behind the mover aims from inside it).
+  lookAt(me(), { x: -20, z: 60 }, { x: -20, y: 0.2, z: 90 });
+  lookAt(me(), standOffFrom(p, 1.1), p);
+  const d = interact.describe(me());
+  ok('M15-3 the prompt at the rack offers it again', /pick up the screwdriver/.test(d.primary || ''), d.primary || 'nothing');
+  const said = interact.act(me());
+  ok('M15-4 …and E honours it (promised == delivered, after a loss)', /carrying/.test(said || '') && sd.state.carriedBy === me().id, said || 'nothing');
+  interact._putDown(me(), sd, { point: { x: -50, y: 0.1, z: 42 } });
+  parkAt(sd, sd.home.x, sd.home.y, sd.home.z);
+  reset();
+}
+emit('running...');
+
 /* ── H. integration (§26.6) ──────────────────────────────────────────────── */
 lines.push('--- H. integration (GDD §26.6) ---');
 {

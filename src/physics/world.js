@@ -14,7 +14,7 @@
  * That is the one structural cost of using a real solver, and it is paid once at startup.
  */
 
-import { SIM } from '../config.js';
+import { SIM, WORLD } from '../config.js';
 
 /* Collision groups. Rapier packs an interaction group into one u32: the high 16 bits are
  * MEMBERSHIP (what this collider is) and the low 16 bits are the FILTER (what it will
@@ -216,7 +216,7 @@ export class PhysicsWorld {
 
   /** Infinite-ish ground plane. A very large thin cuboid rather than a true half-space, so
    *  the character controller's ground snap has a real surface to find. */
-  addGround(size = 200, thickness = 0.4) {
+  addGround(size = WORLD.groundSizeM, thickness = 0.4) {
     const R = this.R;
     const body = this.world.createRigidBody(R.RigidBodyDesc.fixed().setTranslation(0, -thickness / 2, 0));
     const col = this.world.createCollider(

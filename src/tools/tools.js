@@ -28,7 +28,7 @@
  * for one gesture is how a player ends up pressing the wrong key at the top of a ramp.
  */
 
-import { TOOLS, DAMAGE, PARTS } from '../config.js';
+import { TOOLS, DAMAGE, PARTS, RECOVERY, ECONOMY } from '../config.js';
 import { TOOL_DEFS, validateToolDef } from './definitions.js';
 import { pieceDefFor, fragmentDefFor } from '../objects/definitions.js';
 import { EVENTS } from '../core/eventBus.js';
@@ -36,6 +36,20 @@ import { GROUP_PRESETS } from '../physics/world.js';
 import { buildToolVisual } from '../render/prefabs.js';
 
 let _nextToolId = 0;
+
+/* Local copies of registry.js's two §18.3 predicates (M15). tools.js is imported BY
+ * registry.js (pieceSlots, for a lost piece's slot), so importing them back would be a
+ * cycle; the definitions are three lines each and RECOVERY.bounds is the one source. */
+function safeTranslation(body) {
+  let t;
+  try { t = body.translation(); } catch (e) { return null; }
+  if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.y) || !Number.isFinite(t.z)) return null;
+  return { x: t.x, y: t.y, z: t.z };
+}
+function isOutOfBounds(t, bounds, floorY) {
+  return t.y < floorY || t.y > bounds.maxY ||
+    t.x < bounds.minX || t.x > bounds.maxX || t.z < bounds.minZ || t.z > bounds.maxZ;
+}
 
 export class ToolSystem {
   /**
@@ -56,9 +70,21 @@ export class ToolSystem {
     /** toolId -> tool record. Stable string ids (§9.2, §22.4). */
     this.tools = new Map();
     this.byCollider = new Map();
+    /** M15: `(tool) => void` — forget a carried tool on the mover's side (the interaction
+     *  system's per-mover `carriedTool`) when the recovery pass takes it out of their hands.
+     *  Set by main.js; null in a system built by hand, where nothing carries. */
+    this.releaseCarry = null;
   }
 
   get count() { return this.tools.size; }
+
+  /** Recoveries performed on tools this run (§18.3, M15) — the invoice's recoveryCount()
+   *  sums this with the objects' and the movers'. */
+  recoveryCount() {
+    let n = 0;
+    for (const t of this.tools.values()) n += t.state.recoveries || 0;
+    return n;
+  }
 
   /** Spawn a tool as a real world body. §9.2: "tools are world objects and consume cargo
    *  space unless mounted" — so they have mass, they fall over, and they can be forgotten. */
@@ -99,17 +125,116 @@ export class ToolSystem {
     const id = `${def.id}#${_nextToolId++}`;
     const tool = {
       id, defId: def.id, def, body, collider, mesh,
+      /** Its rack slot (M15): where the §18.3 pass puts it back. The spawn pose, so
+       *  PHASE6_TOOL_SPAWNS is the one place the rack is authored. */
+      home: { x: at.x || 0, y: at.y || 0, z: at.z || 0, yaw },
       /** §9.2 "tools have stable IDs and state". Serializable half only. */
       state: {
         id, defId: def.id,
         deployed: false,
         attachedTo: null,      // entityId this tool is currently acting on
         carriedBy: null,       // playerId, once picked up
+        recoveries: 0,         // §18.3 callouts on this tool this run (M15)
+        outOfBoundsMs: 0,
       },
     };
     this.tools.set(id, tool);
     this.byCollider.set(collider.handle, tool);
     return tool;
+  }
+
+  /* ── §18.3 out-of-bounds recovery, for tools (Phase 11 build-side M15; §26.6) ──────────
+   *
+   * The mirror of ObjectRegistry.step's pass, for the four bodies that registry never sees.
+   * Until M15 a dolly knocked off the plot, a ramp dropped into the void or a screwdriver
+   * carried into the truck and lost was gone until "Run it again" — and a lost screwdriver
+   * is a soft lock for every disassembly and every door on the contract (KNOWN_ISSUES,
+   * Phase 17). §26.6 forbids exactly that.
+   *
+   * Same test (below RECOVERY.toolFloorY, outside RECOVERY.bounds, or non-finite), same
+   * grace, same fee, one RECOVERY on the same stream. What differs is the destination — the
+   * tool's rack slot, always: a tool has no "last settled" spot worth returning to (it is
+   * where it was dropped, which is how it got lost), and the rack is beside the truck at
+   * every phase because both sites share one world. Runs AFTER the physics step, like the
+   * registry's; one AABB read per tool per step, no queries. */
+  step(stepMs) {
+    const recovered = [];
+    for (const tool of this.tools.values()) {
+      const t = safeTranslation(tool.body);
+      if (!t) {
+        this.recover(tool, 'non-finite');
+        recovered.push(tool.id);
+        continue;
+      }
+      const oob = isOutOfBounds(t, RECOVERY.bounds, RECOVERY.toolFloorY);
+      tool.state.outOfBoundsMs = oob ? tool.state.outOfBoundsMs + stepMs : 0;
+      if (tool.state.outOfBoundsMs >= RECOVERY.outOfBoundsGraceSeconds * 1000) {
+        this.recover(tool, 'out of bounds');
+        recovered.push(tool.id);
+      }
+    }
+    return recovered;
+  }
+
+  /**
+   * Put one tool back on its rack slot (§18.3), whatever state it left in.
+   *
+   * THROUGH THE EXISTING CALLS, never by clearing flags: a dolly under the couch is detached
+   * with detachDolly so the couch gets its own friction and combine rule back; a deployed
+   * ramp is retrieved so no Fixed plank is left at the deck lip; a blanket comes off its
+   * object; a carried tool is dropped out of the mover's hands (`dropCarried`, reason
+   * 'lost'). The Phase 17 M2 bug class — a parent keeping a tool's effect after the tool is
+   * gone — is exactly what a flag-clearing shortcut here would reintroduce.
+   *
+   * Nothing about the tool's identity changes: same id, same collider handle, same mesh.
+   * Emits ONE RECOVERY {toolId, entityId, reason, fee} on the §27.4 stream (m17 R4's tally
+   * and the invoice's recoveryCount() both read it) and counts it on the tool.
+   */
+  recover(tool, reason = 'out of bounds') {
+    if (!tool) return null;
+    if (tool.state.attachedTo) {
+      if (tool.def.effect === 'friction') this.detachDolly(tool);
+      else if (tool.def.effect === 'protection') this.removeBlanket(tool);
+      else tool.state.attachedTo = null;
+    }
+    if (tool.state.deployed) this.retrieveRamp(tool);
+    if (tool.state.carriedBy) this.dropCarried(tool, 'lost');
+
+    const R = this.physics.R;
+    const h = tool.home;
+    tool.body.setBodyType(R.RigidBodyType.Dynamic, true);
+    tool.collider.setCollisionGroups(GROUP_PRESETS.object);
+    tool.body.setTranslation({ x: h.x, y: h.y + RECOVERY.objectRecoveryLiftM, z: h.z }, true);
+    tool.body.setRotation({ x: 0, y: Math.sin(h.yaw / 2), z: 0, w: Math.cos(h.yaw / 2) }, true);
+    tool.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    tool.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    tool.body.wakeUp();
+    tool.state.outOfBoundsMs = 0;
+    tool.state.recoveries = (tool.state.recoveries || 0) + 1;
+    if (this.bus) {
+      this.bus.emit(EVENTS.RECOVERY, {
+        toolId: tool.id, entityId: tool.id, reason, fee: ECONOMY.recoveryFee, kind: 'tool',
+        newTransform: { x: h.x, y: h.y + RECOVERY.objectRecoveryLiftM, z: h.z },
+      }, this.now());
+    }
+    return tool;
+  }
+
+  /** Take a carried tool out of its mover's hands without putting it anywhere (M15): the
+   *  caller decides where it goes next (recover puts it on the rack). The mover's side of
+   *  the carry is forgotten through `releaseCarry`; the tool's body goes Dynamic in the
+   *  world's collision group, as every put-down path does (interact.js _putDown). One
+   *  TOOL_STATE 'dropped' with the reason, so the run record can see a tool was LOST rather
+   *  than set down. */
+  dropCarried(tool, reason = 'lost') {
+    if (!tool || !tool.state.carriedBy) return false;
+    const by = tool.state.carriedBy;
+    if (typeof this.releaseCarry === 'function') this.releaseCarry(tool);
+    tool.body.setBodyType(this.physics.R.RigidBodyType.Dynamic, true);
+    tool.collider.setCollisionGroups(GROUP_PRESETS.object);
+    tool.state.carriedBy = null;
+    if (this.bus) this.bus.emit(EVENTS.TOOL_STATE, { toolId: tool.id, state: 'dropped', reason, by }, this.now());
+    return true;
   }
 
   get(id) { return this.tools.get(id); }

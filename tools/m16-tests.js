@@ -132,7 +132,8 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
   const x = {
     settings: { ...DEFAULT_SETTINGS, mouseSensitivity: 1.7, gripMode: 'toggle', invertLookY: true, stickDeadzone: 0.3 },
     // M9 (Phase 11 build-side): the shell carries the three bus levels and the captions switch.
-    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false },
+    // M16: …and the camera-shake switch (a non-default, so the round-trip is real).
+    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
   };
@@ -420,6 +421,9 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     audioUi:            () => M.audio.levels.ui,
     audioWorld:         () => M.audio.levels.world,
     captions:           () => huds[0].captionsEnabled,
+    // M16 (Phase 11 build-side): the §26.5 camera-shake switch, at its consumer — every rig's
+    // shakeEnabled (camera.js nudge() is a no-op while it is off; m24 K5).
+    cameraShake:        () => M.rig.shakeEnabled,
   };
   const keys = M.settingsPanel.keys();
   eq('U2 the card has exactly one control per consumer', keys.slice().sort().join(','), Object.keys(consumers).sort().join(','));
@@ -502,6 +506,22 @@ lines.push('--- Z. it still runs, and nothing survives this suite ---');
   deep('Z4 the live settings are the defaults again', input.getSettings(), { ...DEFAULT_SETTINGS });
   eq('Z4a …and --ts is 1', tsNow(), 1);
   ok('Z5 no error banner appeared during the suite', banner() === '', banner());
+}
+
+/* ── M16 (Phase 11 build-side): the camera-shake switch in the shell payload ───────
+ * §26.5 "camera shake … exist[s]" / §21.4 Motion. The switch is a shell key like captions:
+ * a boolean, defaulting from the OS's reduced-motion reading at load (m24 K7 covers the
+ * reading; here only that the payload carries and sanitises it). */
+lines.push('--- M16. the camera-shake switch is a shell key (§26.5, §21.4 Motion) ---');
+{
+  eq('M16-1 SHELL_DEFAULTS.cameraShake is true', SHELL_DEFAULTS.cameraShake, true);
+  localStorage.removeItem(SAVE_KEY);
+  eq('M16-2 load() hands back the boolean', typeof load().shell.cameraShake, 'boolean');
+  save({ shell: { ...SHELL_DEFAULTS, cameraShake: false } });
+  eq('M16-3 save(false) → load() false', load().shell.cameraShake, false);
+  localStorage.setItem(SAVE_KEY, JSON.stringify({ schema: SAVE_SCHEMA, shell: { cameraShake: 'no' } }));
+  eq('M16-4 a non-boolean in the blob is the default, not a truthy string', load().shell.cameraShake, true);
+  localStorage.removeItem(SAVE_KEY);
 }
 
 } catch (e) {

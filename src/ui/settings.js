@@ -13,9 +13,14 @@
  * persists.
  *
  * ONLY SETTINGS THAT MEASURABLY CONSUME are on this card (INDEX.md: "assert consumption, not
- * presence" — m16 U2 walks every `[data-setting]` and checks its consumer moved). There is no
- * camera-shake or reduced-motion control because there is no shake and no particle system for
- * one to act on yet; a switch wired to nothing is a lie (§2.1). The Sound group (Phase 11
+ * presence" — m16 U2 walks every `[data-setting]` and checks its consumer moved). A switch
+ * wired to nothing is a lie (§2.1), which is why 'Camera shake' arrived with M16 and not M4:
+ * M4 had nothing that shook. Now src/render/camera.js has a damped-spring nudge fed by road
+ * events, nearby impacts and the mover's own knockdown, and the switch is every rig's
+ * `shakeEnabled` (m24 K5). Its DEFAULT is the OS's prefers-reduced-motion reading at boot
+ * (§21.4 Motion; save.js reducedMotionPreferred) — recorded, not fought: a player who wants
+ * shake back turns it on and the choice is saved. There is still no reduced-motion control of
+ * its own, because shake is the only motion this build adds. The Sound group (Phase 11
  * build-side M9) exists because src/audio/audio.js now does: three §21.4 "volume categories"
  * routed to audio.setMaster / setBus, and captions (§21.4 Hearing, §26.5 "subtitles … exist")
  * routed to every HUD's caption line (m18 A11).
@@ -52,6 +57,10 @@ const ROWS = Object.freeze({
     { key: 'tier', label: 'Quality', kind: 'select', options: SETTINGS.tiers,
       names: { auto: 'auto-detect', gpu: 'full (GPU)', software: 'reduced (no GPU)' },
       note: 'Applies on reload — the tier decides how many shadow maps get built.' },
+    /* §26.5 "camera shake … exist[s]" / §21.4 Motion (M16): the shell key cameraShake, routed
+     * to every rig's shakeEnabled. Never on the look axes — it is a nudge on the eye. */
+    { key: 'cameraShake', label: 'Camera shake — a nudge on hard brakes, bumps and nearby impacts', kind: 'check',
+      note: 'Never on your look. Starts off when your system asks for reduced motion.' },
   ],
   /* §21.4 Hearing: "volume categories" and "subtitles with direction" (M9). The shell keys
    * audioMaster / audioUi / audioWorld / captions; the store routes the sliders to
@@ -90,7 +99,7 @@ export class SettingsPanel {
       <label class="set-row set-check">
         <input type="checkbox" data-setting="${d.key}">
         <span>${d.label}</span>
-      </label>`;
+      </label>${d.note ? `<p class="set-note">${d.note}</p>` : ''}`;
       }
       if (d.kind === 'select') {
         const opts = d.options.map((o) => `<option value="${o}">${d.names[o] || o}</option>`).join('');

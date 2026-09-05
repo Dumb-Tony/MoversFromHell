@@ -718,3 +718,20 @@ M12 (loose parts) — things to watch with an external group:
 
 Phase 11 build-side M14 — the walls cost money now. What to watch for in the next external session: whether the 'front wall — scuffed · 30.82' notice lands as a price a tester can reason about at the door (the first hit is ~31 N·s for a thrown box; a couch at walking pace is ~99 N·s = 139.20, the fridge at 1 m/s ~110 = 156.80 — brute-forcing the 0.86 opening with the couch on its side now has a number on the other side of §3.3's trade), whether the marks on the hallway read as consequence or as noise (24 at most, oldest reused), and whether 'surfaces marked' on the sheet and the review's 'There is a new mark on the hallway wall' change how a team talks about the drag. Measured baseline for the session: a clean run bills 0; the m14 soak's one deliberate wall throw bills 30.82 a run; the cap is 400 per surface and a capped wall goes quiet (no notice, no mark) — if testers notice the silence, that is the KNOWN_ISSUES item to promote.
 
+
+## Phase 22 — Phase 11 build side, batch 7: nothing you lose stays lost, and the camera shakes — 2026-09-04
+
+### M15
+
+M15 (2026-09-04, headless): knocking a tool off the plot is no longer a reason to restart. Each of the four tools dropped into the void came back to its rack 4 s later with a 45.00 callout on the invoice; the dolly came out from under the couch first, so the couch was not left frictionless; a ramp lost while deployed was folded back up rather than leaving a plank at the lip. A door leaf lost off its hinges came back beside its doorway (its rest pose), not re-hung — you still have to Q it back on. Legs lost after the couch had moved 7 m came back beside the couch, not beside the empty spot. 40 random sessions of grabbing, loading, strapping, dollying, wrapping, ramping, unscrewing, door-removing, driving out and back, recovering and replaying, with three things flung into the void per session, never left the contract uncompletable: every tool, item, piece and leaf was present and in bounds after every session and the cab prompt was always reachable. Watch for in a real playtest: the screwdriver at the rack is picked up only when approached from a few metres away (its slot sits inside the truck deck's collider — see KNOWN_ISSUES); the debug overlay's new 'lost' row says what the recovery line will bill.
+
+### M16
+
+### M16 — camera shake (developer answers, 2026-09-04)
+
+What it feels like by the numbers: a hard brake is a 60 mm lurch toward the mover with a 12–14 mrad nose-dip at 4.8 Hz — two visible wobbles (the far side reaches −18 mm) and still within 0.44 s; a sharp turn is the same size sideways with a roll; a speed bump is 48 mm up. A box dropped at your feet at 4 m/s moves the eye 30 mm; the same box six metres away does nothing, and a box set down gently (below 0.5 m/s, the audio's own silence threshold) does nothing. Being knocked down drops the eye 80 mm with a roll, once. None of it touches the look: yaw and pitch are byte-identical across every nudge, so a shake never reads as the mouse slipping. Nothing pushes through a wall — the shaken eye is re-probed against the same colliders as the boom (a 120 mm nudge into the front wall moved 52 mm and stopped).
+
+Accessibility (§21.4 Motion): the switch is 'Camera shake' on the settings card, reachable from the title and pause cards; off stops a shake in flight. If the OS asks for reduced motion the switch starts OFF and the card says so; turning it on is saved and wins over the OS reading afterwards — the reading is recorded, not fought. Headless Chrome reports no preference, so every suite runs with shake on.
+
+Open questions for the external group (§27.3 'which moment would they tell a friend about?'): whether 60 mm / 14 mrad is felt at all on a 1080p monitor at the 4 m boom — the numbers were chosen to be noticed and not to nauseate (the caps are 120 mm and 35 mrad), and the intensity is one config block (RENDER.camera.shake.road / impact) if the answer is 'more' or 'less'.
+

@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 21,
-  label: 'phase-21',
+  phase: 22,
+  label: 'phase-22',
   date: '2026-09-04',
 });
 
@@ -62,6 +62,51 @@ export const RENDER = Object.freeze({
     followLerp: 12,          // per second; higher = stiffer
     occludeLerpIn: 30,       // pull in fast (§4.1 "rather than cut unpredictably")
     occludeLerpOut: 4,       //  ...ease back out slowly
+
+    /* ---- camera shake (Phase 11 build-side M16; §21.4 Motion, §26.5, §11.3, §8.4) ----------
+     * A damped-spring OFFSET on the eye — in the rig's flat frame (x right, y up, z forward)
+     * plus a small pitch/roll — integrated on SIM time with the exact solution of the damped
+     * oscillator (camera.js), so it reads the same at 60 and 144 Hz. Applied AFTER the boom
+     * solve and probed against the walls again before it lands, so it can neither fight the
+     * follow lerp nor push the eye through a wall. Never on yaw/pitch (m24 K6). A nudge ADDS
+     * to the offset and both caps are on the running value, not the sum (m24 K4).
+     * ω = √stiffness = 30 rad/s (4.8 Hz); ζ = damping / 2ω = 0.3 — two visible wobbles.
+     * Settle: |x| ≤ x0·e^(−ζωt)/√(1−ζ²), so a 50 mm nudge is inside 1 mm at 0.44 s;
+     * settleMs is that with margin (m24 K1 drives it, m24 Z pins the derivation). */
+    /** m — the camera's eye never goes below this (a boom clipped by the floor, a shake). */
+  eyeFloorY: 0.22,
+  shake: {
+    /** A speed bump pitches by this fraction of the road rotation (brakes/turns use it whole). */
+    bumpRotFraction: 0.5,
+      stiffness: 900,          // 1/s², ω²
+      damping: 18,             // 1/s, 2ζω
+      maxOffset: 0.12,         // m, cap on the offset's LENGTH
+      maxRot: 0.035,           // rad, cap on |pitch| and |roll| of the rotational part
+      settleMs: 600,           // a 50 mm nudge is back inside 1 mm within this many sim ms
+      /** Below these the spring is declared at rest and the second probe is skipped, so a
+       *  still camera renders byte-identically to a build without shake (m13/m15 shots). */
+      restOffset: 1e-5,        // m
+      restVelocity: 1e-4,      // m/s
+      /** The sim clock stalled longer than this (paused, or a suite stepping physics without
+       *  the clock): integrate on the frame time instead, so a shake never freezes mid-air. */
+      simStallS: 0.05,
+      /** §11.3 road events, felt by the DRIVING seat: metres and milliradians per unit of
+       *  TRUCK.roadEvents[type].severity, along the same truck-frame direction the cargo's
+       *  pseudo-force takes (truck.js roadEventForce): a brake lurches forward and pitches
+       *  the view down, a turn lurches sideways and rolls, a bump lifts. */
+      road: 0.06,
+      roadRotMrad: 14,
+      /** IMPACT within impactRange of a seat's mover: metres at AUDIO.impact.fullVelocity
+       *  standing on the spot, × ((fullV − minV) fraction) × (1 − d/range)². Mostly a lift
+       *  (the floor jolt) with `impactAway` of it directed away from the hit. Below
+       *  AUDIO.impact.minVelocity nothing is felt — the audio's own silence threshold. */
+      impact: 0.05,
+      impactRange: 6,          // m
+      impactAway: 0.5,
+      /** The mover's own §5.1 knockdown: one nudge, on its own seat. */
+      knockdown: 0.08,
+      knockdownRotMrad: 25,
+    },
   },
 
   /* ---- Phase 15: the Overcooked look ------------------------------------------------------
@@ -933,9 +978,21 @@ export const ECONOMY = Object.freeze({
   leftBehindFee: 60,
 });
 
+/** The physical world's extent (Phase 11 build-side M15). ONE number: the side of the
+ *  square ground collider PhysicsWorld.addGround builds (main.js passes it; world.js's
+ *  default is the same 200 m — the scene's 400 m grass plane is dressing with no collider).
+ *  RECOVERY.bounds is derived from it below, so "off the plot" means what the physics
+ *  means by it: past the ground's edge there is nothing to stand on and the fall reaches
+ *  objectFloorY within a second either way. */
+export const WORLD = Object.freeze({
+  groundSizeM: 200,
+});
+
 /** §18.3 recovery. Validated: Phase 5. */
+const OBJECT_FLOOR_Y = -8;          // below this an object is gone and gets recovered
+const OUT_OF_BOUNDS_GRACE_S = 4;
 export const RECOVERY = Object.freeze({
-  outOfBoundsGraceSeconds: 4,
+  outOfBoundsGraceSeconds: OUT_OF_BOUNDS_GRACE_S,
   noProgressGraceSeconds: 12,
   stableTransformIntervalMs: 900,   // how often a last-known-good transform is banked
   /** §18.3: an OBJECT that leaves the world is recovered too, not only a player. Phase 5's
@@ -943,7 +1000,26 @@ export const RECOVERY = Object.freeze({
    *  first word true. Lifted slightly above the banked transform so it drops onto the
    *  surface rather than starting interpenetrated with it. */
   objectRecoveryLiftM: 0.12,
-  objectFloorY: -8,                 // below this an object is gone and gets recovered
+  objectFloorY: OBJECT_FLOOR_Y,
+  /** M15: tools are recovered by the same pass (tools.js ToolSystem.step) at the same floor.
+   *  A separate key so a 50 mm screwdriver could one day be given a shallower floor than a
+   *  wardrobe without touching registry.step; today they agree. */
+  toolFloorY: OBJECT_FLOOR_Y,
+  /** M15 (§26.6 "no soft lock"): the play AABB. DERIVED from WORLD.groundSizeM, never typed —
+   *  a body outside it is off the ground the physics built, whatever its height, and the
+   *  registry and tool passes both recover it after the grace. The ceiling is the same
+   *  half-size: SIM.maxLinearVelocity (40 m/s) straight up reaches ~82 m, so nothing a
+   *  grip can fling legitimately gets there. m23 L8 asserts every spawn, the truck's box,
+   *  both houses' zones and the tool rack sit ≥ 5 m inside it. */
+  bounds: Object.freeze({
+    minX: -WORLD.groundSizeM / 2, maxX: WORLD.groundSizeM / 2,
+    minZ: -WORLD.groundSizeM / 2, maxZ: WORLD.groundSizeM / 2,
+    minY: OBJECT_FLOOR_Y, maxY: WORLD.groundSizeM / 2,
+  }),
+  /** M15: how many game.frame(SIM.stepMs) calls a suite must drive before a body that left
+   *  the world is guaranteed back — the grace in steps, plus a margin for the clock's
+   *  accumulator rounding (one frame of 16.667 ms is one step, but never exactly). */
+  maxFrames: Math.ceil(OUT_OF_BOUNDS_GRACE_S * 1000 / SIM.stepMs) + 10,
 });
 
 /** §12.1 manifest + §12.3 destination placement. Validated: Phase 5 (pickup half),
@@ -1052,6 +1128,10 @@ export const SETTINGS = Object.freeze({
   shellDefaults: {
     uiScale: 1, cameraDistance: RENDER.camera.distance, tier: 'auto',
     audioMaster: AUDIO.master, audioUi: AUDIO.buses.ui, audioWorld: AUDIO.buses.world, captions: true,
+    /** §26.5 "camera shake … exist[s]" / §21.4 Motion (M16): every rig's shakeEnabled. The
+     *  boot default is `!prefers-reduced-motion` (save.js reducedMotionPreferred) — this is
+     *  the value when the OS has no preference; a saved choice always wins. */
+    cameraShake: true,
   },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
@@ -1091,4 +1171,15 @@ export const DEBUG = Object.freeze({
   overlayEnabledByDefault: false,
   frameSampleSize: 120,      // frames averaged for the FPS readout
   eventLogLines: 8,
+  /** M15's §26.6 soft-lock sweep (tools/m23-softlock-tests.js): how many seeded sessions of
+   *  the common verbs it plays, from which seed, with how many teleports-to-void each. The
+   *  seed is printed in every FAIL line so a failure reproduces; change it here to sweep a
+   *  different neighbourhood. `driveSessions` caps how many sessions may drive the route
+   *  (1681 frames a leg) so the suite stays inside smoketest.ps1's virtual-time budget. */
+  softlockSessions: 40,
+  softlockSeed: 20260904,
+  softlockTeleports: 3,
+  softlockActionsMin: 6,
+  softlockActionsMax: 12,
+  softlockDriveSessions: 3,
 });

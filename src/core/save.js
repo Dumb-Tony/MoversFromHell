@@ -13,7 +13,8 @@
  *                mode …), validated by input.js's own sanitiseSettings — one validator for the
  *                panel, the constructor and this file (INDEX: "route it through the SAME
  *                validator")
- *   shell        UI scale, camera distance, quality tier — the shell's, not the input's
+ *   shell        UI scale, camera distance, quality tier, the sound levels and captions, the
+ *                camera-shake switch (M16) — the shell's, not the input's
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
  *   runs         §27.4's local run records (Phase 11 build-side M6): the last
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
@@ -33,9 +34,27 @@ export const SAVE_KEY = SETTINGS.saveKey;
 export const SAVE_SCHEMA = SETTINGS.schema;
 export const SHELL_DEFAULTS = Object.freeze({ ...SETTINGS.shellDefaults });
 
-/** The four things load() hands back when there is nothing to load. Fresh objects each call. */
-export function defaultSave() {
-  return { settings: { ...DEFAULT_SETTINGS }, shell: { ...SHELL_DEFAULTS }, bestInvoice: null, runs: [] };
+/** The four things load() hands back when there is nothing to load. Fresh objects each call.
+ *  `reducedMotion` (M16) is the boot's prefers-reduced-motion reading: it decides the DEFAULT
+ *  of the camera-shake switch (§21.4 Motion — record it, do not fight the OS) and nothing
+ *  else; a saved choice wins over it (sanitiseShell). */
+export function defaultSave({ reducedMotion = false } = {}) {
+  return {
+    settings: { ...DEFAULT_SETTINGS },
+    shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion },
+    bestInvoice: null,
+    runs: [],
+  };
+}
+
+/** The OS's motion preference, read once at boot (§21.4 Motion; M16). Never throws: a window
+ *  without matchMedia, or one that refuses the query, reads as "no preference". */
+export function reducedMotionPreferred(win = globalThis) {
+  try {
+    if (!win || typeof win.matchMedia !== 'function') return false;
+    const q = win.matchMedia('(prefers-reduced-motion: reduce)');
+    return !!(q && q.matches);
+  } catch (e) { return false; }
 }
 
 /** localStorage, or null — private mode, a locked-down profile, or a storage accessor that
@@ -51,27 +70,27 @@ function storage() {
   } catch (e) { return null; }
 }
 
-/** Never throws. Never writes. */
-export function load() {
+/** Never throws. Never writes. `opts.reducedMotion` — see defaultSave. */
+export function load(opts = {}) {
   const s = storage();
-  if (!s) return defaultSave();
+  if (!s) return defaultSave(opts);
   let raw;
-  try { raw = s.getItem(SAVE_KEY); } catch (e) { return defaultSave(); }
-  if (!raw) return defaultSave();
+  try { raw = s.getItem(SAVE_KEY); } catch (e) { return defaultSave(opts); }
+  if (!raw) return defaultSave(opts);
   let data;
-  try { data = JSON.parse(raw); } catch (e) { return defaultSave(); }
-  return migrate(data);
+  try { data = JSON.parse(raw); } catch (e) { return defaultSave(opts); }
+  return migrate(data, opts);
 }
 
 /** Future schemas land here. An unknown or damaged save falls back to defaults rather than
  *  half-applying itself (§27.1). Today there is exactly one schema and no migration. */
-export function migrate(data) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return defaultSave();
-  if (data.schema !== SAVE_SCHEMA) return defaultSave();
-  const base = defaultSave();
+export function migrate(data, opts = {}) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return defaultSave(opts);
+  if (data.schema !== SAVE_SCHEMA) return defaultSave(opts);
+  const base = defaultSave(opts);
   return {
     settings: { ...base.settings, ...sanitiseSettings(data.settings).accepted },
-    shell: sanitiseShell(data.shell),
+    shell: sanitiseShell(data.shell, opts),
     bestInvoice: sanitiseInvoice(data.bestInvoice),
     runs: sanitiseRuns(data.runs),
   };
@@ -134,10 +153,14 @@ export function sanitiseRun(obj) {
   };
 }
 
-/** Clamp the shell's numbers to SETTINGS.ranges and the tier to SETTINGS.tiers. */
-export function sanitiseShell(obj) {
-  const out = { ...SHELL_DEFAULTS };
+/** Clamp the shell's numbers to SETTINGS.ranges and the tier to SETTINGS.tiers. The
+ *  camera-shake switch (M16) is a boolean or the OS-derived default: a save that carries a
+ *  choice keeps it, one that does not (an older blob, a hand edit) starts from
+ *  `!reducedMotion`. */
+export function sanitiseShell(obj, { reducedMotion = false } = {}) {
+  const out = { ...SHELL_DEFAULTS, cameraShake: !reducedMotion };
   if (!obj || typeof obj !== 'object') return out;
+  if (typeof obj.cameraShake === 'boolean') out.cameraShake = obj.cameraShake;
   const r = SETTINGS.ranges;
   const ts = Number(obj.uiScale);
   if (Number.isFinite(ts)) out.uiScale = clamp(ts, r.uiScale);

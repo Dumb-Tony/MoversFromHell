@@ -21,6 +21,7 @@ import { GROUP_PRESETS } from '../physics/world.js';
 import { RECOVERY, SIM, ECONOMY } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
 import { buildPrefab } from '../render/prefabs.js';
+import { pieceSlots } from '../tools/tools.js';
 
 let _nextId = 0;
 
@@ -29,6 +30,29 @@ function rotationOf(pose) {
   if (pose.rot) return { x: pose.rot.x, y: pose.rot.y, z: pose.rot.z, w: pose.rot.w };
   const yaw = pose.yaw || 0;
   return { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+}
+
+/* ── §18.3's "where is it" questions, shared with the tool pass (M15) ─────────────────
+ *
+ * ONE definition of out-of-bounds for every body the game can lose — manifest objects,
+ * fixtures, pieces (here) and tools (tools.js ToolSystem.step) — so the two passes cannot
+ * disagree about where the world ends. RECOVERY.bounds is derived from the ground the
+ * physics built (config.js WORLD.groundSizeM); objectFloorY is the floor of it. */
+
+/** A body's translation, or null when it cannot be trusted: non-finite on any axis (a NaN
+ *  that has escaped the solver) or a translation() that throws — the risk note in the M15
+ *  plan says not every Rapier build reads a NaN body safely, so the read is guarded. */
+export function safeTranslation(body) {
+  let t;
+  try { t = body.translation(); } catch (e) { return null; }
+  if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.y) || !Number.isFinite(t.z)) return null;
+  return { x: t.x, y: t.y, z: t.z };
+}
+
+/** Outside the play AABB (below the floor, past the ground's edge, above the ceiling). */
+export function isOutOfBounds(t, bounds = RECOVERY.bounds, floorY = bounds.minY) {
+  return t.y < floorY || t.y > bounds.maxY ||
+    t.x < bounds.minX || t.x > bounds.maxX || t.z < bounds.minZ || t.z > bounds.maxZ;
 }
 
 export class ObjectRegistry {
@@ -47,6 +71,12 @@ export class ObjectRegistry {
     this.now = now || (() => 0);
     this.entities = new Map();        // entityId -> entity
     this.byCollider = new Map();      // rapier collider handle -> entity
+    /** M15 (§18.3, §26.6): `(entity, reason) => void` — let go of every grip on an entity
+     *  BEFORE it is teleported. Set by main.js over the movers' grip systems; null in a
+     *  registry built by hand, which then recovers a held body as it always did. Never
+     *  teleport a body the spring is pulling: the hand would be metres from the grip point
+     *  the next step and the spring would fire the object across the room. */
+    this.releaseHolds = null;
   }
 
   /**
@@ -257,6 +287,15 @@ export class ObjectRegistry {
   step(stepMs) {
     const recovered = [];
     for (const e of this.entities.values()) {
+      /* A body whose translation cannot be read or is not finite is recovered NOW, with no
+       * grace: NaN does not fall further, it spreads — into every contact it touches and
+       * every grip that reads it (M15, the plan's risk note). */
+      const t = safeTranslation(e.body);
+      if (!t) {
+        this.recover(e, 'non-finite');
+        recovered.push(e.id);
+        continue;
+      }
       const v = e.body.linvel(), w = e.body.angvel();
       const speed = Math.hypot(v.x, v.y, v.z);
       const spin = Math.hypot(w.x, w.y, w.z);
@@ -265,12 +304,15 @@ export class ObjectRegistry {
       // until M6 — heaviestMoved() in main.js tested it and it was always false (M2's note).
       if (e.state.held) e.state.everHeld = true;
 
-      const t = e.body.translation();
       if (e.state.settled && t.y > -1) {
         e.state.lastStable.x = t.x; e.state.lastStable.y = t.y; e.state.lastStable.z = t.z;
       }
 
-      const oob = t.y < RECOVERY.objectFloorY || Math.abs(t.x) > 120 || Math.abs(t.z) > 120;
+      /* A FIXED body is bolted to the house — a door leaf on its hinges (M11). It cannot
+       * leave the world, and "recovering" it would unbolt it. The pass skips it (m23 L4). */
+      if (e.body.isFixed()) { e.state.outOfBoundsMs = 0; continue; }
+
+      const oob = isOutOfBounds(t, RECOVERY.bounds, RECOVERY.objectFloorY);
       e.state.outOfBoundsMs = oob ? e.state.outOfBoundsMs + stepMs : 0;
 
       /* §18.3 RECOVERY, for objects rather than players — the half of Phase 5's gate that
@@ -301,12 +343,21 @@ export class ObjectRegistry {
    * §27.4 "recovery" signal is a single stream with the movers' (main.js) — m17 R4.
    */
   recover(entity, reason = 'out of bounds') {
-    const s = entity.state.lastStable;
-    entity.body.setTranslation(
-      { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z }, true);
-    // Upright, not the tumbling orientation it left in: a recovered wardrobe lying on its
-    // face reads as the recovery being broken.
-    entity.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+    // A hung leaf is Fixed at its jamb: nothing to recover, and never unbolted by this (M15).
+    if (entity.body.isFixed()) return entity;
+    /* THE GRIPS LET GO FIRST (M15, scope 3). A held body's spring is evaluated against the
+     * hand every step; teleport the body and the next step sees a stretch of metres and
+     * applies a force to match. Under game.frame() the grip's own anti-ghosting tears first
+     * ('pulled out of reach', grip.js) because any out-of-bounds point is further than
+     * GRIP.maxStretch; this is the path for a recover() invoked while the hand is still on
+     * — and the reason is 'lost', so the run record can tell the two apart. */
+    if (entity.state.held && typeof this.releaseHolds === 'function') this.releaseHolds(entity, 'lost');
+
+    const pose = this.recoveryPose(entity);
+    entity.body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, true);
+    // Upright (or the authored rest/slot rotation), not the tumbling orientation it left in:
+    // a recovered wardrobe lying on its face reads as the recovery being broken.
+    entity.body.setRotation(pose.rot, true);
     entity.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     entity.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     entity.body.wakeUp();
@@ -315,11 +366,56 @@ export class ObjectRegistry {
     entity.state.recoveries = (entity.state.recoveries || 0) + 1;
     if (this.bus) {
       this.bus.emit(EVENTS.RECOVERY, {
-        entityId: entity.id, reason, fee: ECONOMY.recoveryFee,
-        newTransform: { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z },
+        entityId: entity.id, reason, fee: ECONOMY.recoveryFee, kind: pose.kind,
+        newTransform: { x: pose.x, y: pose.y, z: pose.z },
       }, this.now());
     }
     return entity;
+  }
+
+  /**
+   * Where a lost body goes back to (M15; §18.3, §26.4 "stuck recovery preserves progress and
+   * consequences"). Three answers, by what the body is:
+   *
+   *   a DOOR LEAF off its hinges  its authored REST pose beside its doorway (state.rest,
+   *                               house.js leafRestPose) — not its home: re-hanging is the
+   *                               player's Q, and a recovery that hung the door back would
+   *                               undo a paid preparation (§26.4).
+   *   a PIECE (part or fragment)  the slot beside its parent's CURRENT world AABB that a
+   *                               fresh disassembly would give it (tools.js pieceSlots),
+   *                               so the legs come back to the couch wherever the couch has
+   *                               got to — not to where it stood when they came off. If
+   *                               the parent is itself lost or gone, the piece's own last
+   *                               stable spot, as for any object.
+   *   anything else               its last settled transform, lifted objectRecoveryLiftM.
+   *
+   * @returns {{x, y, z, rot: {x,y,z,w}, kind: 'object'|'fixture'|'piece'}}
+   */
+  recoveryPose(entity) {
+    const st = entity.state;
+    const upright = { x: 0, y: 0, z: 0, w: 1 };
+    if (st.doorId && st.rest && !st.hung) {
+      return { x: st.rest.x, y: st.rest.y, z: st.rest.z, rot: rotationOf(st.rest), kind: 'fixture' };
+    }
+    const link = st.partOf || st.fragmentOf;
+    if (link) {
+      const parent = this.get(link.entityId);
+      const pt = parent ? safeTranslation(parent.body) : null;
+      if (parent && pt && !isOutOfBounds(pt, RECOVERY.bounds, RECOVERY.objectFloorY)) {
+        const siblings = st.partOf
+          ? ((parent.state.parts || {})[link.part] || [])
+          : (parent.state.fragments || []);
+        const count = Math.max(siblings.length, (link.index || 0) + 1);
+        const placed = pieceSlots(parent, entity.def.dimensions, count, this.physics);
+        const slot = placed.slots[Math.min(link.index || 0, placed.slots.length - 1)];
+        const yaw = placed.yaw || 0;
+        return { x: slot.x, y: slot.y, z: slot.z,
+                 rot: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, kind: 'piece' };
+      }
+    }
+    const s = st.lastStable;
+    return { x: s.x, y: s.y + RECOVERY.objectRecoveryLiftM, z: s.z, rot: upright,
+             kind: link ? 'piece' : 'object' };
   }
 
   /** §7.3's velocity caps apply to grabbable objects too — an object yanked by a grip is

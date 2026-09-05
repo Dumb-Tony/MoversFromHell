@@ -106,7 +106,10 @@ export const PHASE6_TOOL_SPAWNS = Object.freeze([
   { def: 'dolly_flat_01',   x: TOOL_RACK.x + 0.00, y: 0.10, z: TOOL_RACK.z + 0.00, yaw: 0.0 },
   { def: 'blanket_01',      x: TOOL_RACK.x + 1.30, y: 0.06, z: TOOL_RACK.z + 0.10, yaw: 0.0 },
   { def: 'ramp_01',         x: TOOL_RACK.x + 0.10, y: 0.08, z: TOOL_RACK.z + 1.70, yaw: 0.0 },
-  { def: 'screwdriver_01',  x: TOOL_RACK.x + 2.30, y: 0.05, z: TOOL_RACK.z + 0.00, yaw: 0.0 },
+  /* +2.30 put the screwdriver at x -0.10, INSIDE the truck deck's solid collider (x -0.55..1.75,
+   * z 8.20..12.60) — it rested sandwiched between the deck block and the ground and the probe
+   * ray from a mover beside it hit the deck first (M15, Phase 22). 0.13 m clear of the deck now. */
+  { def: 'screwdriver_01',  x: TOOL_RACK.x + 1.60, y: 0.05, z: TOOL_RACK.z + 0.90, yaw: 0.0 },
 ]);
 
 /** §24.4 again: validate the content, at load, in the build that ships it. */

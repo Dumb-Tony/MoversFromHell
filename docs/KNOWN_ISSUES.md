@@ -635,7 +635,7 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 **Replay (§26.6 / §26.1) — fixed in M2, with the seams that remain.** `game.reset()` still replaces `game.state` wholesale; there are now THREE re-attach points that must agree about what a contract is: the manifest (rebuilt against `contractEntityIds`), the player rows, and the damage system — which no longer captures the state at all but reads `game.state` through a getter (`damage.js` `get state()`), so it cannot go stale again. `resetContract` unwinds tool effects through `detachDolly` / `removeBlanket` / `retrieveRamp` / `reassemble` before clearing any flag (the order trap tools/m11-tests.js documents). Measured over three full runs (tools/m14-soak-tests.js): bodies 71, colliders 71, scene children 325, renderer geometries 408, textures 60, strap pool 0 — identical after run 1 and run 3; ledger 3/3/3 lines at the three settlements.
 
 **Still open after M2.**
-- **Tools have no §18.3 out-of-bounds recovery.** `registry.step` walks `registry.entities` only; a tool that leaves the world mid-run stays gone until "Run it again" puts it back on the rack (which now works: y = 0.08 m for the ramp, 0.07 m dolly, 0.00 m blanket, −0.00 m screwdriver after 120 frames — the last two rest a few millimetres into the ground, inside Rapier's contact tolerance).
+- **~~Tools have no §18.3 out-of-bounds recovery~~ RESOLVED in Phase 22 (M15): ToolSystem.step mirrors registry.step through the detach calls, one RECOVERY the invoice bills, m23 L1-L3 pin it.** `registry.step` walks `registry.entities` only; a tool that leaves the world mid-run stays gone until "Run it again" puts it back on the rack (which now works: y = 0.08 m for the ramp, 0.07 m dolly, 0.00 m blanket, −0.00 m screwdriver after 120 frames — the last two rest a few millimetres into the ground, inside Rapier's contact tolerance).
 - **§26.6 'fragments' is still vacuous.** Detached parts are recorded in `state.removedParts`, never spawned; there is nothing to remove, and the clause cannot be claimed either way.
 - **`entity.state.everHeld` is never written.** It is read by `heaviestMoved()` (main.js) and cleared by `respawnContract`, but no system sets it, so the "heaviest moved" stat only ever counts loaded or recovered objects.
 - **`hud._notices` accumulates under headless drive.** Notices expire by `performance.now()`, which does not advance under virtual time, so a suite that replays sees one 'new contract' notice per replay (1, 2, 3 across the soak) until the cap of 4. Harness artefact, not a game defect; m14 S7 pins the cap.
@@ -759,4 +759,23 @@ Resolved by M11: KNOWN_ISSUES's 'single most important open question' (the 0.82 
 - **The scuff ring is scene geometry on both tiers** (one Group, 24 hidden quads, one material, one geometry, +1 scene child at boot: 330). m13 B1's movable exemption covers the quads; B1b (interior doorways) has no movable check and would flag a mark drawn inside a doorway's 0.06–2.01 m clear box — nothing in m13 marks one.
 - **heldBy is recorded, never scored** (§15.3): who held the object at the window's first contact is on the line and in the run record; nothing reads it.
 - **Door leaves are still item damage** (M11's note stands): a hung leaf is an entity, so a couch forced into it marks the leaf, not the frame; the M11 hinge brute-force branch through `doorLeaf_` is the seam.
+
+
+## Phase 22 open items
+
+### M15
+
+- **Recovery still lifts objects RECOVERY.objectRecoveryLiftM (0.12 m) and lets them drop** — a 1.5 m/s landing that the 'fragile'/'extreme' bands can bill. Pre-existing (Phase 5); a lost leaf goes to its rest pose with no lift and a piece to its spawn-lift slot (0.01 m), so neither bills on recovery.
+- **The sweep is one seed neighbourhood** (DEBUG.softlockSeed 20260904 + session index, 40 sessions). Change the seed in config to sweep another; a failure prints its seed and script.
+- **Fixed at integration (Phase 22):** the screwdriver's rack slot moved out of the truck deck's collider (tools/definitions.js), and the player controller's out-of-bounds test now reads RECOVERY.bounds like every other body.
+
+### M16
+
+- **The aim ray's origin follows the shaken camera.** `GripSystem.aim()` reads `camera.position` for `camOrigin` (grip.js), so for up to settleMs (600 ms) after a nudge the interaction/grab ray starts up to maxOffset (0.12 m) from where it would otherwise start; the ray's DIRECTION (aimYaw/aimPitch, the pointer-lock axes) is untouched (m24 K6/K6b). Same class as the boom's occlusion compression, which already moves that origin. Only matters for a grab attempted inside the half-second after a nearby impact or a road event; deliberately not changed here because grip.js is outside M16 and 'what you see is what you aim' is defensible. A future milestone could hand aim() an unshaken eye.
+- **The driving seat is inferred, not declared.** CONTRACT_PHASE carries no mover id, so the road-shake observer records the seated mover nearest the cab point when the phase turns to TRANSIT. Two movers crowding the cab picks the nearer one, whoever pressed E. Solo always feels road events on its one seat.
+- **Road directions assume TRUCK_POSE.yaw = 0.** The observer uses roadEventForce's truck-local vector as a world vector, which is exact while the truck is unrotated (it is, and never moves — M13). Rotating the truck would need the pose yaw applied in the ROAD_FORCE observer (main.js).
+- **A paused jolt decays on frame time.** The shake integrates on the sim clock; after 50 ms (RENDER.camera.shake.simStallS) of a stalled clock it falls back to frame time so a nudge is never frozen mid-air behind the pause card. On a display drawing more than one frame per sim step the fallback never triggers.
+- **The rotational part is pitch and roll only; no yaw, by design** (§21.4: the look axes are the player's).
+- **Impacts nudge on relVelocity alone**, not mass: a 9 kg box and a 90 kg couch landing at the same speed feel the same. AUDIO.impact has the same simplification; a mass term is a one-line change in the IMPACT observer if the audio gets one.
+- **No screen-shake control beyond on/off** (intensity slider deferred — §26.5 asks only that the switch exist).
 

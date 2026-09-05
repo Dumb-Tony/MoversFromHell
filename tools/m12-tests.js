@@ -29,6 +29,10 @@ import { layoutFor } from '../src/render/coopView.js';
 // Phase 11 build-side M5 (section K): the glyph derivation and the two config numbers it pins.
 import { glyphFor } from '../src/core/input.js';
 import { COOP, PROMPTS } from '../src/config.js';
+// Phase 11 build-side M16 (section S): a road event nudges only the driving seat's camera.
+import { EVENTS, PHASES } from '../src/core/eventBus.js';
+import { TRUCK, RENDER, MOVERS } from '../src/config.js';
+import { cabPoint } from '../src/world/truck.js';
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -534,6 +538,67 @@ lines.push('--- K. device-aware prompt glyphs per seat (M5: §26.5 "both input m
   const helpSolo = document.querySelector('#help').textContent;
   ok('K5 the solo help line is derived from the same table (E use, LMB/RMB grab)',
      /E use/.test(helpSolo) && /LMB\/RMB grab/.test(helpSolo) && /WASD/.test(helpSolo), helpSolo.slice(0, 90));
+}
+emit('running...');
+
+/* ── S. camera shake per seat (Phase 11 build-side M16; §21.4 Motion, §11.3, §6.4) ──
+ * A ROAD_FORCE on the bus nudges ONLY the driving seat's rig — the seat whose mover was at
+ * the cab when the phase turned to TRANSIT — and the other seat's camera does not move by
+ * 1e-9. Driven the way the render loop does it: game.frame(), then every seated rig's
+ * update(); the shake integrates on the sim clock, so this is a real frame. */
+lines.push('--- S. a road event shakes the driving seat only (M16) ---');
+{
+  const FR = 16.667;
+  const stand = (m, x, z) => {
+    m.controller.hardSetPosition({ x, y: 0.2, z });
+    m.controller._vel.x = 0; m.controller._vel.z = 0; m.controller.velocityY = 0;
+    m.controller.pull.x = 0; m.controller.pull.z = 0; m.controller.imbalance = 0; m.controller._downMs = 0;
+  };
+  const tick = (n) => {
+    for (let k = 0; k < n; k++) {
+      game.frame(FR);
+      for (let s = 0; s < M.seatCount; s++) { const m = M.moverOfSeat(s); m.rig.update(game.state.players[m.id].position, FR / 1000); }
+    }
+  };
+  const settle = (m) => { m.rig.clearShake(); m.rig._first = true; m.rig._currentDistance = m.rig.distance; };
+  const COOP_SPOT = MOVERS.spawnOffsets;
+  const pos = (m) => ({ x: m.camera.position.x, y: m.camera.position.y, z: m.camera.position.z });
+  const moved = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+  M.setSeats(2);
+  const cab = cabPoint();
+  stand(movers[0], cab.x, cab.z + 1.4);
+  stand(movers[1], M.world.spawn.x + COOP_SPOT[1].x, M.world.spawn.z + COOP_SPOT[1].z);
+  // Section G's _useCab() left the contract in TRANSIT (the driver recorded then was whoever
+  // stood nearest the cab); leave and re-enter so THIS placement is the one recorded.
+  const phaseBefore = game.state.phase;
+  game.setPhase(PHASES.PICKUP);
+  game.setPhase(PHASES.TRANSIT);
+  eq('S1 the seat at the cab when TRANSIT begins is recorded as the driver', M.shakeDriver(), 0);
+  // Both on their own spawn points for the measurement — clear by construction, so the idle
+  // seat's mover is genuinely still (anywhere else on the driveway a capsule can lean on a tool).
+  stand(movers[0], M.world.spawn.x + COOP_SPOT[0].x, M.world.spawn.z + COOP_SPOT[0].z);
+  movers[0].rig.yaw = 0; movers[0].rig.pitch = -0.12;
+  movers[1].rig.yaw = 0.7; movers[1].rig.pitch = -0.12;
+  settle(movers[0]); settle(movers[1]);
+  tick(240);
+  const r0 = pos(movers[0]), r1 = pos(movers[1]);
+  tick(2);
+  ok('S2 fixture: both cameras are still', moved(pos(movers[0]), r0) < 1e-9 && moved(pos(movers[1]), r1) < 1e-9,
+     `${moved(pos(movers[0]), r0)} / ${moved(pos(movers[1]), r1)}`);
+  const sev = TRUCK.roadEvents.hardBrake.severity;
+  game.bus.emit(EVENTS.ROAD_FORCE, { roadType: 'hardBrake', label: 'Traffic light', severity: sev }, game.clock.simTimeMs);
+  tick(1);
+  ok('S3 a ROAD_FORCE nudges the driving seat\'s camera (by severity × shake.road)',
+     moved(pos(movers[0]), r0) > 0.9 * sev * RENDER.camera.shake.road, `${moved(pos(movers[0]), r0)}`);
+  ok('S4 …and the other seat\'s camera position is unchanged to 1e-9',
+     moved(pos(movers[1]), r1) <= 1e-9 && movers[1].rig.shakeMagnitude() === 0, `${moved(pos(movers[1]), r1)}`);
+  near('S5 …and neither seat\'s look axes moved', movers[0].rig.yaw, 0, 1e-12);
+  tick(180);
+  eq('S6 …and the nudge is gone before the next hazard', movers[0].rig.shakeMagnitude(), 0);
+  game.setPhase(phaseBefore);
+  M.setSeats(1);
+  for (const m of movers) m.rig.clearShake();
 }
 emit('running...');
 

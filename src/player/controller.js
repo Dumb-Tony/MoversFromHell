@@ -570,7 +570,9 @@ export class PlayerController {
 
     // Out of bounds: below the world, or absurdly far out. §18.3 gives a grace period
     // before offering recovery rather than snatching control away instantly.
-    const oob = p.y < -8 || Math.abs(p.x) > 120 || Math.abs(p.z) > 120;
+    // One definition of 'off the world' for everything that can leave it (RECOVERY.bounds, M15).
+    const B = RECOVERY.bounds;
+    const oob = !Number.isFinite(p.x + p.y + p.z) || p.y < B.minY || Math.abs(p.x) > B.maxX || Math.abs(p.z) > B.maxZ;
     this._outOfBoundsMs = oob ? this._outOfBoundsMs + stepMs : 0;
     if (this._outOfBoundsMs > RECOVERY.outOfBoundsGraceSeconds * 1000) {
       this.recoverNow('out of bounds');
