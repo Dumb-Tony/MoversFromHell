@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 27,
-  label: 'phase-27',
+  phase: 28,
+  label: 'phase-28',
   date: '2026-09-05',
 });
 
@@ -580,6 +580,45 @@ export const GRIP = Object.freeze({
    *  1.10 m/s, which tips a top-heavy 110 kg fridge (M7 measured 1.24 m on its side);
    *  ~390 N at this crawl, under the ~460 N that tipping needs at the 0.875 m grab (432 N static estimate). m6 B6/B10b pin the binary. */
   towSpeedFloor: 0.15,
+
+  /* ---- Phase 11 build-side M27: a half-pulled trigger is a weaker grip (§4.3, §6.5) ------
+   *
+   * The binding tables have marked gripLeft/gripRight `analog: true` since Phase 3 and
+   * input.js's header says it plainly — "analog() returns 0..1 so a half-pulled trigger is a
+   * weaker grip" — but the strength method never read it: a feathered LT and a full pull were
+   * the same 750 N. The per-hand cap is now multiplied by that 0..1, live, every step a hand
+   * is closed, FOR A PAD SEAT ONLY. Keyboard and mouse are a full pull, and so is a latched
+   * (gripMode 'toggle') grip — §4.4's parity is "the same actions", not "the same nuance", and
+   * a latch that read a released trigger as zero would drop the box the moment the player let
+   * go of the toggle. */
+
+  /** The LEAST pressure a closed hand reports, 0..1. A hair-trigger must not drop what it is
+   *  holding the instant the finger relaxes, so this is the weakest a hand gets while it is
+   *  still closed. Deliberately equal to DEFAULT_SETTINGS.triggerThreshold's shipped 0.35:
+   *  under that the input layer has already RELEASED the grip (input.js _pollPads gates the
+   *  trigger at it), so a reading below the floor is a hand that is opening, not a weak hold,
+   *  and 0.35 is exactly the pressure it took to close the hand in the first place. A player
+   *  who raises triggerThreshold makes the hand close later, never weaker (m34 T1). */
+  analog: { floor: 0.35 },
+
+  /** §6.5's first accessibility assist: "Grip strength scaling … may reduce motor demand.
+   *  They must preserve the physical puzzle rather than turn furniture into inventory icons."
+   *  The shell key `gripAssist` (save.js, the 'Grip strength' settings row) multiplies
+   *  forceCap for every seat, and `max` is the number that keeps §6.5's own condition true.
+   *
+   *  TWO BOUNDS, both asserted from these constants by tools/m34-pressure-tests.js T3:
+   *    1. A PARTNER IS STILL WORTH MORE. One hand at full assist is forceCap x max = 1125 N,
+   *       BELOW one mover's two-hand total forceCap x twoHandForceMult = 1237.5 N. The couch
+   *       never becomes a solo lift because somebody turned a slider up.
+   *    2. THE ASSIST NEVER TOUCHES THE STRETCH BAND. A hand's force is also spring x stretch,
+   *       so it can never exceed spring x maxStretch = 630 N however high the cap goes — and
+   *       that band, not the cap, is what stops one mover shifting the 110 kg fridge (745 N of
+   *       floor friction against a 630 N band; m6 B5/B6/B10b). The fridge stays a dolly job,
+   *       and a tool stays the answer to a tool-shaped problem, at every assist setting.
+   *  Where it DOES help is where the cap genuinely binds: towing (the solo couch drag), a wet
+   *  or low-grip surface (wetGripMult), and a tired mover (§5.2 strengthFraction).
+   *  `steps` is what the settings row offers; `step` is the slider's increment. */
+  assist: { default: 1.0, max: 1.5, step: 0.25, steps: [1.0, 1.25, 1.5] },
 
   holdDistanceMin: 0.85,     // how close the hand target may be pulled
   holdDistanceMax: 2.0,      // …and how far it may be pushed
@@ -1371,6 +1410,78 @@ export const AUDIO = Object.freeze({
   },
 });
 
+/** §8.4 "At impact: material sound, visual mark, optional haptic pulse, and one small cost
+ *  notice" — the FOURTH channel (Phase 11 build-side M28, src/audio/haptics.js). One row per
+ *  CUE TYPE, on exactly the list src/audio/audio.js's CUES uses (m18 A1g asserts the two key
+ *  sets are equal), so an event that makes a sound can never silently make no rumble.
+ *
+ *  A row is { strong, weak, ms, to }: the two Gamepad `dual-rumble` magnitudes (0..1 — strong
+ *  is the low-frequency heavy motor, weak the high-frequency light one) and how long the
+ *  effect runs. `to` is the ROUTING — whose pad feels it:
+ *    'holder'  the hands on the object (the payload's heldBy, else the entity's own grips)
+ *    'player'  the mover the payload names (playerId / by / an entityId that IS a mover)
+ *    'driver'  the seat main.js recorded as driving — the SAME choice §11.3's camera shake
+ *              makes (main.js roadShakeSeat()); no driver means no pulse, as for the shake
+ *    'all'     every seat (in solo that is the one seat)
+ *  A 'holder' or 'player' row whose payload names nobody falls back to 'all': in solo that is
+ *  the only hand there is, and in co-op a knock nobody was holding is the house's, not one
+ *  crew member's. Nothing here scales with severity — the audio layer's own silence threshold
+ *  decides WHETHER a cue fires (cueVolume ≤ 0 is silent), and the row decides how hard.
+ *
+ *  Every ms is inside [minMs, maxMs] and every magnitude inside [0,1] (m35 H1). maxMs is 260
+ *  deliberately: §11.3's road events are ONE hit each and never a bed, so the worst drive
+ *  cannot leave a pad buzzing for the 28 s of the route. */
+export const HAPTICS = Object.freeze({
+  /** The only effect type the Gamepad API defines for a pad's two motors. */
+  effect: 'dual-rumble',
+  /** The audio layer's minGapMs rule (audio.js takeCue), per SEAT and per cue type: a second
+   *  thud inside this many sim ms is the same thud. 120 against AUDIO's 90 for IMPACT because
+   *  a hand is slower than an ear. */
+  minGapMs: 120,
+  /** The bounds every row's `ms` is asserted inside (m35 H1). */
+  minMs: 40,
+  maxMs: 260,
+  /* NOT TUNED HERE: how many pulses a seat has in the air. The Gamepad API's actuator plays
+   * ONE effect and issuing a second CANCELS the first, so that is a fact about the hardware
+   * rather than a knob — a `maxConcurrent` here would be a number nothing reads. The rule it
+   * would have described is in haptics.js pulse(): a weaker cue arriving inside a stronger
+   * one's window stands down rather than cutting it short, and a stronger one replaces it
+   * (m35 H3c/H3d). */
+  /** §10.3's overstressed strap — "creak, vibration". A STATE, not a knock: a weak pulse
+   *  every periodMs on the carrier's seat for as long as the state lasts, stopping within one
+   *  period of it clearing (m35 H6). Never the strong motor — this is a warning, not an
+   *  impact. periodMs > minGapMs so the per-type gap never swallows a repeat. */
+  strap: Object.freeze({ strong: 0, weak: 0.32, ms: 180, periodMs: 320, to: 'holder' }),
+
+  /* Every row is frozen individually, not just the table: Object.freeze is shallow, and a
+   * table whose rows can still be written is a table a system can retune at runtime — which
+   * is the bare literal this project's rules exist to stop, one indirection further out. */
+  /* §8.4's own line: the thud in the hand that dropped it. */
+  IMPACT:         Object.freeze({ strong: 0.45, weak: 0.30, ms: 90,  to: 'holder' }),
+  /* §8.3's bands cost money; this is the one pulse a player should notice through a sleeve. */
+  DAMAGE_APPLIED: Object.freeze({ strong: 0.85, weak: 0.55, ms: 180, to: 'holder' }),
+  /* §6.1 the grip: a tick on, a tick off. Weak motor only — a grab is not a hit. */
+  GRIP_STARTED:   Object.freeze({ strong: 0,    weak: 0.22, ms: 45,  to: 'player' }),
+  GRIP_ENDED:     Object.freeze({ strong: 0.10, weak: 0.26, ms: 50,  to: 'player' }),
+  /* §10.3 the strap's one-shots (hooked, ratcheted, snapped). 'overstressed' is the sustain
+   * above instead, so this row never fires for it. */
+  STRAP_CHANGED:  Object.freeze({ strong: 0.35, weak: 0.40, ms: 110, to: 'holder' }),
+  /* §9.2 tools are world objects: the dolly clacks under your hands. */
+  TOOL_STATE:     Object.freeze({ strong: 0.15, weak: 0.30, ms: 60,  to: 'player' }),
+  /* §8.2 the screwdriver's ratchet — the lightest thing on the table. */
+  PART_CHANGED:   Object.freeze({ strong: 0.08, weak: 0.24, ms: 45,  to: 'player' }),
+  /* §8.2 a leaf coming off its hinges, in the arms that took it. */
+  DOOR_STATE:     Object.freeze({ strong: 0.30, weak: 0.35, ms: 90,  to: 'player' }),
+  /* §10.2 loaded/unloaded is a fact about the truck: everybody's news. */
+  CARGO_STATE:    Object.freeze({ strong: 0.20, weak: 0.30, ms: 70,  to: 'all' }),
+  /* §11.3 the road, in the driving seat only — the seat the camera shake already picked. */
+  ROAD_FORCE:     Object.freeze({ strong: 0.70, weak: 0.45, ms: 220, to: 'driver' }),
+  /* §18.3 a recovery: something is somewhere else now, and it costs money. */
+  RECOVERY:       Object.freeze({ strong: 0.25, weak: 0.35, ms: 90,  to: 'player' }),
+  /* §3.4 the phase stings, the invoice one included — the whole crew's moment. */
+  CONTRACT_PHASE: Object.freeze({ strong: 0.18, weak: 0.28, ms: 120, to: 'all' }),
+});
+
 /** §21.4 settings panel + §26.6 versioned, device-local save (Phase 11 build-side M4).
  *
  *  The input keys and their defaults live with their consumer (input.js DEFAULT_SETTINGS);
@@ -1392,6 +1503,12 @@ export const SETTINGS = Object.freeze({
     keyLookRate:        { min: 4,   max: 40,  step: 1 },
     stickDeadzone:      { min: 0,   max: 0.6, step: 0.02 },
     triggerThreshold:   { min: 0.1, max: 0.9, step: 0.05 },
+    /** §6.5's grip-strength assist (Phase 11 build-side M27): the multiplier on every seat's
+     *  force cap. min is 1 (off) and max is GRIP.assist.max — the bound that keeps the puzzle,
+     *  derived and asserted there, not a slider limit somebody may widen here. The step makes
+     *  the row the three settings §6.5 wants offered (1.00 / 1.25 / 1.50); save.js accepts a
+     *  stored value only ON one of those steps (sanitiseShell). */
+    gripAssist:         { min: 1, max: GRIP.assist.max, step: GRIP.assist.step },
     /** UI scale is the `--ts` CSS variable every font-size in styles.css multiplies by. */
     uiScale:            { min: 0.8, max: 1.6, step: 0.1 },
     /** The boom, in metres, inside the rig's own clamp (RENDER.camera.distanceMin/Max). */
@@ -1411,6 +1528,13 @@ export const SETTINGS = Object.freeze({
      *  boot default is `!prefers-reduced-motion` (save.js reducedMotionPreferred) — this is
      *  the value when the OS has no preference; a saved choice always wins. */
     cameraShake: true,
+    /** §8.4's haptic pulse / §4.4 controller parity / §21.4 Motion (Phase 11 build-side M28):
+     *  the pad's two motors, routed per seat by src/audio/haptics.js. Its boot default follows
+     *  prefers-reduced-motion exactly as cameraShake's does — this is the value when the OS
+     *  has no preference — and a saved choice always wins (save.js sanitiseShell). A keyboard
+     *  seat loses nothing by it: no cue is withheld from anybody, this is a second channel on
+     *  cues the sound and the caption already carry. */
+    rumble: true,
     /** §21.4 Cognition "reduced HUD", "optional hints" and Vision "high contrast" (Phase 11
      *  build-side M19). reducedHud → every HUD's setReduced (the cargo panel, the route label
      *  and the contract panel's secondary rows go; the objective, the prompt, the reticle,
@@ -1426,6 +1550,11 @@ export const SETTINGS = Object.freeze({
      *  player who has done it (a settings-card checkbox unticks it). Hints off hides the cards
      *  too, without touching this. */
     walkthroughSeen: false,
+    /** §6.5 "Grip strength scaling" (Phase 11 build-side M27): the multiplier on every mover's
+     *  force cap, routed by main.js to each GripSystem's setAssist (the M16 pattern — a rig's
+     *  setShakeEnabled). 1.0 is off, and off is the default: the assist is an option, never a
+     *  difficulty the player has to turn back down. GRIP.assist carries the bounds and why. */
+    gripAssist: GRIP.assist.default,
   },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */

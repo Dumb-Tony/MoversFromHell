@@ -527,6 +527,12 @@ export class Input {
     this.padSticks = this.seatBindings.map(() => ({ lx: 0, ly: 0, rx: 0, ry: 0 }));
     /** seat -> navigator.getGamepads() index, or -1. */
     this.padIndex = this.seatBindings.map(() => -1);
+    /* seat -> the Gamepad OBJECT this seat's pad was read from at the last poll, or null.
+     * navigator.getGamepads() hands back fresh objects on every call, so anything that wants
+     * a pad's OUTPUT side — vibrationActuator (§8.4's haptic pulse, M28) — has to re-read it
+     * through here each time rather than keeping a reference. Published rather than private
+     * because it is also the seam a suite installs a fake actuator through (m35 H2). */
+    this.padObjects = this.seatBindings.map(() => null);
     this.contexts = this.seatBindings.map(() => CONTEXTS.FOOT);
 
     /* SINGLE-PLAYER ALIASES — the same objects, never copies. A snapshot here would read
@@ -570,6 +576,14 @@ export class Input {
   seatForPadSlot(i) {
     if (this.seatCount < 2) return 0;
     return i === 0 ? 1 : 0;       // first pad to the joiner, second to seat 0
+  }
+
+  /** The Gamepad object seat `n` was polled from THIS frame, or null (§8.4's haptic pulse,
+   *  M28 — src/audio/haptics.js is the only reader). Not a stored reference: poll() replaces
+   *  it every frame because navigator.getGamepads() does, and clears it when the pad goes.
+   *  A seat past seatCount, or one with no pad, is null and never a throw. */
+  padForSeat(n) {
+    return (n >= 0 && n < this.padObjects.length ? this.padObjects[n] : null) || null;
   }
 
   /**
@@ -627,15 +641,28 @@ export class Input {
   setBindings(bindings) {
     this.seatBindings = Array.isArray(bindings) ? bindings : [bindings];
     /** seat -> (context -> Map(token -> action[])) */
-    this._sourceIndex = this.seatBindings.map((seatMap) => {
+    this._sourceIndex = this.seatBindings.map((seatMap, seat) => {
       const perContext = new Map();
       for (const [ctx, actions] of Object.entries(seatMap)) {
         const idx = new Map();
         for (const [action, def] of Object.entries(actions)) {
           for (const code of def.keys  || []) push(idx, code, action);
           for (const b    of def.mouse || []) push(idx, 'Mouse' + b, action);
-          // Pad tokens are SEAT-QUALIFIED. Two controllers both report button 6, so an
-          // unqualified 'Pad6' is seat 1's trigger arriving as seat 0's as well.
+          /* Pad tokens are SEAT-QUALIFIED, and that is the whole reason they can be indexed at
+           * all. Two controllers both report button 6, so an unqualified 'Pad6' would be seat
+           * 1's trigger arriving as seat 0's as well; 'P<seat>B<i>' cannot, and it is the token
+           * _pollPads actually presses.
+           *
+           * THEY WERE MISSING UNTIL M27, and one feature depended on them: §21.4's toggle grip.
+           * _press() resolves a token to its actions to decide what to latch, so a pad trigger
+           * press found no action and never latched — gripMode 'toggle' worked on the keyboard
+           * and did nothing whatsoever on a controller, which is a §4.4 parity hole rather than
+           * a nuance. m34 T1i pins it. Nothing else regressed by their absence: _markDevice is
+           * only ever called with a key code, _tokenIsBound only with key and mouse tokens, and
+           * _clearSeat now drops a seat's held pad buttons on a context switch the same way it
+           * drops its keys — which _pollPads re-adds on the next poll if the button is still
+           * physically held, before any step reads it. */
+          for (const b    of def.pad   || []) push(idx, padToken(seat, b), action);
         }
         perContext.set(ctx, idx);
       }
@@ -894,6 +921,9 @@ export class Input {
     const prev = this._padSlotPrev;          // last poll, by physical slot — see the constructor
     const cur = new Map();
     this._padValue.clear();
+    /* M28: EVERY seat, not just the seated ones — a seat that co-op dropped must not keep the
+     * pad it had, or its actuator would still answer padForSeat after the join ended. */
+    this.padObjects.fill(null);
     for (let s = 0; s < this.seatCount; s++) {
       this.padIndex[s] = -1;
       const st = this.padSticks[s];
@@ -909,6 +939,7 @@ export class Input {
       if (seat >= this.seatCount) continue;
       const pad = connected[slot];
       this.padIndex[seat] = pad.index;
+      this.padObjects[seat] = pad;    // M28: this poll's object, for the output side
 
       const ax = pad.axes || [];
       const st = this.padSticks[seat];

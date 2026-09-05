@@ -15,7 +15,7 @@
  *                validator")
  *   shell        UI scale, camera distance, quality tier, the sound levels and captions, the
  *                camera-shake switch (M16), the reduced-HUD, high-contrast and hints switches
- *                (M19) — the shell's, not the input's
+ *                (M19) and §6.5's grip-strength assist (M27) — the shell's, not the input's
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
  *   runs         §27.4's local run records (Phase 11 build-side M6): the last
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
@@ -50,7 +50,9 @@ export const SHELL_DEFAULTS = Object.freeze({ ...SETTINGS.shellDefaults });
 export function defaultSave({ reducedMotion = false } = {}) {
   return {
     settings: { ...DEFAULT_SETTINGS },
-    shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion },
+    // M28: `rumble` (§8.4's haptic pulse) takes its default from the same reading, for the
+    // same §21.4 Motion reason — and a saved choice wins over it, exactly as cameraShake's does.
+    shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion },
     bestInvoice: null,
     runs: [],
     bindings: {},
@@ -199,9 +201,11 @@ export function sanitiseWalkthrough(w) {
  *  choice keeps it, one that does not (an older blob, a hand edit) starts from
  *  `!reducedMotion`. */
 export function sanitiseShell(obj, { reducedMotion = false } = {}) {
-  const out = { ...SHELL_DEFAULTS, cameraShake: !reducedMotion };
+  const out = { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion };
   if (!obj || typeof obj !== 'object') return out;
   if (typeof obj.cameraShake === 'boolean') out.cameraShake = obj.cameraShake;
+  // M28: the pad-rumble switch, same rule and same validator as the shake's (m35 H4).
+  if (typeof obj.rumble === 'boolean') out.rumble = obj.rumble;
   const r = SETTINGS.ranges;
   const ts = Number(obj.uiScale);
   if (Number.isFinite(ts)) out.uiScale = clamp(ts, r.uiScale);
@@ -221,6 +225,16 @@ export function sanitiseShell(obj, { reducedMotion = false } = {}) {
   }
   // M22: the first-minute cards' seen flag — a boolean or the default (false: show them).
   if (typeof obj.walkthroughSeen === 'boolean') out.walkthroughSeen = obj.walkthroughSeen;
+  /* M27 (§6.5): the grip-strength assist is one of the row's OWN steps, or the default. NOT
+   * clamped the way uiScale is, and that difference is deliberate: a hand-edited 1.42 is a
+   * strength no player could have chosen, and 9 is an edit that would delete the physical
+   * puzzle §6.5 says the assist must preserve. Rejected values fall back to 1.0 (off) rather
+   * than to the nearest step, so a damaged save is never quietly stronger than it says.
+   * GripSystem.setAssist clamps to GRIP.assist.max again on the way in — one door each side. */
+  const ga = Number(obj.gripAssist);
+  const rg = r.gripAssist;
+  if (Number.isFinite(ga) && rg && ga >= rg.min && ga <= rg.max &&
+      Math.abs(ga / rg.step - Math.round(ga / rg.step)) < 1e-9) out.gripAssist = ga;
   return out;
 }
 

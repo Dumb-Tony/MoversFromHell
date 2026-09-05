@@ -135,8 +135,11 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     // M16: …and the camera-shake switch (a non-default, so the round-trip is real).
     // M19: …and the reduced-HUD, high-contrast and hints switches (all three off their defaults).
     // M22: …and the first-minute cards' seen flag (true: off its default).
+    // M28: …and the pad-rumble switch (§8.4's haptic pulse), false: off its default too.
     shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false,
-             reducedHud: true, highContrast: true, hints: false, walkthroughSeen: true },
+             reducedHud: true, highContrast: true, hints: false, walkthroughSeen: true, rumble: false,
+             // M27: …and §6.5's grip-strength assist, at the top step (off its 1.0 default).
+             gripAssist: 1.5 },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
     // M18: the §21.4 remap section — the DIFF from the shipped bindings (m26 B6 fills it; empty here).
@@ -429,6 +432,12 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     // M16 (Phase 11 build-side): the §26.5 camera-shake switch, at its consumer — every rig's
     // shakeEnabled (camera.js nudge() is a no-op while it is off; m24 K5).
     cameraShake:        () => M.rig.shakeEnabled,
+    // M27 (Phase 11 build-side): §6.5's grip-strength assist, at its consumer — every mover's
+    // GripSystem.assist, which capPerHand multiplies forceCap by (m34 T3 measures the lift).
+    gripAssist:         () => M.movers[0].grips.assist,
+    // M28 (Phase 11 build-side): §8.4's haptic pulse, at its consumer — the haptic layer's own
+    // live read of the shell key (haptics.js `enabled`, checked before every playEffect; m35 H4).
+    rumble:             () => M.haptics.enabled(),
     // M19 (Phase 11 build-side): §21.4's Cognition/Vision rows, at their consumers — every
     // HUD's reduced class, the `.hc` class on <body>, the interaction system's hints flag
     // (the stall hint reads the same shell key; m27 A5 asserts the queue).

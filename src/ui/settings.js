@@ -71,6 +71,14 @@ const ROWS = Object.freeze({
     { key: 'gripMode', label: 'Grab', kind: 'select', options: GRIP_MODES,
       names: { hold: 'hold the button', toggle: 'press to grab, press to let go' },
       note: 'Toggle is §21.4’s accessibility option: a grip stays until you press again.' },
+    /* §6.5 "Grip strength scaling … may reduce motor demand. They must preserve the physical
+     * puzzle rather than turn furniture into inventory icons" (Phase 11 build-side M27). The
+     * shell key gripAssist, routed to every mover's GripSystem.setAssist, which clamps it to
+     * GRIP.assist.max — the bound that keeps the couch a two-person job and the fridge a dolly
+     * job at every setting. The note says what it does NOT do, because an assist that quietly
+     * trivialised the job would be worse than none (§2.1). */
+    { key: 'gripAssist', label: 'Grip strength', kind: 'range', fmt: (v) => v.toFixed(2) + '×',
+      note: 'For holding a trigger or a mouse button hard for long. It raises how hard your hands can pull — most where the pull is what binds: dragging, wet or awkward surfaces, and tired arms. It cannot make you faster, and it never lifts the couch alone or shifts the fridge without the dolly.' },
     { key: 'mouseSensitivity', label: 'Mouse look', kind: 'range', fmt: (v) => v.toFixed(1) + '×' },
     { key: 'padLookSensitivity', label: 'Stick look', kind: 'range', fmt: (v) => v.toFixed(1) + '×' },
     { key: 'keyLookRate', label: 'P2 key look (UHJK)', kind: 'range', fmt: (v) => String(Math.round(v)) },
@@ -90,6 +98,12 @@ const ROWS = Object.freeze({
      * to every rig's shakeEnabled. Never on the look axes — it is a nudge on the eye. */
     { key: 'cameraShake', label: 'Camera shake — a nudge on hard brakes, bumps and nearby impacts', kind: 'check',
       note: 'Never on your look. Starts off when your system asks for reduced motion.' },
+    /* §8.4 "optional haptic pulse" / §4.4 controller parity / §21.4 Motion (M28): the shell
+     * key rumble, routed to src/audio/haptics.js — which reads it live, per seat, on the same
+     * cue table the sound and the captions read. Beside the shake because it obeys the same
+     * reduced-motion rule, not because it is a camera. */
+    { key: 'rumble', label: 'Controller rumble — a pulse in the hand that dropped it', kind: 'check',
+      note: 'Impacts, damage, straps, tools and the road, on the pad of the seat it happened to. Nothing is withheld from a keyboard: every one of them already has a sound and a caption. Starts off when your system asks for reduced motion.' },
   ],
   /* §21.4 Hearing: "volume categories" and "subtitles with direction" (M9). The shell keys
    * audioMaster / audioUi / audioWorld / captions; the store routes the sliders to

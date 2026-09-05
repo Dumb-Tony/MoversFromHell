@@ -108,12 +108,19 @@ the pause card (Esc / Menu → Settings). Everything on it does something measur
 or toggle**, mouse / stick / P2-key look speed, **invert** left-right and up-down, stick
 deadzone, trigger pull, **text size** (80–160 %, one CSS variable behind every font), **camera
 distance** (solo boom, 1.6–7.0 m) and the render **quality tier** (auto / full / reduced —
-applies on reload; `?tier=` on the URL still wins). Settings are saved on this machine under one
-localStorage key (`mfh.save`, schema 1) together with your **best invoice**, which the
-settlement sheet quotes as "best so far". A retry keeps every setting (§21.2). A save from
-another schema, a damaged one, or a browser that refuses storage all fall back to defaults
-without a crash. Not yet: key remapping (bindings are data in `src/core/input.js`), and no
-camera-shake, reduced-motion or subtitle switch because nothing exists for them to act on.
+applies on reload; `?tier=` on the URL still wins). Since then it has grown four groups:
+**Controls** rebinds every on-foot action per player (Phase 23), **Sound** carries the three
+buses and captions (Phase 19), **Reading the screen** carries reduced HUD, high contrast and
+hints (Phase 24), and the motion switches — **camera shake** (Phase 22) and **controller
+rumble** (Phase 28) — start off when your system asks for reduced motion. **Grip strength**
+(Phase 28) is §6.5's accessibility assist: 1.00× / 1.25× / 1.50× on how hard your hands can
+pull, bounded so one hand at maximum stays below what two hands give you and the fridge stays a
+dolly job. It helps where the pull is what binds — dragging, wet surfaces, tired arms — and does
+nothing to a light box, which is limited by how fast a hand can move rather than how hard it can
+pull. Settings are saved on this machine under one localStorage key (`mfh.save`) together with
+your **best invoice**, which the settlement sheet quotes as "best so far", and your bindings as
+differences from the defaults. A retry keeps every setting (§21.2). A save from another schema, a
+damaged one, or a browser that refuses storage all fall back to defaults without a crash.
 
 **Prompts speak your device.** Every key chip, the grip label, the seat tag and the help line
 are derived from the binding table for your seat and the device you last used — E · Q · LMB/RMB
@@ -122,6 +129,18 @@ quarter of a second so a nudged stick cannot flicker it. One line under the cont
 what to do next (the truck, how many to load, the road, how many to unload), every item you look
 at says which room it is for, and thirty seconds into a job with nothing grabbed a single notice
 names the grab buttons. Cargo glance while driving is **LB** on a pad (View is join/leave).
+
+**Analog grip** (Phase 28). On a controller the triggers are analog: how far you pull is how hard
+your hands hold, live, so easing off lowers your grip while you are carrying and a badly loaded
+hand sags and then slips. Below the trigger-pull threshold the hand simply opens. Keyboard and
+mouse are always a full pull — controller parity means the same actions, not the same nuance.
+
+**A pulse in the hand that dropped it** (Phase 28). §8.4's fourth feedback channel reads the same
+cue table as the sounds and the captions: impacts, damage, straps, tools, the road and the phase
+stings, each on the pad of the seat it happened to — the hands that were holding it, the holder
+named on a property line, or the driving seat for a road event, which is the seat the camera
+shake nudges. An overstressed strap creaks in the carrier's hand for as long as it lasts. Nothing
+is withheld from a keyboard: every cue that rumbles already has a sound and a caption.
 
 **Furniture legs come off.** The couch is §7.1's own example: E with the screwdriver takes
 its legs off (0.85 → 0.77 m across, 60 s billed to the clock, the notice names it) and Q puts
@@ -318,7 +337,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**3612 assertions across thirty-four suites, all passing** — plus a GPU-only suite that the
+**3779 assertions across thirty-six suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -375,8 +394,12 @@ fixed the strap that launched a light box — the damping is solved rather than 
 amplification factor is at most 1 at every mass, and a 9 kg box thrown 1.077 m at 4.27 m/s now
 moves 0.025 m over a whole route while the 110 kg fridge is unchanged to half a millimetre —
 and made four recorded inconsistencies true: the carry counter, notices on sim time, the holder
-on the property line, and a speed bump that finally does something. Batch 13 (trigger pressure
-at the hand; the haptic pulse) is briefed in the plan.
+on the property line, and a speed bump that finally does something. Batch 13
+put the trigger's pressure into the hand — a half-pulled trigger is now half the force cap, live,
+with every validated grip number proven bit-identical at a full pull — added §6.5's bounded
+grip-strength assist, and built §8.4's fourth feedback channel, a pad pulse routed by the same
+cue table the sounds and captions read. Batch 14 (settings that keep their word; property damage
+that tells the whole story) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -671,6 +694,16 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
+- **Rumble has never touched a real controller.** There is no gamepad on the build machine, so
+  every assertion runs against a stubbed actuator through the real polling path: the routing,
+  the rate limiting and the failure modes are proven, the magnitudes are not tuned. A pad or
+  browser without a vibration actuator gets silence by design. A cue nobody was holding — a
+  dropped box has no holder by the time it lands — rumbles every seat, which is right in solo
+  and arguably noise in two-player, and the pulse does not get harder when the hit is harder.
+- **The grip assist is inert where a second limit binds.** It multiplies the force cap, so it
+  cannot make a hand faster (a light box is acceleration-limited) and it never touches the
+  spring's stretch band, which is what keeps every one-hand lift where it is. Turning it up
+  feels like nothing on a box; that is the bound working.
 - **Cargo tuning has one hard edge (M17).** A sideways fall in the 2.10 m box caps near 31°
   because the fridge's top meets the far wall. The strap that used to launch a light box is
   fixed (Phase 27) and the speed bump now takes the weight off the deck rather than doing

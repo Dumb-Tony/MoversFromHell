@@ -79,6 +79,71 @@ export class GripSystem {
      * instance-override rule from m3 D5 (`controller.tractionN = () => T`), applied to a
      * whole block instead of one method. Never mutate GRIP; it is frozen for a reason. */
     this.tuning = GRIP;
+
+    /* §6.5 GRIP STRENGTH ASSIST (M27) — the multiplier on this mover's force cap, pushed here
+     * by main.js's settings store from the shell key `gripAssist`. The M16 pattern: a setting
+     * lives on the system that consumes it and never in game.state (§22.4, m0 E8 — settings do
+     * not replay). 1 is off. setAssist() is the only writer, because the clamp to
+     * GRIP.assist.max is the §6.5 puzzle guard and a bare field assignment would skip it. */
+    this.assist = 1;
+
+    /* §4.3 TRIGGER PRESSURE (M27) — the seat currently DRIVING this mover, or null. Duck-typed
+     * to `input.seat(n)`: { activeDevice, analog(action) }. Null is a full pull, which is what
+     * an unattended mover (a solo player who swapped away mid-carry) and every fixture that
+     * drives step() directly get — see handPressure(). */
+    this.seatInput = null;
+  }
+
+  /** §6.5's assist, clamped to [1, GRIP.assist.max]. The clamp is the puzzle guard (see
+   *  GRIP.assist), so it lives here rather than in the settings store: a save, a slider and a
+   *  suite all arrive through this one door. Anything unusable is 1 (off). Returns what stuck. */
+  setAssist(v) {
+    const n = Number(v);
+    const max = this.tuning.assist.max;
+    this.assist = Number.isFinite(n) ? Math.min(max, Math.max(1, n)) : 1;
+    return this.assist;
+  }
+
+  /** Whose triggers these hands read. main.js sets it to the driving seat each step and to
+   *  null for a mover nobody is steering. */
+  setSeatInput(si) { this.seatInput = si || null; return this; }
+
+  /**
+   * 0..1 — how hard THIS hand is closed right now (§4.3, §6.5). Read every step a hand is
+   * closed, so easing off the trigger lowers the cap live.
+   *
+   * FULL PULL unless a pad is actually driving: no seat (an unattended mover, a fixture), or a
+   * seat whose active device is the keyboard and mouse. §4.4's parity is "every essential
+   * action requires controller parity", i.e. the same ACTIONS on both devices — not the same
+   * analog nuance, which a mouse button does not have to give. A latched toggle-mode grip is a
+   * full pull too, and that falls out of input.js rather than being special-cased here:
+   * analog() returns 1 for a latched latchable action whatever the trigger is doing.
+   *
+   * The floor (GRIP.analog.floor) is applied AFTER the input layer's own trigger threshold, so
+   * a reading of 0 means "under SETTINGS.triggerThreshold" — the hand is already being released
+   * by main.js this same step — and never "hold at zero strength".
+   */
+  handPressure(hand) {
+    const si = this.seatInput;
+    if (!si || si.activeDevice !== 'pad') return 1;
+    const v = si.analog(hand === 'left' ? 'gripLeft' : 'gripRight');
+    if (!Number.isFinite(v)) return 1;
+    return Math.min(1, Math.max(this.tuning.analog.floor, v));
+  }
+
+  /** The WEAKEST pressure among this mover's own hands on `entityId`; 1 when none of them is.
+   *  towFor() asks, so a feathered hold tows at what the feathered hand can actually pull —
+   *  the same number step() applies, not a stronger one the legs would then chase. */
+  gripPressureOn(entityId) {
+    let p = 1, any = false;
+    for (const h of HANDS) {
+      const g = this.grips[h];
+      if (!g || g.entityId !== entityId) continue;
+      const v = this.handPressure(h);
+      p = any ? Math.min(p, v) : v;
+      any = true;
+    }
+    return any ? p : 1;
   }
 
   /** Adopt the shared rig's orientation as this mover's own. Called for the mover currently
@@ -239,6 +304,10 @@ export class GripSystem {
       lastDemand: 0,    // what the spring WANTED, before the §6.4 clamp
       lastApplied: 0,   // what actually reached the body — this is the bounded one
       lastStretch: 0,
+      /* M27: how hard this hand is closed, 0..1 (§4.3). Initialised to a full pull rather than
+       * left undefined, so it is a number from the grab for anything that reads it — the M26
+       * lesson about everHeld, applied to a scalar. step() rewrites it every step. */
+      lastPressure: 1,
       /* Phase 11 (M10): the hand target's own motion, for hand-frame damping. `lastTarget`
        * is where the hand was last step; `handSteps` counts steps since the grab or since
        * the last target jump, so the finite difference is never taken across a teleport or
@@ -336,10 +405,23 @@ export class GripSystem {
    *  is measured against (see step()). It has to be computed here rather than by dividing
    *  the tired cap back out, because the acceleration half of the min() does not scale with
    *  strength — for a 9 kg box (225 N against 750) the division would inflate the reference
-   *  by 1/strengthFraction and a tired mover would under-register exertion on light loads. */
-  capPerHand(entity, hands, brace, fresh = false) {
+   *  by 1/strengthFraction and a tired mover would under-register exertion on light loads.
+   *
+   *  TWO M27 FACTORS, and they enter at different places on purpose.
+   *  `this.assist` (§6.5) multiplies forceCap — it is STRENGTH, so it is inside the min() and
+   *  the acceleration half never moves: an assist cannot make a hand FASTER, for the same
+   *  reason brace and hand count do not (see GRIP.maxAccel), and it therefore does nothing at
+   *  all to a light box, which is acceleration-limited.
+   *  `pressure` (§4.3, 0..1 from the trigger) scales the RESULT — how hard the hand is closed
+   *  limits everything the hand can do, the acceleration half included, and it is the only way
+   *  a feathered trigger on a 9 kg box can be felt at all (the box's cap is 225 N of
+   *  mass x maxAccel against 750 N of strength, so scaling strength alone would be inert until
+   *  the trigger was under 0.30 — below the floor, i.e. never). At pressure 1 and assist 1 both
+   *  are exact identities in IEEE-754 (x * 1 === x), which is what lets m34 T1 assert this
+   *  method unchanged to the bit against the pre-M27 formula. */
+  capPerHand(entity, hands, brace, fresh = false, pressure = 1) {
     const G = this.tuning;
-    let strength = G.forceCap * (entity.def.grip.forceMult || 1);
+    let strength = G.forceCap * this.assist * (entity.def.grip.forceMult || 1);
     if (brace) strength *= G.braceForceMult;
     if (hands > 1) strength *= G.twoHandForceMult;
     if (entity.state.wet) strength *= G.wetGripMult;
@@ -351,7 +433,7 @@ export class GripSystem {
      * the acceleration term, 750 N on a 9 kg box is 8.5 g and a dropped box leaves at
      * 17 m/s. Brace and hand count buy strength, not hand speed, so they do not raise
      * this half. See GRIP.maxAccel. */
-    return Math.min(strength, entity.def.mass * G.maxAccel) / Math.max(1, hands);
+    return (Math.min(strength, entity.def.mass * G.maxAccel) * pressure) / Math.max(1, hands);
   }
 
   /**
@@ -438,8 +520,12 @@ export class GripSystem {
     const mass = entity.def.mass;
     const kEff = G.spring * allHands;
     const frictionN = effectiveFloorFriction(entity, this.physics.R, G);
-    // Every hand on the object, at this mover's per-hand cap (a partner's is assumed equal).
-    const capTotal = this.capPerHand(entity, hands, brace) * allHands;
+    /* Every hand on the object, at this mover's per-hand cap (a partner's is assumed equal),
+     * at the pressure this mover's hands are actually closed to (M27; 1 for a keyboard seat,
+     * an unattended mover and every fixture, so every number this function has ever printed is
+     * unchanged). A feathered hold that can no longer beat floor friction takes the existing
+     * `towable === false` path to GRIP.towSpeedFloor — the crawl, not a stop (§2.1). */
+    const capTotal = this.capPerHand(entity, hands, brace, false, this.gripPressureOn(entity.id)) * allHands;
     const margin = band - frictionN / kEff;
     const towable = margin > 0 && capTotal > frictionN;
     if (!towable) {
@@ -605,9 +691,17 @@ export class GripSystem {
       let fy = G.spring * err.y - cPerHand * (vp.y - w * vHand.y);
       let fz = G.spring * err.z - cPerHand * (vp.z - w * vHand.z);
 
-      // §6.2's factors, all as multipliers on STRENGTH — the bound §6.4 demands — then the
-      // GRIP.maxAccel half of it, split between this mover's hands. See capPerHand().
-      const cap = this.capPerHand(entity, hands, brace);
+      /* §6.2's factors, all as multipliers on STRENGTH — the bound §6.4 demands — then the
+       * GRIP.maxAccel half of it, split between this mover's hands. See capPerHand().
+       *
+       * §4.3's TRIGGER (M27) is read HERE, inside the per-hand loop, not once at the grab: the
+       * cap follows the finger, so easing off lowers it on the very next step and the object
+       * sags in the hand. An overloaded hand then takes the slipThreshold/slipMs path four
+       * lines down, which is the failure mode this already had — there is no new event and no
+       * new way to lose a grip, only a new reason to reach the old one. */
+      const pressure = this.handPressure(hand);
+      grip.lastPressure = pressure;
+      const cap = this.capPerHand(entity, hands, brace, false, pressure);
 
       // DEMAND vs APPLIED. lastForce used to record the pre-clamp demand and was then
       // used to assert §6.4's bound — which is meaningless, since demand is unbounded by
@@ -652,7 +746,15 @@ export class GripSystem {
        * the tired cap meets the line (strengthFraction 0.75), still "never to zero". The
        * fresh cap is capPerHand(..., fresh) — the same min() with the penalty left out — not
        * the tired cap divided back up, which is only the same thing when strength won the
-       * min (see capPerHand). */
+       * min (see capPerHand).
+       *
+       * NO `pressure` HERE, deliberately (M27). The reference is what RESTED MUSCLES could do,
+       * and a player who chooses to feather the trigger is not working near that — they are
+       * applying less force, not straining harder. Passing the pressure in would have made a
+       * deliberately light hold read as a 100%-of-cap effort and tire the mover for holding
+       * something gently, which is the opposite of what §6.5's assist row is for. A feathered
+       * hand still SLIPS (the overload test above is against its own live cap); it just does
+       * not also get tired. This call is therefore byte-identical to the pre-M27 one. */
       if (this.player && grip.lastApplied > this.capPerHand(entity, hands, brace, true) * CARRY.exertAt) {
         this.player.noteExertion(stepMs);
       }

@@ -814,3 +814,28 @@ M23 (2026-09-05, headless): the brute-force branch exists and it is tempting. Bo
 
 *A replay clears the notices.* 'Run it again' wipes the bottom-right stack along with the 'What happened' ring, so the last thing that went wrong is not still on screen at the start of the new run.
 
+
+## Phase 28 — Phase 11 build side, batch 13: trigger pressure at the hand, and the haptic pulse — 2026-09-05
+
+### M27
+
+**Try this with a controller (M27).** Grab a 9 kg box with a full trigger pull, then relax your finger by half without letting go. The box should visibly sag lower below your hand, and if you hold it there it should slide out of your grip after about half a second with the same "slipped" feedback an overloaded hold has always given. The question to answer: does the sag read as *your hand opening*, or does it read as the game dropping things for no reason? If it is the second, the fix is more cue, not more strength — the slip is deliberately the same failure the couch already gives you.
+
+**And check the boundary.** Ease the trigger all the way off slowly. There is no band of "barely holding on": under about a third of the pull the hand is simply released, because that is the same threshold that closed it. If it ever feels like the box falls before you meant to let go, the `Trigger pull to grab` slider on the settings card is the number to move — raising it makes the hand close later, never weaker.
+
+**The Grip strength row (§6.5).** Settings → Grip and look → *Grip strength*, at 1.00×, 1.25× or 1.50×. It is for holding a trigger or a mouse button hard for a long time. Where to feel it: dragging the couch on bare floor (0.34 m in three seconds at 1.00×, 0.63 m at 1.50×), anything wet or awkward, and a second attempt after your arms are tired. Where you will feel nothing at all: picking up a box, and any one-handed lift — the hand's reach, not its strength, is what limits those. **What we most want to hear** is whether it ever makes the job feel *solved* rather than easier. It is bounded so that it cannot: one hand at maximum is 1125 N against the 1237.5 N two hands give you, and the fridge still needs the dolly at every setting (745 N of friction against a 630 N stretch band that the slider does not touch). If a tester at 1.50× ever finds themselves skipping a partner or a tool, that is the report that matters most.
+
+**Toggle grip on a controller now works (§21.4).** It never did — a trigger press did not latch anything, so "press to grab, press to let go" was a keyboard-only option. Worth a pass with Grab set to *toggle* and a pad in hand: pull and release the trigger, walk around, pull again to let go. Your hands should stay at full strength the whole time you are latched, whatever the trigger is doing.
+
+### M28
+
+**§8.4's fourth channel, for the first tester who owns a controller (M28).** Everything below was proven against a stub; none of it has been felt. Plug a pad in, tick **Controller rumble** on the settings card, and answer:
+
+1. **Is the thud in the right hand?** Drop a box you are carrying (0.45 strong / 0.30 weak / 90 ms). It should arrive with the sound and the mark, not after them. If it reads as late, the suspect is that the pulse is issued inside the fixed step while the sound is drained on the render frame.
+2. **Is the damage pulse distinguishable from the thud?** 0.85/0.55/180 against 0.45/0.30/90. §8.4 wants the cost to register through the sleeve; if the two feel the same, the damage row wants more separation rather than more strength.
+3. **Is the hard brake too much?** 0.70/0.45/**220 ms**, once per §11.3 event, on the driving seat only. The 260 ms cap exists so a bad drive is not a buzzing pad for 28 s — check that three road events over one route read as three events and not as a rumble bed.
+4. **Is the creak a warning or an irritation?** An overstressed strap repeats 0.32 weak / 180 ms **every 320 ms** for as long as the state lasts (measured intervals 333.3 ms). Does it make you retension the strap, or make you reach for the settings card?
+5. **Do the small rows earn their place?** GRIP_STARTED is 0.22 weak / 45 ms and PART_CHANGED is 0.08/0.24/45 — deliberately at the edge of noticeable. If they are below the pad's own floor they are dead weight and should be dropped rather than raised.
+6. **Co-op, two pads.** Is 'the seat it happened to' legible, or does the crew member who felt nothing feel left out? The creak is proven to reach the carrier's pad and only the carrier's — does that read as informative or as one player being kept in the dark? And how bad is the broadcast case: a box nobody was holding buzzes BOTH pads (see Known limitations).
+7. **Reduced motion.** With the OS preference on and no saved choice, rumble starts OFF (like camera shake). Does that read as broken to a player who plugged in a pad, or as respectful? The card's note says the default follows the OS.
+

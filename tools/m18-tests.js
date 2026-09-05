@@ -30,7 +30,9 @@
 import { mixFor, atten, RANGE, CUES, SILENT_EVENTS, cueFor, resolveCue, cueVolume, GameAudio,
          audioEnabledFrom, directionGlyph, panFor, tone, noiseBurst, makeNoise } from '../src/audio/audio.js';
 import { EVENTS, PHASES, EventBus } from '../src/core/eventBus.js';
-import { AUDIO, SETTINGS } from '../src/config.js';
+// M28: §8.4's fourth channel reads the SAME cue-type list — A1g/A1h below extend A1's walk.
+import { HAPTIC_TYPES, hapticFor } from '../src/audio/haptics.js';
+import { AUDIO, SETTINGS, HAPTICS } from '../src/config.js';
 import { load, SAVE_KEY, SHELL_DEFAULTS } from '../src/core/save.js';
 
 const lines = [];
@@ -217,6 +219,35 @@ lines.push('--- A1. every EVENTS name has a cue or is silent on purpose (GDD §2
   eq('A1e1 resolveCue of an unknown type is null', resolveCue('NOT_AN_EVENT', {}), null);
   ok('A1f a variant function that throws falls back rather than escaping',
      (() => { try { return resolveCue('IMPACT', { get materials() { throw new Error('boom'); } }).variant === '_'; } catch (e) { return false; } })());
+}
+
+/* ── A1g-h (Phase 11 build-side M28). ONE cue-type list for sound, captions AND rumble ──
+ * §8.4 names four channels at an impact and the haptic pulse is the fourth. A1 above insists
+ * every EVENTS name is cued or deliberately silent; this extends the SAME walk to the haptic
+ * table, so an event that arrives with a sound and no pulse fails by name here rather than
+ * being quietly numb. The two tables are compared as key SETS, not counts — a swap of one row
+ * for another would keep the count. */
+lines.push('--- A1g-h. the haptic table walks the same cue-type list (M28, §8.4) ---');
+{
+  eq('A1g the HAPTICS cue types and the CUES keys are the same set',
+     HAPTIC_TYPES.slice().sort().join(','), Object.keys(CUES).sort().join(','));
+  const missingHaptic = Object.keys(CUES).filter((k) => !hapticFor(k));
+  ok('A1g1 …so every cue that makes a sound also has a pulse', missingHaptic.length === 0, missingHaptic.join(','));
+  const notEvents = HAPTIC_TYPES.filter((k) => !EVENTS[k]);
+  ok('A1g2 …and every haptic row is a name in EVENTS', notEvents.length === 0, notEvents.join(','));
+  const bad = [];
+  for (const t of HAPTIC_TYPES) {
+    const row = hapticFor(t);
+    for (const m of ['strong', 'weak']) {
+      if (!(Number.isFinite(row[m]) && row[m] >= 0 && row[m] <= 1)) bad.push(`${t}.${m}=${row[m]}`);
+    }
+    if (!(Number.isFinite(row.ms) && row.ms >= HAPTICS.minMs && row.ms <= HAPTICS.maxMs)) bad.push(`${t}.ms=${row.ms}`);
+    if (!['holder', 'player', 'driver', 'all'].includes(row.to)) bad.push(`${t}.to=${row.to}`);
+  }
+  ok(`A1h every haptic row: magnitudes in [0,1], ms in [${HAPTICS.minMs},${HAPTICS.maxMs}], a known route`,
+     bad.length === 0, bad.join(' | '));
+  eq('A1h1 hapticFor("constructor") is null (own properties only, as cueFor is)', hapticFor('constructor'), null);
+  lines.push(`      ${HAPTIC_TYPES.length} haptic rows against ${Object.keys(CUES).length} cue rows`);
 }
 emit('running...');
 

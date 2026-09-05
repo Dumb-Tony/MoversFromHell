@@ -57,6 +57,7 @@ import { SettingsPanel } from './ui/settings.js';
 import { load as loadSave, save as writeSave, SHELL_DEFAULTS, reducedMotionPreferred, highContrastForced } from './core/save.js';   // highContrastForced: M19 ?hc=1
 import { RunRecorder, buildRunSummary, compactRun } from './telemetry/runLog.js';
 import { GameAudio, audioEnabledFrom, directionGlyph } from './audio/audio.js';
+import { createHaptics } from './audio/haptics.js';   // §8.4's fourth channel (M28)
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
@@ -401,6 +402,11 @@ async function boot() {
       };
     }
   }
+  /* §6.5 grip-strength assist (Phase 11 build-side M27): the saved shell key on every mover's
+   * grip system at boot, the same way the camera-shake switch reaches every rig above.
+   * setAssist clamps to GRIP.assist.max, so a hand-edited save that slipped past sanitiseShell
+   * still cannot hand one mover the couch. */
+  for (const m of movers) m.grips.setAssist(shell.gripAssist);
   /* §18.3 recovery of a HELD body lets every hand go first (M15, grip.js releaseEntity):
    * the registry knows bodies, the movers know hands, and this is the seam between them. */
   registry.releaseHolds = (entity, reason) => {
@@ -576,6 +582,16 @@ async function boot() {
       const seat = seatOfMover(i);
       const isActive = seat >= 0;
       const si = isActive ? seatInputs[seat] : null;
+
+      /* §4.3 TRIGGER PRESSURE (M27): this mover's hands read the seat that is DRIVING them,
+       * and only while it is on foot — a grip action has no binding in the DRIVE table, and a
+       * seat reading one there would report a trigger nobody is holding.
+       *
+       * An unattended mover gets null, which is a full pull, for the same reason it braces
+       * automatically below: the trigger under the player's finger belongs to the mover they
+       * are steering, and a solo player who swaps away must not have the couch quietly sag out
+       * of the hands they left behind. */
+      m.grips.setSeatInput(isActive && si.activeContext === CONTEXTS.FOOT ? si : null);
 
       /* THE INACTIVE MOVER STILL SIMULATES, and still holds. §6.4: "when one player
        * releases, forces update immediately; no canned synchronized carry animation takes
@@ -1069,6 +1085,25 @@ async function boot() {
         shell.cameraShake = !!shellPatch.cameraShake;
         for (const m of movers) m.rig.setShakeEnabled(shell.cameraShake);
       }
+      /* §6.5 grip strength (M27): every mover's grip system at once, the shake switch's shape.
+       * Clamped to the slider's range here and again to GRIP.assist.max by setAssist — the cap
+       * is the puzzle guard, and it is not the slider's to widen. */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'gripAssist')) {
+        const r = SETTINGS.ranges.gripAssist;
+        const v = Number(shellPatch.gripAssist);
+        if (Number.isFinite(v)) {
+          // Clamp AND snap: save.js rejects an off-step value outright, so a programmatic
+          // apply({gripAssist: 1.4}) that only clamped would run at 1.4 and boot at 1.0.
+          const clamped = Math.min(r.max, Math.max(r.min, v));
+          const steps = Math.round((clamped - r.min) / r.step);
+          shell.gripAssist = Number((r.min + steps * r.step).toFixed(4));
+          for (const m of movers) m.grips.setAssist(shell.gripAssist);
+        }
+      }
+      /* §8.4's haptic pulse (M28): the pad-rumble switch. Its consumer READS shell.rumble live
+       * (haptics.js `enabled`), so there is nothing to push — but unticking it must also stop a
+       * §10.3 creak already repeating, which the layer's own frame() does on the next tick. */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'rumble')) shell.rumble = !!shellPatch.rumble;
       /* §21.4 Cognition / Vision (M19): the three switches are booleans, pushed together to
        * their consumers by applyAccessibility below — every HUD, <body> and the cards, the
        * interaction system; the stall hint reads shell.hints itself. */
@@ -1089,7 +1124,8 @@ async function boot() {
     },
     reset() {
       // M16: 'Defaults' restores the OS reading for the shake switch, not a bare true.
-      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion });
+      // M28: and for the pad-rumble switch, which follows the same reading.
+      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion });
     },
     /* §21.4 "full remapping" (Phase 11 build-side M18): the Controls group. The live Input
      * OWNS the table (rebind validates through bindingConflicts and installs only a clean
@@ -1249,12 +1285,17 @@ async function boot() {
     }
     shakeDriver.mover = best;
   });
+  /** WHICH SEAT A ROAD EVENT REACHES, decided ONCE (M28). The shake below and the pad rumble
+   *  (haptics.js) are two channels of the same §11.3 event, so they must not each infer the
+   *  driver: this is the expression the shake observer already used, given a name so the
+   *  haptic layer can read the SAME answer (m35 H2 asserts they are equal). In solo the one
+   *  seat is the crew whatever mover it is on; in co-op only the driver's; -1 means nobody. */
+  const roadShakeSeat = () => (seatCount === 1 ? 0 : seatOfMover(shakeDriver.mover));
   bus.on(EVENTS.ROAD_FORCE, (e) => {
     const ev = TRUCK.roadEvents[e.roadType];
     if (!ev) return;
     const sev = ev.severity;
-    // In solo the one seat is the crew whatever mover it is on; in co-op only the driver's.
-    const seat = seatCount === 1 ? 0 : seatOfMover(shakeDriver.mover);
+    const seat = roadShakeSeat();
     if (seat < 0) return;
     const rig = moverOfSeat(seat).rig;
     // The truck-frame direction the seat is nudged in: the same one the cargo's pseudo-force
@@ -1310,6 +1351,32 @@ async function boot() {
       knockdownsSeen.set(m.id, n);
     }
   }
+  /* ---- the haptic pulse (Phase 11 build-side M28; §8.4, §11.3, §10.3, §21.4 Motion, §4.4) --
+   * §8.4's fourth channel, beside the sound (M9), the mark (M14) and the cost notice above.
+   * A read-only OBSERVER of the same cue stream, exactly like the shake sources: it never
+   * writes game.state, adds no body and adds nothing to the scene. Every routing question it
+   * asks is answered by something that already exists — the entity's own grips for "whose
+   * hands", roadShakeSeat() for "who is driving" (the shake's answer, not a second guess),
+   * input.padForSeat for "which pad is this seat's" — and the shell key `rumble` is read LIVE
+   * so unticking the box stops it inside the same frame. */
+  const haptics = createHaptics({
+    input,
+    seatCount: () => seatCount,
+    // The recap's own mover-id → seat helper, hoisted below; one lookup, not a second copy.
+    seatOfPlayer,
+    holdersOf: (entityId) => {
+      const e = registry.get(entityId);
+      const grips = e && e.state && e.state.grips;
+      return Array.isArray(grips) ? grips.map((g) => g.playerId).filter((id) => id != null) : [];
+    },
+    drivingSeat: roadShakeSeat,
+    enabled: () => !!shell.rumble,
+    now: () => game.clock.simTimeMs,
+  });
+  haptics.attach(bus);
+  // §10.3's creak is the only SUSTAINED pulse, so it needs a tick; the M3 shell-observer
+  // pattern runs it at the end of every game.frame(), on sim time, frozen under the pause card.
+  game.subscribe(() => haptics.frame(game.clock.simTimeMs));
   bus.on(EVENTS.STRAP_CHANGED, (e) => { if (e.state === 'slack' && e.strapId) strapsPlacedTotal++; });
   bus.on(EVENTS.RECOVERY, () => {
     pendingNotices.push({ text: 'recovery callout — a fee at settlement', kind: 'warn' });
@@ -2136,6 +2203,9 @@ async function boot() {
      * knockdown source and which mover is the recorded driver — so a suite can drive one
      * frame of it headlessly (m24). */
     reducedMotion, shakeFrame, shakeDriver: () => shakeDriver.mover,
+    /* §8.4's haptic pulse (M28): the layer itself, and the ONE driving-seat answer the shake
+     * and the rumble share — m35 H2 asserts the pad that buzzed is the seat this returned. */
+    haptics, roadShakeSeat,
     /* The notice queue and the contract panel's facts, because the render loop that drains
      * one and feeds the other never runs under headless Chrome (1-3 rAF callbacks total). A
      * suite asserts the 'arrived' notice and the phase word through these. */
