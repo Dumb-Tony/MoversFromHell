@@ -65,6 +65,7 @@ export class PauseScreen {
           <button type="button" data-act="restart">Restart the contract</button>
           <button type="button" data-act="settings" hidden>Settings</button>
         </div>
+        <label class="keep" hidden><input type="checkbox" class="keep-loadout"> keep the tools on the truck — the same box as the invoice's, remembered between sessions</label>
         <div class="foot">
           <b>Esc</b> or <b>Menu</b> resumes · click the game to look around again · <b>F3</b> stats
         </div>
@@ -87,16 +88,63 @@ export class PauseScreen {
     this.onResume = null;
     this.onRestart = null;
     this.onSettings = null;
+    /* M31 (§21.2 "optionally preserves loadout"; KNOWN_ISSUES Phase 26, M24 gap 4). The
+     * settlement sheet has had this box since M24 and this card's Restart always restored the
+     * stock loadout without saying so — two restarts, two answers. Both boxes are now views of
+     * ONE shell key (main.js `keepLoadout`, in the save): `keepLoadout()` reads it on every
+     * refresh, `onKeepLoadout` writes it when the box is ticked here, and Restart hands the
+     * value to the same resetContract option the sheet's Run-it-again uses. Left unwired (a
+     * suite's bare card) the row stays HIDDEN — never a box that does nothing (§2.1). */
+    this.keepLoadout = null;
+    this.onKeepLoadout = null;
 
     this._why = this.el.querySelector('.why');
     this._settings = this.el.querySelector('[data-act="settings"]');
+    this._keepRow = this.el.querySelector('label.keep');
+    this._keepBox = this.el.querySelector('input.keep-loadout');
+    /* The row's layout is set HERE, not in styles.css, because styles.css belongs to another
+     * milestone in this batch and an unstyled label is a shipped defect, not a note: without
+     * it the box and its text run together with no gap and the text ignores `--ts`, alone
+     * among the card's rows. The values mirror the sheet's twin, `#settlement label.keep`
+     * (styles.css:1293) — flex, centred, 7 px gap, `calc(11px * var(--ts))` — plus
+     * `justify-content: center` for this card's centred layout. Two deliberate omissions:
+     * no `opacity` (an inline one would beat M19's `.hc` "nothing dimmed" rule, which a
+     * stylesheet rule would not), and no `display`, which refresh() writes beside `hidden`
+     * because an inline display beats the UA's `[hidden] { display: none }` — the same trap
+     * styles.css:694 names for the card itself. Fold it into styles.css when the file is
+     * free (orchestratorNotes). */
+    Object.assign(this._keepRow.style, {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '7px',
+      margin: '10px 0 2px',
+      // Set piecewise, never as the `font` shorthand: a `calc()` size inside the shorthand is
+      // rejected outright by the parser and the whole declaration is dropped.
+      fontFamily: 'Quicksand, system-ui, sans-serif',
+      fontSize: 'calc(11px * var(--ts))',
+      lineHeight: '1.4',
+      color: 'var(--paper)',
+      cursor: 'pointer',
+    });
+    this._keepBox.style.margin = '0';
+    this._keepBox.style.accentColor = 'var(--lime)';
+    this._keepBox.style.flex = '0 0 auto';
 
     this.el.addEventListener('click', (e) => {
       const act = e.target && e.target.dataset ? e.target.dataset.act : null;
+      // A click on the box (or its label) is an answer to the box, never a resume: the label
+      // is inside the card, and the backdrop rule below matches only the backdrop itself.
+      if (this._keepRow && e.target instanceof Node && this._keepRow.contains(e.target)) return;
       // The backdrop is "click to resume" — the one gesture that can also re-take the pointer.
       if (act === 'resume' || e.target === this.el) { if (this.onResume) this.onResume(); }
-      else if (act === 'restart') { if (this.onRestart) this.onRestart(); }
+      else if (act === 'restart') { if (this.onRestart) this.onRestart({ keepLoadout: this.keepLoadoutTicked() }); }
       else if (act === 'settings') { if (this.onSettings) this.onSettings(); }
+    });
+    // The box writes the shell key the moment it is ticked, so the sheet's box (built fresh at
+    // every settlement) reads the same answer, and a restart from either place agrees.
+    this.el.addEventListener('change', (e) => {
+      if (e.target !== this._keepBox) return;
+      if (this.onKeepLoadout) this.onKeepLoadout(!!this._keepBox.checked);
     });
 
     if (bus) {
@@ -126,7 +174,20 @@ export class PauseScreen {
     this._why.hidden = !this.reason;
     this._why.textContent = this.reason ? `paused — ${this.reason}` : '';
     this._settings.hidden = !this.onSettings;
+    /* M31: the tick is the shell's, so it is READ here rather than remembered — a settlement
+     * sheet ticked a minute ago shows through, and so does a Defaults that cleared it. */
+    const wired = typeof this.keepLoadout === 'function';
+    this._keepRow.hidden = !wired;
+    // `hidden` is the truth; the inline display is written with it because the row's own
+    // inline `flex` (set in the constructor) would otherwise beat the UA's [hidden] rule.
+    this._keepRow.style.display = wired ? 'flex' : 'none';
+    if (wired) this._keepBox.checked = !!this.keepLoadout();
     if (show) this._renderHistory();
+  }
+
+  /** The box as it stands right now — false when the row is unwired or unticked (m38 F4). */
+  keepLoadoutTicked() {
+    return !!(typeof this.keepLoadout === 'function' && this._keepBox && this._keepBox.checked);
   }
 
   /** The 'What happened' rows from the shell's ring: oldest first, stamp · glyph · text · seat.

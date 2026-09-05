@@ -15,7 +15,9 @@
  *                validator")
  *   shell        UI scale, camera distance, quality tier, the sound levels and captions, the
  *                camera-shake switch (M16), the reduced-HUD, high-contrast and hints switches
- *                (M19) and §6.5's grip-strength assist (M27) — the shell's, not the input's
+ *                (M19), §6.5's grip-strength assist (M27), and (M31) the settlement reveal's
+ *                own switch and the 'keep the tools on the truck' tick the sheet and the pause
+ *                card share — the shell's, not the input's
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
  *   runs         §27.4's local run records (Phase 11 build-side M6): the last
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
@@ -52,7 +54,8 @@ export function defaultSave({ reducedMotion = false } = {}) {
     settings: { ...DEFAULT_SETTINGS },
     // M28: `rumble` (§8.4's haptic pulse) takes its default from the same reading, for the
     // same §21.4 Motion reason — and a saved choice wins over it, exactly as cameraShake's does.
-    shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion },
+    // M31: and `invoiceReveal` (§21.2's settlement reveal), the third animation with a switch.
+    shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion, invoiceReveal: !reducedMotion },
     bestInvoice: null,
     runs: [],
     bindings: {},
@@ -201,11 +204,13 @@ export function sanitiseWalkthrough(w) {
  *  choice keeps it, one that does not (an older blob, a hand edit) starts from
  *  `!reducedMotion`. */
 export function sanitiseShell(obj, { reducedMotion = false } = {}) {
-  const out = { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion };
+  const out = { ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion, invoiceReveal: !reducedMotion };
   if (!obj || typeof obj !== 'object') return out;
   if (typeof obj.cameraShake === 'boolean') out.cameraShake = obj.cameraShake;
   // M28: the pad-rumble switch, same rule and same validator as the shake's (m35 H4).
   if (typeof obj.rumble === 'boolean') out.rumble = obj.rumble;
+  // M31: the settlement reveal, the third §21.4 Motion switch — same rule, same validator.
+  if (typeof obj.invoiceReveal === 'boolean') out.invoiceReveal = obj.invoiceReveal;
   const r = SETTINGS.ranges;
   const ts = Number(obj.uiScale);
   if (Number.isFinite(ts)) out.uiScale = clamp(ts, r.uiScale);
@@ -223,6 +228,10 @@ export function sanitiseShell(obj, { reducedMotion = false } = {}) {
   for (const k of ['reducedHud', 'highContrast', 'hints']) {
     if (typeof obj[k] === 'boolean') out[k] = obj[k];
   }
+  /* M31 (§21.2 "optionally preserves loadout"): the 'keep the tools on the truck' tick that
+   * the settlement sheet and the pause card share. A boolean or the default (false: the stock
+   * loadout), rejected the way every other hand edit is. */
+  if (typeof obj.keepLoadout === 'boolean') out.keepLoadout = obj.keepLoadout;
   // M22: the first-minute cards' seen flag — a boolean or the default (false: show them).
   if (typeof obj.walkthroughSeen === 'boolean') out.walkthroughSeen = obj.walkthroughSeen;
   /* M27 (§6.5): the grip-strength assist is one of the row's OWN steps, or the default. NOT

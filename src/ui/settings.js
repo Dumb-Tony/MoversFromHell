@@ -26,7 +26,8 @@
  * routed to every HUD's caption line (m18 A11). The 'Reading the screen' group (Phase 11
  * build-side M19) closes §21.4's last Cognition and Vision rows: reduced HUD (every HUD's
  * setReduced), high contrast (the `.hc` class — m27 A2), hints (the stall hint's gate and the
- * prompt's room suffix — m27 A5).
+ * prompt's room suffix — m27 A5), and (M31) the settlement reveal — the third thing in the
+ * build that animates, and until M31 the only one without a row (§21.4 Motion).
  *
  * The four controls §21.4 lists that were already true by construction, so nobody rediscovers
  * it: colour-independent cues (every HUD state carries words or a shape, styles.css), visible
@@ -135,6 +136,15 @@ const ROWS = Object.freeze({
       note: 'Every notice already leads with a glyph and every state carries a word; this makes the panels opaque over a bright scene. ?hc=1 in the address forces it on.' },
     { key: 'hints', label: `Hints — the ${Math.round(CONTRACT.stallHintMs / 1000)} s “how to grab” nudge and the → room on each item`, kind: 'check',
       note: 'Off silences the stall hint (it never fires, not merely hidden) and drops the room suffix from the prompt. The objective line stays.' },
+    /* §21.2 "Invoice animates major lines, then exposes a complete static breakdown" / §21.4
+     * Motion (Phase 11 build-side M31). The shell key invoiceReveal, routed to the settlement
+     * sheet's revealEnabled through the page rule (invoiceScreen.js revealEnabledWith). It is
+     * here rather than in Display because what it changes is READING the sheet: off, every
+     * major line and the whole breakdown are on screen the instant the job settles. Nothing is
+     * hidden either way — the reveal is presentation over lines invoice.js already wrote — so
+     * the note says exactly that, and says the OS rule, as the shake and rumble rows do. */
+    { key: 'invoiceReveal', label: 'Invoice reveal — the major lines land one at a time and count up', kind: 'check',
+      note: 'Off shows the finished invoice at once. No number changes either way, and nothing is hidden. Starts off when your system asks for reduced motion; ?reveal=off in the address forces it off.' },
     /* §26.7 / §21.3 first-minute cards (Phase 11 build-side M22; walkthrough.js). The shell key
      * is walkthroughSeen — set by the cards themselves when the third retires or the ✕ skips
      * them — and this row is its NEGATION (`invert`: the box shows !value and writes !checked):

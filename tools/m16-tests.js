@@ -136,10 +136,12 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     // M19: …and the reduced-HUD, high-contrast and hints switches (all three off their defaults).
     // M22: …and the first-minute cards' seen flag (true: off its default).
     // M28: …and the pad-rumble switch (§8.4's haptic pulse), false: off its default too.
+    // M31: …and §21.2's invoice-reveal switch (false: off its default) and the shared
+    // 'keep the tools on the truck' tick (true: off its default), both round-tripped for real.
     shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false,
              reducedHud: true, highContrast: true, hints: false, walkthroughSeen: true, rumble: false,
              // M27: …and §6.5's grip-strength assist, at the top step (off its 1.0 default).
-             gripAssist: 1.5 },
+             gripAssist: 1.5, invoiceReveal: false, keepLoadout: true },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
     // M18: the §21.4 remap section — the DIFF from the shipped bindings (m26 B6 fills it; empty here).
@@ -543,6 +545,12 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     reducedHud:         () => huds[0].reduced,
     highContrast:       () => document.body.classList.contains('hc'),
     hints:              () => M.interact.hints,
+    /* M31 (Phase 11 build-side): §21.2's settlement reveal. Its consumer is the SAVE, for the
+     * same reason the tier's is — the EFFECTIVE switch (invoiceScreen.revealEnabled) is the row
+     * AND the page rule, and this page is the harness's scratch page, where the page rule says
+     * no however the box is ticked (m17 M24-R1 and m31 V3 both pin that false). So the half U2
+     * can assert here is the CHOICE, and m38 F3 drives show() for real on both branches. */
+    invoiceReveal:      () => load().shell.invoiceReveal,
     // M22 (Phase 11 build-side): the first-minute cards' seen flag, at its consumer — the
     // card reads it when a run arms (walkthrough.js arm(); m29 W3 drives the row for real).
     // The row is 'Show the first-minute cards again': the key's NEGATION (settings.js `invert`,
@@ -666,6 +674,41 @@ lines.push('--- M19. reducedHud / highContrast / hints are shell keys (§21.4 Co
   eq('M19-4 non-booleans in the blob are the defaults, not truthy strings or numbers',
      `${load().shell.reducedHud}/${load().shell.highContrast}/${load().shell.hints}`, 'false/false/true');
   eq('M19-5 the blob still has exactly the seven sections (the keys are under shell)',
+     (() => { save({}); return Object.keys(JSON.parse(localStorage.getItem(SAVE_KEY))).sort().join(','); })(),
+     'bestInvoice,bindings,build,runs,schema,settings,shell');
+  localStorage.removeItem(SAVE_KEY);
+}
+
+/* ── M31 (Phase 11 build-side): invoiceReveal and keepLoadout are shell keys ──────────
+ * §21.2 (the settlement reveal's own switch, and the 'keep the tools on the truck' tick the
+ * sheet and the pause card share) / §21.4 Motion. Booleans under `shell`, defaulting from the
+ * OS's reduced-motion reading (the reveal) and to false (the loadout); the payload still has
+ * exactly the seven sections. The consumers are asserted in m38 F3/F4. */
+lines.push('--- M31. invoiceReveal / keepLoadout are shell keys (§21.2, §21.4 Motion) ---');
+{
+  eq('M31-1 SHELL_DEFAULTS: invoiceReveal true, keepLoadout false',
+     `${SHELL_DEFAULTS.invoiceReveal}/${SHELL_DEFAULTS.keepLoadout}`, 'true/false');
+  localStorage.removeItem(SAVE_KEY);
+  ok('M31-2 load() hands back two booleans', typeof load().shell.invoiceReveal === 'boolean' && typeof load().shell.keepLoadout === 'boolean');
+  eq('M31-3 the reveal\'s default follows prefers-reduced-motion, the M16 rule (both branches)',
+     `${defaultSave({ reducedMotion: true }).shell.invoiceReveal}/${defaultSave({ reducedMotion: false }).shell.invoiceReveal}`, 'false/true');
+  eq('M31-3a …and keepLoadout is false under either reading (it is not a motion switch)',
+     `${defaultSave({ reducedMotion: true }).shell.keepLoadout}/${defaultSave({ reducedMotion: false }).shell.keepLoadout}`, 'false/false');
+  save({ shell: { ...SHELL_DEFAULTS, invoiceReveal: false, keepLoadout: true } });
+  eq('M31-4 save(false/true) → load() false/true', `${load().shell.invoiceReveal}/${load().shell.keepLoadout}`, 'false/true');
+  localStorage.setItem(SAVE_KEY, JSON.stringify({ schema: SAVE_SCHEMA, shell: { invoiceReveal: 'yes', keepLoadout: 1 } }));
+  /* The OS reading is passed EXPLICITLY, both ways. load()'s own `reducedMotion` defaults to
+   * false and never touches matchMedia (save.js: load → migrate → sanitiseShell all take the
+   * opt), so a bare load() is deterministic on any machine — M16-4 relies on exactly that —
+   * but naming it makes that a fact the assertion STATES instead of one a reader has to trace,
+   * and it lets the reduce branch be pinned here too rather than only in defaultSave. */
+  eq('M31-5 non-booleans in the blob are the defaults, not a truthy string or number',
+     `${load({ reducedMotion: false }).shell.invoiceReveal}/${load({ reducedMotion: false }).shell.keepLoadout}`, 'true/false');
+  eq('M31-5a …and the fallback follows the reading it is given — on a reduced-motion machine the reveal starts off',
+     `${load({ reducedMotion: true }).shell.invoiceReveal}/${load({ reducedMotion: true }).shell.keepLoadout}`, 'false/false');
+  eq('M31-5b …a bare load() is the no-preference branch, never a live matchMedia read',
+     `${load().shell.invoiceReveal}`, `${load({ reducedMotion: false }).shell.invoiceReveal}`);
+  eq('M31-6 the blob still has exactly the seven sections (both keys are under shell)',
      (() => { save({}); return Object.keys(JSON.parse(localStorage.getItem(SAVE_KEY))).sort().join(','); })(),
      'bestInvoice,bindings,build,runs,schema,settings,shell');
   localStorage.removeItem(SAVE_KEY);

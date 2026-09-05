@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 29,
-  label: 'phase-29',
+  phase: 30,
+  label: 'phase-30',
   date: '2026-09-05',
 });
 
@@ -430,6 +430,28 @@ export const WALKTHROUGH = Object.freeze({
    *  bottom is measured from the help line's live height, so a larger text size or high
    *  contrast cannot push the two into each other — m29 W1). */
   clearancePx: 8,
+
+  /* ── THE BOTTOM BAND IN A NARROW WINDOW (Phase 11 build-side M32; §21.4 Vision, §21.1) ──
+   * M22 left this recorded and unmeasured: the card is bottom-LEFT and the caption and the
+   * route bar are CENTRED, so at the harness's 1262 px the card ends at x 322 and the bar
+   * begins at 471, but as the window narrows the bar's left edge (w/2 − 160) walks toward the
+   * card and reaches it below ~960 px. It was never measured because the harness cannot
+   * resize its window.
+   *
+   * The rule is keyed on the BAND's own width — #ui's clientWidth, which is the viewport's
+   * except when a suite overrides it to emulate one (m39 E4) — and not on a @media query,
+   * for exactly that reason: a media query reads the viewport, which the harness cannot move.
+   * Under narrowPx the card takes the badge form (one row, the body line dropped) and the
+   * boxes above the help line rise by --band-lift, its measured height plus bandGapPx, so the
+   * band STACKS instead of colliding. Above narrowPx --band-lift is 0 and nothing moves
+   * (m36 S2's 0.5 px pins, m29 W1's rects). */
+  /** px of band width at or below which the card takes the badge form. 960 is the width
+   *  KNOWN_ISSUES named: at it the route bar's left edge is 320 px and a 1.0× card ends at
+   *  10 + min(312, 33 % − 12) = 322 — the first pixel of overlap. */
+  narrowPx: 960,
+  /** px between the badge's top and whatever now sits above it. The same 6 px the notices
+   *  stack with (styles.css .notices gap). */
+  bandGapPx: 6,
 });
 
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */
@@ -975,8 +997,86 @@ export const DOOR = Object.freeze({
   forceWithinMs: 4000,
   /** m — the hung pose's box is shrunk by this before the rehang occupancy sweep (interact.js
    *  _doorwayBlocked), so the floor, the jamb it sits flush against and the header do not
-   *  count as blocking it. */
+   *  count as blocking it. Also shrinks a REST strip's box before the same sweep (M32), which
+   *  is why a 40 mm leaf lying at y 0.02 does not read the ground plane's y ≤ 0 top face. */
   occupancyMargin: 0.01,
+
+  /* ── WHERE A REMOVED LEAF GOES (Phase 11 build-side M32; §8.2, §7.3, §26.6) ────────────
+   * KNOWN_ISSUES carried M11's "the rest spot is not checked at removal" for six phases: E
+   * laid the leaf on ONE authored strip whether or not a mover or a box was standing there,
+   * and the solver then separated them over a few steps — and M23's forcing inherited it
+   * (a couch shoved from the west found the leaf laid under its leading corner).
+   *
+   * The answer is an ORDERED LIST per door, swept with M23's own occupancy primitive
+   * (interact.js boxBlocked) and taken in config order, so the choice is deterministic
+   * (m14's soak equality) and the FIRST entry is exactly M11's authored pose — house.js
+   * leafRestPose is now "candidate 0", which is why m5 DL and m19 D4c read the same numbers
+   * as before for the three interior leaves.
+   *
+   * Each entry is a DESCRIPTOR, never a coordinate: house.js leafRestPoseOn derives the pose
+   * from the door record, so moving a door moves its strips with it.
+   *   side  'hinge' | 'latch'   which jamb the strip runs from, along the wall's own axis
+   *   lay   'wall'  | 'room'    the leaf's 2.00 m height along the wall, or out into the room
+   *   out   'swing' | 'back'    the side of the wall it is laid on ('swing' is the side the
+   *                             door opens into — M11's only option)
+   *   shift m                   further along the wall, past DOOR.restPad, to dodge a fixture
+   *
+   * EVERY CANDIDATE OF EVERY DOOR sits outside every doorway's clear box (m13 B1's predicate)
+   * and inside RECOVERY.bounds — house.js restCandidateProblems asserts both (m39 E0).
+   *
+   * interior32's list is the second recorded fact M32 closes: its leaf swings OUT and M11
+   * laid it on the lawn at x −2.77..−1.97, 170 mm past the porch's west edge. Every candidate
+   * here is inside WORLD.porchBounds, so a removed front leaf never lies on the grass where
+   * the recovery sweep and the truck's route meet (m39 E3). */
+  /** m13 B1's clear box, the predicate restCandidateProblems checks a candidate strip against:
+   *  the doorway gap less the jamb markers (0.02 m a side), and this much either side of the wall.
+   *  Named here so the validator and m13 cannot drift apart silently. */
+  clearBox: Object.freeze({ jambInsetM: 0.02, crossM: 0.20 }),
+  restCandidates: {
+    living_kitchen: [
+      // M11's: the kitchen's 2.11 m wall strip west of the door, x 0.15..2.15.
+      { id: 'hinge_wall', side: 'hinge', lay: 'wall', out: 'swing', shift: 0 },
+      // The latch side, 0.60 m along to clear the dining chairs at x 3.20: x 3.65..4.45.
+      { id: 'latch_room', side: 'latch', lay: 'room', out: 'swing', shift: 0.60 },
+      // The same strip on the LIVING-ROOM face of the same wall: x 0.15..2.15, z −4.92..−4.12.
+      { id: 'hinge_wall_living', side: 'hinge', lay: 'wall', out: 'back', shift: 0 },
+    ],
+    kitchen_bedroom: [
+      // M11's: out into the bedroom past the north jamb, x −2.08..−0.08, z −6.93..−6.13.
+      { id: 'hinge_room', side: 'hinge', lay: 'room', out: 'swing', shift: 0 },
+      // The latch side of the same wall (the nightstand stands on it at boot — which is the
+      // case this whole list exists for: the sweep passes over it and takes the next).
+      { id: 'latch_room', side: 'latch', lay: 'room', out: 'swing', shift: 0 },
+      // Further along, on the KITCHEN face: 1.00 m clears wall_living_back, x 0.08..2.08.
+      { id: 'hinge_room_kitchen', side: 'hinge', lay: 'room', out: 'back', shift: 1.00 },
+    ],
+    door34: [
+      // M11's: into the living room past the west jamb, x −1.25..−0.45.
+      { id: 'hinge_room', side: 'hinge', lay: 'room', out: 'swing', shift: 0 },
+      // …and the porch either side of the opening, where a front door is actually laid down.
+      { id: 'latch_wall_porch', side: 'latch', lay: 'wall', out: 'back', shift: 0 },
+      { id: 'hinge_wall_porch', side: 'hinge', lay: 'wall', out: 'back', shift: 0 },
+    ],
+    interior32: [
+      /* ALL THREE ON THE PORCH (M32). M11 laid this one at x −2.77..−1.97, 170 mm past the
+       * porch's west edge and on the grass. 0.17 m of shift is the least that would fit it
+       * inside WORLD.porchBounds; 0.50 is the number because it also keeps the leaf within
+       * DOOR.rehangRange of its jamb — 1.18 m against 1.25 — so Q from where you are standing
+       * is still the undo, as it is at every other door. x −2.27..−1.47, z −1.89..0.11. */
+      { id: 'porch_room', side: 'hinge', lay: 'room', out: 'swing', shift: 0.50 },
+      { id: 'porch_room_far', side: 'hinge', lay: 'room', out: 'swing', shift: 1.20 },
+      { id: 'porch_wall', side: 'hinge', lay: 'wall', out: 'swing', shift: 0.30 },
+    ],
+  },
+  /** m — with every authored strip occupied, how much further along the wall the chooser may
+   *  look before giving up and using candidate 0 anyway. 2.00 m is one leaf-length past the
+   *  longest strip: far enough to get out from under a couch, near enough that "laid it down
+   *  further along" is still beside the door you took it off. */
+  restSearchM: 2.00,
+  /** m — the rung of that ladder. Half a leaf's width: the smallest step that can clear a
+   *  0.50 m box in one rung, and 10 rungs × 3 candidates = 30 shape casts in the worst case,
+   *  all of them on ONE key press. */
+  restSearchStepM: 0.20,
 });
 
 /** §10.3 straps. Validated: Phase 7. */
@@ -1321,6 +1421,16 @@ export const NOTICE = Object.freeze({
  *  objectFloorY within a second either way. */
 export const WORLD = Object.freeze({
   groundSizeM: 200,
+  /** THE PAVED APRON IN FRONT OF THE HOUSE (Phase 11 build-side M32; §21.1, §18.3, §11.1).
+   *
+   *  A footprint, not a zone: the rectangle a removed FRONT leaf must lie inside so it never
+   *  ends up on the lawn where §18.3's recovery sweep and the truck's route meet. It is the
+   *  porch ZONE (house.js ZONES 'porch', x −2.60..5.00, z −2.00..4.20) with its driveway end
+   *  cut back to z 2.90 — 1.30 m short of the driveway zone at z 4.20, 5.40 m short of the
+   *  truck's rear lip at z 8.30, and 50 mm short of the porch step at z 2.95. Kept HERE rather
+   *  than derived from the zone because the zone is a delivery volume that may grow; this is a
+   *  placement rule that must not. m39 E3 asserts it is inside the zone and clear of both. */
+  porchBounds: Object.freeze({ minX: -2.60, maxX: 5.00, minZ: -2.00, maxZ: 2.90 }),
 });
 
 /** §18.3 recovery. Validated: Phase 5. */
@@ -1576,6 +1686,21 @@ export const SETTINGS = Object.freeze({
      *  setShakeEnabled). 1.0 is off, and off is the default: the assist is an option, never a
      *  difficulty the player has to turn back down. GRIP.assist carries the bounds and why. */
     gripAssist: GRIP.assist.default,
+    /** §21.2 "Invoice animates major lines" / §21.4 Motion (Phase 11 build-side M31): the
+     *  settings row for the settlement reveal, routed to invoiceScreen.revealEnabled through
+     *  the page rule (invoiceScreen.js revealEnabledWith). Its boot default follows
+     *  prefers-reduced-motion exactly as cameraShake's and rumble's do — this is the value when
+     *  the OS has no preference — and a saved choice always wins (save.js sanitiseShell). Off,
+     *  every number is the same number, shown at once: the reveal is presentation over lines
+     *  invoice.js already wrote, never a second calculation. */
+    invoiceReveal: true,
+    /** §21.2 "a retry … optionally preserves loadout" (Phase 11 build-side M31): the tick that
+     *  the settlement sheet's box AND the pause card's box both read and write, so the two
+     *  restarts cannot disagree about the tools. REMEMBERED between sessions (it is in the
+     *  save), which is why both labels say so and why 'Defaults' puts it back to false — a
+     *  tester who ticked it once in a previous session would otherwise be quietly starting
+     *  every job with the truck already loaded. */
+    keepLoadout: false,
   },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. APPLIES LIVE since
    *  Phase 11 build-side M29 — lighting.setQualityTier disposes the rig and rebuilds it from

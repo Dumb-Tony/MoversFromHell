@@ -177,10 +177,14 @@ one item that does not fit its route intact (the couch — legs off), the road's
 the profit to beat once you have one. **The invoice reveals itself.** At settlement the major
 lines land one at a time and count up — revenue, labour, damage, fuel, what was left behind, fees,
 then PROFIT or LOSS — and the full breakdown opens under them; Space, a click or any pad button
-skips to the end, `?reveal=off` (or a reduced-motion OS setting) shows the sheet at once. Every
-number is the same either way: the reveal is a curtain over the ledger, never a second sum.
+skips to the end. It has its own switch on the settings card (Reading the screen → Invoice
+reveal), which starts off if your system asks for reduced motion, and `?reveal=off` in the
+address still forces it off for a screenshot. Every number is the same either way: the reveal is
+a curtain over the ledger, never a second sum.
 **What happened** lists the run's own logged events — doors off or forced, legs off, drops, damage
-with its cost, marked walls, road events, callouts — with stamps. **Run it again** keeps your
+with its cost, marked walls, road events, callouts — with stamps, and each row that had somebody's
+hands on it names the seat: the legs, the dents and the marked walls say who, while a thrown box
+and a road event say nobody, because nobody was holding them. **Run it again** keeps your
 settings; tick "keep the tools on the truck" to start the next run with the tools you left in the
 cargo box.
 
@@ -346,7 +350,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**4045 assertions across thirty-eight suites, all passing** — plus a GPU-only suite that the
+**4274 assertions across forty suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -411,8 +415,13 @@ cue table the sounds and captions read. Batch 14
 made two settings keep their word — text size now scales the boxes as well as the letters, and
 the quality tier rebuilds the lighting rig in the running game — and taught property damage to
 tell the whole story: a corner hit is split across the surfaces that stopped it, a full surface
-stops charging without going silent, and a subtitle names which wall it was. Batch 15 (contract-UX
-follow-through; the world's edges) is briefed in the plan.
+stops charging without going silent, and a subtitle names which wall it was. Batch 15
+finished what batch 11 started — every recap row that had hands on it names the seat, the brief
+refreshes after a settlement, the reveal has its own switch, and both restarts offer to keep the
+tools — and closed the world's edges: a removed or forced door now picks a clear strip to lie on
+rather than landing on whoever was standing there, the front door stays on the porch, and the
+first-minute card gives the bottom band room in a narrow window. Batch 16 (the manifest panel
+§21.2 still lacks; the impulse the solver hides) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 

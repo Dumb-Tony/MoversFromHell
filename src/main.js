@@ -50,7 +50,7 @@ import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn, localToWorld } from './player/grip.js';
 import { Hud } from './ui/hud.js';
-import { InvoiceScreen, revealEnabledFrom } from './ui/invoiceScreen.js';   // revealEnabledFrom: M24 §21.2 reveal
+import { InvoiceScreen, revealEnabledWith } from './ui/invoiceScreen.js';   // revealEnabledWith: M24's reveal, M31's switch
 import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
@@ -970,11 +970,22 @@ async function boot() {
   const divider = new SplitDivider(ui);
   const invoiceScreen = new InvoiceScreen(ui);
   /* §21.2's reveal (M24): wall-time presentation over the sheet's own lines. Off on the
-   * harness's scratch page unless asked (?reveal=on, DEBUG.invoiceRevealInHarness), off
-   * under prefers-reduced-motion (the count-up is motion; the numbers are the same either
-   * way), `?reveal=off` for anyone who wants the sheet at once. */
-  invoiceScreen.revealEnabled = revealEnabledFrom(location.search, location.pathname) && !reducedMotion;
+   * harness's scratch page unless asked (?reveal=on, DEBUG.invoiceRevealInHarness), and
+   * `?reveal=off` for anyone who wants the sheet at once — that is the PAGE rule
+   * (invoiceScreen.js revealEnabledFrom).
+   *
+   * M31 adds the player's own row to it (shell.invoiceReveal, the settings card's 'Invoice
+   * reveal'), because §21.4 Motion wants a switch for anything that animates and the count-up
+   * was the one animation without one. The reduced-motion reading is now the DEFAULT OF THAT
+   * KEY rather than a term in this line (save.js), which is what lets a saved choice win over
+   * the OS the way the shake and rumble switches do — and `?reveal=on|off` still wins over
+   * both, for the screenshot path. */
+  invoiceScreen.revealEnabled = revealEnabledWith(shell.invoiceReveal, location.search, location.pathname);
   invoiceScreen.loadoutHook = true;   // resetContract honours { keepLoadout } (M24)
+  /* M31: the sheet's 'keep the tools on the truck' box is a VIEW of the shell key the pause
+   * card's box writes, and vice versa — one answer, two places to give it (M24 gap 4). */
+  invoiceScreen.keepLoadoutDefault = () => !!shell.keepLoadout;
+  invoiceScreen.onKeepLoadout = (v) => { shell.keepLoadout = !!v; persist(); pauseScreen.refresh(); };
   const strapLines = new StrapLines(world.scene, straps, registry);
 
   /* §13.4's "compact job-start screen". It does NOT pause the clock — the world behind it
@@ -1013,9 +1024,14 @@ async function boot() {
      * to click.) A pad player gets no lock they did not ask for. */
     if (input.activeDevice[0] === 'kbm') input.requestPointerLock();
   };
-  // §21.2 "a retry keeps settings": the same unwind the settlement sheet's replay uses.
-  pauseScreen.onRestart = () => {
-    resetContract();
+  /* §21.2 "a retry keeps settings [and optionally preserves loadout]": the same unwind the
+   * settlement sheet's replay uses — and since M31 the same OPTION too. The card's box reads
+   * and writes the one shell key the sheet's box does, so a player who ticked it at the last
+   * settlement does not lose the truck's tools to a pause-card restart (M24 gap 4). */
+  pauseScreen.keepLoadout = () => !!shell.keepLoadout;
+  pauseScreen.onKeepLoadout = (v) => { shell.keepLoadout = !!v; persist(); };
+  pauseScreen.onRestart = (opts = {}) => {
+    resetContract({ keepLoadout: opts.keepLoadout != null ? !!opts.keepLoadout : !!shell.keepLoadout });
     game.setPaused(false);
     hud.notice('new contract', 'good');
   };
@@ -1140,6 +1156,21 @@ async function boot() {
        * (haptics.js `enabled`), so there is nothing to push — but unticking it must also stop a
        * §10.3 creak already repeating, which the layer's own frame() does on the next tick. */
       if (Object.prototype.hasOwnProperty.call(shellPatch, 'rumble')) shell.rumble = !!shellPatch.rumble;
+      /* §21.2's reveal (M31): the row is half the answer and the PAGE rule is the other half —
+       * `?reveal=off`, and the harness's scratch page, still say no however the box is ticked
+       * (invoiceScreen.js revealEnabledWith). Recomputed rather than assigned, so the two
+       * halves can never drift apart. */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'invoiceReveal')) {
+        shell.invoiceReveal = !!shellPatch.invoiceReveal;
+        invoiceScreen.revealEnabled = revealEnabledWith(shell.invoiceReveal, location.search, location.pathname);
+      }
+      /* §21.2 "optionally preserves loadout" (M31): the tick both restart buttons read. Its
+       * consumers are the two boxes — the pause card's, redrawn here, and the settlement
+       * sheet's, which reads the key when the sheet is built — and resetContract itself. */
+      if (Object.prototype.hasOwnProperty.call(shellPatch, 'keepLoadout')) {
+        shell.keepLoadout = !!shellPatch.keepLoadout;
+        pauseScreen.refresh();
+      }
       /* §21.4 Cognition / Vision (M19): the three switches are booleans, pushed together to
        * their consumers by applyAccessibility below — every HUD, <body> and the cards, the
        * interaction system; the stall hint reads shell.hints itself. */
@@ -1161,7 +1192,9 @@ async function boot() {
     reset() {
       // M16: 'Defaults' restores the OS reading for the shake switch, not a bare true.
       // M28: and for the pad-rumble switch, which follows the same reading.
-      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion });
+      // M31: and for the invoice reveal, the third one that does — and it clears keepLoadout
+      // (in SHELL_DEFAULTS as false), so a tick from a previous session does not outlive it.
+      this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion, rumble: !reducedMotion, invoiceReveal: !reducedMotion });
     },
     /* §21.4 "full remapping" (Phase 11 build-side M18): the Controls group. The live Input
      * OWNS the table (rebind validates through bindingConflicts and installs only a clean
@@ -1705,6 +1738,13 @@ async function boot() {
       nameOf: wordsFor, doorLabel: (id) => { const d = doors.doorById(id); return d ? d.label : String(id); },
       seatOf: seatOfPlayer, contractId: game.state.contractId,
     });
+    /* §13.4 / §21.2 (M31): the brief's goal line is "beat your best", and the best was just
+     * decided. briefFacts() is pure and reads bestInvoice, so re-feeding the card here is the
+     * whole fix for M24 gap 5 — the goal line used to change only at the NEXT boot, because
+     * the title is read once and never re-shows in a session. Called from the two places the
+     * facts can change (here and at the end of resetContract), never per frame: it walks the
+     * manifest, the registry and the door table. */
+    title.setBrief(briefFacts());
     game.setPaused(true);
     input.releasePointerLock && input.releasePointerLock();
   }
@@ -1860,6 +1900,11 @@ async function boot() {
     physics.primeQueries();
     resetStallHint();          // once per RUN: the new contract gets its own first minute
     if (walkthrough) walkthrough.arm();   // M22: the cards too, unless this browser has seen them
+    /* M31: and the brief again, over the contract that now exists — the manifest was rebuilt,
+     * the doors were rehung and the route was reset above, so the facts are gathered from the
+     * new run rather than from the one that just ended. Same seed, so every fact but the goal
+     * line reads exactly as it did at boot (m38 F2). */
+    title.setBrief(briefFacts());
     game.setPhase(PHASES.PICKUP);
   }
 

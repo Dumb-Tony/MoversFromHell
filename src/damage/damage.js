@@ -38,6 +38,7 @@ import { DAMAGE, DOOR } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
 import { conditionLossFor, impactToleranceOf, breakInto } from '../tools/tools.js';
 import { billable, labelFor, surfaceRow, doorFrameTag } from './surfaces.js';
+import { chooseLeafRest } from '../player/interact.js';   // M32: ONE rest-strip chooser, shared with E
 
 /** §8.3's condition bands, as a lookup. Condition is 0..100 (§7.2). */
 export function bandFor(condition) {
@@ -73,6 +74,20 @@ export function propertyCost(impulse, share = 1) {
   const P = DAMAGE.property;
   const f = Number.isFinite(share) ? Math.max(0, Math.min(1, share)) : 1;
   return Math.max(0, (impulse - P.impulseThreshold * f) * P.costPerImpulse);
+}
+
+/**
+ * M31 — §8.4's "player attribution when reliable", as ONE id. `heldBy` is M14's shape (one
+ * entry per HAND, so a two-hand carry reads ['p0','p0']), and the recap's seat column wants
+ * the holder, not the count: the first entry that is somebody. Null for a thrown, dropped or
+ * shoved-by-nobody object — the blank column is a fact, not a gap.
+ * @param {{heldBy?: string[]}} w  an open damage window (item or property)
+ */
+export function holderOf(w) {
+  const held = w && Array.isArray(w.heldBy) ? w.heldBy : null;
+  if (!held) return null;
+  const id = held.find((x) => x != null);
+  return id == null ? null : id;
 }
 
 /** §15.1's item-damage line: replacement value scaled by how far the condition fell. */
@@ -186,7 +201,14 @@ export class DamageSystem {
         w.ageMs = 0;
       } else {
         if (w) this._closeWindow(e, w, simTimeMs);
-        w = { x: t.x, y: t.y, z: t.z, loss, peakSpeed: lost, ageMs: 0, startedAt: simTimeMs };
+        w = {
+          x: t.x, y: t.y, z: t.z, loss, peakSpeed: lost, ageMs: 0, startedAt: simTimeMs,
+          /* §8.4 "player attribution when reliable" (M31): who had hands on it at FIRST
+           * contact, the property window's own rule and M14's shape — one entry per hand, so
+           * a two-hand carry reads ['p0','p0'] and the first entry is the holder. Empty for a
+           * thrown or dropped object, which is the honest blank the recap prints. */
+          heldBy: (e.state.grips || []).map((g) => g.playerId).filter((id) => id != null),
+        };
         this._open.set(e.id, w);
       }
 
@@ -222,6 +244,16 @@ export class DamageSystem {
         this.bus.emit(EVENTS.PART_CHANGED, {
           entityId: e.id, part: 'fragments', action: 'broken', pieces: ids.length,
           position: { x: t.x, y: t.y, z: t.z },
+          /* M31: the same holder as the DAMAGE_APPLIED this breakage belongs to — it is the
+           * SAME window, still open in `_open` (the band was crossed in the block above), so
+           * the two events about one impact can never disagree about who was holding it. The
+           * recap builds no row for 'broken' (invoiceScreen classify() takes 'removed' only),
+           * but a run record with two PART_CHANGED shapes, one attributed and one not, is a
+           * seam for a later reader to trip over. */
+          // NOT inert: HAPTICS.PART_CHANGED routes to 'player', and haptics.js resolves that from
+      // e.playerId / e.by, so naming the holder here also puts the break in THEIR hand instead of
+      // broadcasting it. That is the intent (§8.4: the pulse belongs to whoever was holding it).
+      by: holderOf(this._open.get(e.id)),
         }, simTimeMs);
       }
     }
@@ -529,12 +561,16 @@ export class DamageSystem {
     return !!best && best.handle === target.handle;
   }
 
-  /** The hinges go (M23). The M11 unhang path, then the frame's line and the door's event. */
+  /** The hinges go (M23). The M11 unhang path, then the frame's line and the door's event.
+   *  M32: through interact.js chooseLeafRest, the SAME chooser E's removal uses — so a couch
+   *  shoved from the west no longer finds the leaf laid under its own leading corner
+   *  (KNOWN_ISSUES M23 "a forced leaf goes to M11's rest pose"). One path, not two. */
   _forceLeaf(leaf, w, simTimeMs) {
     const ls = leaf.state;
     ls.frameBent = false;
     const by = w.heldBy.length ? w.heldBy[0] : null;
-    this.registry.unhang(leaf, ls.rest || null);
+    const spot = chooseLeafRest(this.physics, leaf);
+    this.registry.unhang(leaf, spot.pose || ls.rest || null);
     w.frameState = 'forced';
     if (ls.hinge && ls.hinge.at && ls.hinge.normal) {
       w.at = { x: ls.hinge.at.x, y: ls.hinge.at.y, z: ls.hinge.at.z };
@@ -640,8 +676,9 @@ export class DamageSystem {
      * full. Still at most one line per surface: the room is gone after this one either way. */
     if (cost + 0.005 < raw || room - cost <= 0.005) line.capped = true;
     if (ledger) lines.push(line);
-    // The SAME event the item ledger uses; every listener branches on `category`.
-    if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, { ...line, position: line.at }, simTimeMs);
+    // The SAME event the item ledger uses; every listener branches on `category`. `by` (M31)
+    // is heldBy's first entry — one key for "who", whatever the category (see _closeWindow).
+    if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, { ...line, position: line.at, by: holderOf(w) }, simTimeMs);
   }
 
   /** M30: a window's own share of the hits that fed it — 1 for everything that was never
@@ -690,6 +727,7 @@ export class DamageSystem {
       normal: { x: Number(w.normal.x.toFixed(3)), y: Number(w.normal.y.toFixed(3)), z: Number(w.normal.z.toFixed(3)) },
       timeMs: w.startedAt,
       heldBy: w.heldBy.slice(),
+      by: holderOf(w),   // M31: the same "who" a real line carries, so a capped hit reads alike
     };
     if (row.kind) { payload.kind = row.kind; payload.doorId = w.doorId; }
     this.bus.emit(EVENTS.PROPERTY_CAPPED, payload, simTimeMs);
@@ -724,7 +762,12 @@ export class DamageSystem {
       timeMs: w.startedAt,
     };
     if (this.state && this.state.ledger) this.state.ledger.itemDamage.push(line);
-    if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, line, simTimeMs);
+    /* `by` (M31; §8.4 "player attribution when reliable", §15.3 "for humour and learning"):
+     * the holder at first contact, or null for a thrown one. On the EVENT and not on the
+     * ledger line, because the line is what the invoice reconciles (m8, m11 G13) and this is
+     * what the recap reads (invoiceScreen.js recapFrom) — the same key the door events carry,
+     * so every recap row that HAS an actor names one. */
+    if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, { ...line, by: holderOf(w) }, simTimeMs);
   }
 
   /** Close every open window — call when a phase ends, so nothing is left unbilled. */

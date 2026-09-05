@@ -43,6 +43,7 @@ import { disassemble, reassemble, currentDimensions, partStatus } from '../tools
 import { cargoAnchors, cabPoint, insideCargo, rampAnchorPoint, CARGO_BOX } from '../world/truck.js';
 import { STRAP_STATE } from '../cargo/straps.js';
 import { GROUP_PRESETS } from '../physics/world.js';
+import { doorRecordById, leafRestOptions } from '../world/house.js';   // M32: the rest-strip chooser
 
 /** What the reticle is over. One shape, so the HUD and the action share a description. */
 export const TARGET = Object.freeze({
@@ -445,25 +446,13 @@ export class InteractionSystem {
    *  capsules are colliders too). One place, so the prompt and Q agree; the reset's
    *  rehangAll never asks, because a reset teleports everything home. */
   _doorwayBlocked(entity) {
-    const st = entity.state;
-    const home = st.home;
-    const R = this.physics && this.physics.R;
-    const world = this.physics && this.physics.world;
-    if (!home || !R || !world || typeof world.intersectionsWithShape !== 'function') return false;
-    const L = DOOR.leaf, m = DOOR.occupancyMargin;
+    const home = entity.state.home;
+    if (!home) return false;
+    const L = DOOR.leaf;
     // The hung leaf stands axis-aligned: its yaw is a multiple of a quarter turn (leafPose).
     const alongZ = Math.abs(Math.sin(home.yaw)) < 0.5;   // local z (its length) along world z
-    const hx = (alongZ ? L.t : L.length) / 2 - m;
-    const hz = (alongZ ? L.length : L.t) / 2 - m;
-    const hy = L.height / 2 - m;
-    if (!(hx > 0 && hy > 0 && hz > 0)) return false;
-    let hit = false;
-    try {
-      const shape = new R.Cuboid(hx, hy, hz);
-      world.intersectionsWithShape({ x: home.x, y: home.y, z: home.z }, { x: 0, y: 0, z: 0, w: 1 }, shape,
-        () => { hit = true; return false; }, undefined, undefined, undefined, entity.body);
-    } catch (e) { hit = false; }
-    return hit;
+    const half = { x: (alongZ ? L.t : L.length) / 2, y: L.height / 2, z: (alongZ ? L.length : L.t) / 2 };
+    return boxBlocked(this.physics, home, half, entity.body);
   }
 
   /** …and what to call it. */
@@ -675,8 +664,10 @@ export class InteractionSystem {
           return this._say(`${part}: ${st.missing} of ${st.of} missing — find them first`);
         }
         if (this.bus) {
+          // `by` (M31): the mover who turned the screwdriver, so §15.3's recap can say WHO put
+          // the legs back — the same key, from the same source, as DOOR_STATE's (M11/M23).
           this.bus.emit(EVENTS.PART_CHANGED,
-            { entityId: e.id, part, action: 'restored', pieces: r.piecesRemoved, seconds: r.seconds }, this.now());
+            { entityId: e.id, part, action: 'restored', pieces: r.piecesRemoved, seconds: r.seconds, by: mover.id }, this.now());
         }
         /* §8.2 "unscrew and REATTACH" — and both directions are "preparation time" (M20).
          * Until M20 the legs came off for 60 s and went back for nothing, so the round trip
@@ -768,17 +759,24 @@ export class InteractionSystem {
      * land on the labour clock through the same chargeWorkMs hook a disassembly uses (M8;
      * §2.3), and DOOR_STATE 'removed' is on the bus for the run record and §15.2's review.
      * The opening is the full gap from this moment. Any other tool: nothing — _applyLabel
-     * promised nothing, so nothing is refused here. */
+     * promised nothing, so nothing is refused here.
+     * M32: WHICH strip it is laid on is chosen here rather than assumed — chooseLeafRest
+     * sweeps the door's candidates and takes the first clear one, so a mover or a box on the
+     * strip is no longer separated by the solver over the next few steps. */
     if (isLeaf(e) && e.state.hung) {
       if (tool.def.effect !== 'dimensions') return null;
-      this.registry.unhang(e, e.state.rest || null);
+      const spot = chooseLeafRest(this.physics, e);
+      this.registry.unhang(e, spot.pose || e.state.rest || null);
       const seconds = DOOR.removeSeconds * TOOLS.screwdriver.timeScale;
       if (this.bus) {
         this.bus.emit(EVENTS.DOOR_STATE,
           { doorId: e.state.doorId, entityId: e.id, state: 'removed', by: mover.id }, simTimeMs);
       }
       this.chargeWorkMs(seconds * 1000, { entityId: e.id, doorId: e.state.doorId, seconds });
-      return this._say(`door off its hinges — ${seconds.toFixed(0)} s of prep`);
+      // M32: the line grows a clause ONLY when the leaf went past every authored strip, so a
+      // removal onto candidate 0 or 1 reads exactly as M11's did (m19 D4).
+      const moved = spot.searched ? ` · ${DOOR_REST_MOVED_SAID}` : '';
+      return this._say(`door off its hinges — ${seconds.toFixed(0)} s of prep${moved}`);
     }
 
     switch (tool.def.effect) {
@@ -805,9 +803,13 @@ export class InteractionSystem {
         const r = disassemble(this.registry, e, part);
         if (!r) return null;
         if (this.bus) {
-          // `pieces` (M12): how many bodies the part became — the recorder counts them.
+          /* `pieces` (M12): how many bodies the part became — the recorder counts them.
+           * `by` (M31): WHOSE screwdriver. §15.3 wants the attribution "for humour and
+           * learning", and the settlement's recap had a blank seat column against 'legs off'
+           * because this emit named nobody (KNOWN_ISSUES Phase 26, M24 gap 2). The refusals
+           * above return before this line, so a `by` on the bus is always a part that moved. */
           this.bus.emit(EVENTS.PART_CHANGED,
-            { entityId: e.id, part, action: 'removed', dimensions: r.after, pieces: (r.pieces || []).length }, simTimeMs);
+            { entityId: e.id, part, action: 'removed', dimensions: r.after, pieces: (r.pieces || []).length, by: mover.id }, simTimeMs);
         }
         /* §8.2's tradeoff is "preparation time", and until Phase 11 M8 it was never paid:
          * disassemble() returned the authored seconds and this line threw them away, so
@@ -905,6 +907,74 @@ export const DOOR_BLOCKED_SAID = 'doorway blocked — the door stays off';
  *  gives every leaf at spawn ({doorId, hung, home, rest} — plain data, §22.4). */
 export function isLeaf(entity) {
   return !!(entity && entity.state && entity.state.doorId != null);
+}
+
+/** M32: the notice's suffix when every authored strip was taken and the leaf went further
+ *  along the wall. Appended to M11's line, so the removal still says what it cost. */
+export const DOOR_REST_MOVED_SAID = 'laid it down further along';
+
+/**
+ * THE OCCUPANCY PRIMITIVE (M23, generalised by M32). An axis-aligned box through the physics
+ * world: anything but `exceptBody` inside it blocks — a box, a piece, a tool, a MOVER (the
+ * capsules are colliders too). `half` is shrunk by DOOR.occupancyMargin here and nowhere else,
+ * so the floor a strip lies on, the jamb a hung leaf sits flush against and the header above it
+ * do not count as blocking. Never throws; a world without the query answers "clear", which is
+ * M11's behaviour.
+ * @param {object} physics  PhysicsWorld ({ R, world })
+ * @param {{x:number,y:number,z:number}} centre
+ * @param {{x:number,y:number,z:number}} half  UN-shrunk half-extents
+ */
+export function boxBlocked(physics, centre, half, exceptBody = null) {
+  const R = physics && physics.R;
+  const world = physics && physics.world;
+  if (!centre || !R || !world || typeof world.intersectionsWithShape !== 'function') return false;
+  const m = DOOR.occupancyMargin;
+  const hx = half.x - m, hy = half.y - m, hz = half.z - m;
+  if (!(hx > 0 && hy > 0 && hz > 0)) return false;
+  let hit = false;
+  try {
+    const shape = new R.Cuboid(hx, hy, hz);
+    world.intersectionsWithShape({ x: centre.x, y: centre.y, z: centre.z }, { x: 0, y: 0, z: 0, w: 1 }, shape,
+      () => { hit = true; return false; }, undefined, undefined, undefined, exceptBody);
+  } catch (e) { hit = false; }
+  return hit;
+}
+
+/**
+ * WHERE THIS LEAF GOES WHEN IT COMES OFF — ONE chooser, for both ways off (M32).
+ *
+ * KNOWN_ISSUES carried M11's "the rest spot is not checked at removal" and M23's "a forced leaf
+ * goes to M11's rest pose" as two entries because they were two call sites of one unchecked
+ * number. They are one call site now: E with the screwdriver (interact._applyTool) and a shove
+ * that tears the hinges out (damage._forceLeaf) both come here, so there is no second rest-pose
+ * path to drift.
+ *
+ * house.js leafRestOptions gives the authored strips in config order and then the search ladder
+ * (nearest rung first, out to DOOR.restSearchM); boxBlocked above says which are free; the first
+ * free one wins. Deterministic: config order, and a sweep whose answer is a function of the
+ * world's state alone (m14's soak equality). With nothing in the way the answer is candidate 0,
+ * which is M11's pose to the bit — m19 D4c and m30 D1 read the same numbers as before.
+ *
+ * With EVERY option taken (a room packed solid), candidate 0 is used anyway rather than the leaf
+ * being left in the doorway: §2.1's "the game should rarely say no" — the solver separating two
+ * bodies is a worse outcome than not removing the door, but refusing the verb is worse than both.
+ * The result is recorded on the leaf's own state as plain data (§22.4).
+ * @returns {{pose:object, id:string, index:number, searched:boolean, clear:boolean}}
+ */
+export function chooseLeafRest(physics, leaf) {
+  const st = leaf.state;
+  const authored = st.rest || null;
+  const door = doorRecordById(st.doorId);
+  if (!door || !door.leaf) return { pose: authored, id: 'authored', index: 0, searched: false, clear: false };
+  const options = leafRestOptions(door);
+  let choice = null;
+  for (const o of options) {
+    if (!boxBlocked(physics, o.pose, o.half, leaf.body)) { choice = { ...o, clear: true }; break; }
+  }
+  if (!choice) choice = { ...options[0], clear: false };
+  st.restAt = { x: choice.pose.x, y: choice.pose.y, z: choice.pose.z, rot: { ...choice.pose.rot } };
+  st.restChoice = { id: choice.id, index: choice.index, shift: choice.shift, searched: choice.searched, clear: choice.clear };
+  return { pose: choice.pose, id: choice.id, index: choice.index, searched: choice.searched, clear: choice.clear };
 }
 
 /** A short human name for an object. §21.2 needs to say WHICH thing, and `box_small_01#7`

@@ -394,8 +394,12 @@ export class ObjectRegistry {
   recoveryPose(entity) {
     const st = entity.state;
     const upright = { x: 0, y: 0, z: 0, w: 1 };
-    if (st.doorId && st.rest && !st.hung) {
-      return { x: st.rest.x, y: st.rest.y, z: st.rest.z, rot: rotationOf(st.rest), kind: 'fixture' };
+    if (st.doorId && (st.restAt || st.rest) && !st.hung) {
+      // restAt is the strip this leaf was actually laid on (M32's chooser); st.rest is the
+      // authored candidate. A leaf that had to take a fallback must return THERE, or recovery
+      // puts it back on the strip something was standing on.
+      const at = st.restAt || st.rest;
+      return { x: at.x, y: at.y, z: at.z, rot: rotationOf(at), kind: 'fixture' };
     }
     const link = st.partOf || st.fragmentOf;
     if (link) {

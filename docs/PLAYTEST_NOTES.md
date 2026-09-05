@@ -862,3 +862,29 @@ Grind a wall until it is paid for. Seven 6 m/s throws take the front wall to 400
 
 **Three things to feel for.** First, whether the split reads as fair. A box that clearly hit the header and only clipped the jamb should not produce two equal lines, and it does not — under 12 % of the step's impulse the graze folds into the bigger surface and you get one line, one notice, one mark, exactly as before. The measured fold in the fixture is 6.09 %. Second, whether the capped feedback reads as generous or as nagging. §8.4 asks for a notice at every impact; if 1500 ms feels like nagging while a couch is being shoved along a capped wall, that number is the one knob to turn, and turning it changes the notice, the sound, the mark and the pad together because they all read the same event. Third — and this is the thing to shout about if you ever see it — 'already at its maximum' should only ever appear on a surface you have genuinely paid 400.00 for. The very lightest taps, the ones that cost nothing at all, must stay silent; a review caught that backwards before it shipped and it is now asserted in both directions.
 
+
+## Phase 30 — Phase 11 build side, batch 15: contract-UX follow-through, and the world's edges — 2026-09-05
+
+### M31
+
+**Phase 30 (M31) — what a tester should now see, and what to watch for.**
+
+1. *The invoice says who.* Settle a job in co-op after each player has damaged something. Every 'What happened' row that had an actor names a seat: 'legs off — couch 3seat P1', 'front wall marked by box small P2', 'tv 55 broken P1'. Rows with no actor stay blank on purpose — a box that was thrown, a road event. Ask the tester whether the blanks read as 'nobody was holding it' or as 'the game does not know'; that is the one wording risk in the change. §15.3 forbids turning any of this into a score, so nothing is ranked and nothing is totalled per seat.
+2. *The brief keeps up.* Settle, then Run it again, then open the title card's job sheet (it does not re-show in a session, so read `M.title.brief` or restart the tab): the goal line reads 'beat your best: <profit>' and every other fact — payout, estimate, distance, the manifest profile, the doors, the couch's access note, the road's three events — is exactly what it was at boot. A worse run does not move the line. Measured this pass: −233.44 then −1962.65; the line stayed at −233.44.
+3. *The reveal has a switch.* Settings → Reading the screen → 'Invoice reveal'. Off, the settlement sheet is complete the instant it appears; on, the major lines land one per 700 ms and count up over 560 ms. It starts off if the machine asks for reduced motion. Worth asking a tester whether they turned it off and why — impatience and motion sensitivity are different answers and only one of them is about §21.4.
+4. *One box for the tools.* Tick 'keep the tools on the truck' on the invoice, then restart from the PAUSE card next time: the tools you left in the cargo box are still there. Both boxes are the same box, and the tick is remembered between sessions — a tester who ticks it once and forgets will start every later job with a loaded truck, which is exactly the confusion the label's 'remembered' is there to prevent. Watch for it anyway. While you are on that card, glance at the row itself: it should sit centred under the buttons and scale with the UI-scale slider like everything else on the card (its layout is set in JS rather than the stylesheet, so it is the one row that could drift if someone edits pauseScreen.js).
+
+### M32
+
+**Phase 30 (M32) — what to look at.**
+
+*Doors that lie down where there is room.* Take the kitchen door off (screwdriver, E) with something standing on the strip west of it — a box, or just stand there yourself — and watch where the leaf goes. Before M32 it was laid under whatever was there and the physics pushed the two apart over the next half second; now it goes to the strip past the latch jamb (about 1.5 m east) and the notice is the same one it always was. Put something on both of those and it goes further along the wall and tells you: 'laid it down further along'. The thing to judge is whether the further-away spot ever feels like the game hiding your door — it is up to 2 m from the jamb, and past 1.25 m Q no longer offers to hang it back until you pick it up and carry it over.
+
+*Shoving the door off, with the room in the way.* The couch shove that tears the hinges out now uses the same chooser, so the leaf never lands under the couch's leading corner. Try it with the kitchen half-full and see whether the door ending up somewhere else reads as sensible or as teleporting.
+
+*The front door on the porch.* Take the 32-inch leaf off. It used to end up on the grass, 170 mm outside the paving; it now lies on the porch, 330 mm inside the edge, and Q from where you stand still hangs it back. It is demo geometry on no route, so the only thing to judge is whether it looks placed rather than dropped.
+
+*A narrow window.* This is the one that needs a real browser, because the test harness cannot resize itself. Drag the window narrower than about 960 px during the first minute, while the third card is up ('now the rest — the panel says what is next'), and drive off so the route bar appears. The card should collapse to a single strip above the controls line and the route bar and the caption should sit above it, not through it. Numbers to compare against: at 960 px the card runs from x 10 to 440 and the bar from 320 to 640 — they overlap left-to-right and are separated only by the stacking, with 6 px between them. Below about 700 px the card's title wraps to two rows; it should still not touch anything. Also worth a look: at 800 px the controls line takes two rows, which raises everything above it — check the whole band still reads as one thing rather than as a pile.
+
+Nothing above changes a price, a damage number or a clearance. If the doorway feels different, that is not this change.
+

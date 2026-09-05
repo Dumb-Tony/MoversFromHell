@@ -47,6 +47,17 @@
  *      -> settings are shell state and survive a restart by construction (m31 R2 asserts it);
  *         the 'keep the tools on the truck' box hands { keepLoadout } to onReplay, which
  *         main.js resetContract honours for the tools inside the cargo box.
+ *
+ * Phase 11 build-side M31 finishes M24's own list of gaps (KNOWN_ISSUES Phase 26):
+ *   THE SEAT COLUMN     recapFrom read `by` from the start and only the doors carried one, so
+ *                       'legs off', the damage rows and the property rows were blank whoever
+ *                       did them. interact.js and damage.js name the actor now; a row with no
+ *                       actor (a thrown box, a road event) still prints nothing, on purpose.
+ *   THE REVEAL'S SWITCH revealEnabledWith() is the page rule AND the settings card's row
+ *                       (shell.invoiceReveal), with `?reveal=on|off` still winning over both
+ *                       for the screenshot path.
+ *   ONE KEEP-LOADOUT BOX  the sheet's box is a view of the shell key the pause card's Restart
+ *                       reads, so the two restarts agree and the choice is remembered.
  */
 
 import { Questionnaire, questionnaireHtml } from './questionnaire.js';
@@ -62,11 +73,36 @@ const HARNESS_PAGE = /_smoketest-\d+\.html$/i;
  */
 export function revealEnabledFrom(search = '', pathname = '', allowInHarness = DEBUG.invoiceRevealInHarness) {
   try {
+    const q = revealQuery(search);
+    if (q != null) return q;
+    return !HARNESS_PAGE.test(String(pathname || '')) || !!allowInHarness;
+  } catch (e) { return false; }
+}
+
+/** `?reveal=on|1` -> true, `?reveal=off|0` -> false, anything else (and any failure) -> null. */
+function revealQuery(search) {
+  try {
     const q = new URLSearchParams(search || '').get('reveal');
     if (q === 'off' || q === '0') return false;
     if (q === 'on' || q === '1') return true;
-    return !HARNESS_PAGE.test(String(pathname || '')) || !!allowInHarness;
-  } catch (e) { return false; }
+    return null;
+  } catch (e) { return null; }
+}
+
+/**
+ * THE SWITCH, whole (M31; §21.4 Motion "a switch for anything that animates"). The page rule
+ * above says whether this PAGE may animate; `shellOn` is the settings card's row (the shell
+ * key `invoiceReveal`, whose own default follows prefers-reduced-motion — save.js). Both must
+ * agree, EXCEPT that an explicit `?reveal=on|off` still wins over both, because that parameter
+ * is the screenshot path and a screenshot script cannot tick a box.
+ *
+ * Pure, so the suite can pin the whole table without a reboot (m38 F3).
+ * @param {boolean} shellOn  shell.invoiceReveal
+ */
+export function revealEnabledWith(shellOn, search = '', pathname = '', allowInHarness = DEBUG.invoiceRevealInHarness) {
+  const q = revealQuery(search);
+  if (q != null) return q;
+  return revealEnabledFrom(search, pathname, allowInHarness) && !!shellOn;
 }
 
 /** (n < 0 ? '−' : '') + |n| to the cent — the sheet's one number format. */
@@ -155,6 +191,8 @@ function classify(e, h) {
       if (e.state === 'forced') return { kind: 'door', text: `door forced — ${h.doorLabel(e.doorId)}`, seat: h.seat(e.by) };
       return null;
     case EVENTS.PART_CHANGED:
+      // M31: interact.js now names the mover who turned the screwdriver, so `by` is a seat and
+      // no longer the blank column M24 recorded (KNOWN_ISSUES Phase 26, gap 2).
       if (e.action === 'removed') return { kind: 'part', text: `${e.part} off — ${h.nameOf(e.entityId)}`, seat: h.seat(e.by) };
       return null;
     case EVENTS.GRIP_ENDED:
@@ -167,7 +205,7 @@ function classify(e, h) {
          * PER HAND, so a two-hand shove reads ['p0','p0'] — the seat column wants the first
          * holder, not the count. Empty (a thrown object) stays the blank column M24 recorded
          * as an open item: nobody was carrying it, so no seat is named. */
-        const by = Array.isArray(e.heldBy) ? e.heldBy.find((id) => id != null) : null;
+        const by = e.by != null ? e.by : (Array.isArray(e.heldBy) ? e.heldBy.find((id) => id != null) : null);
         /* M30: the ONE line on which a surface reached DAMAGE.property.maxChargePerSurface —
          * its charge was trimmed to the room that was left, and every later hit on it is
          * free (EVENTS.PROPERTY_CAPPED, no line). Exactly one line per surface is ever
@@ -175,7 +213,11 @@ function classify(e, h) {
         return { kind: 'property', text: `${e.location || e.surfaceId || 'a surface'} marked by ${h.nameOf(e.entityId)} — ${money(cost)}${e.capped ? ' (capped)' : ''}`,
                  seat: by == null ? -1 : h.seat(by), rank: cost };
       }
-      return { kind: 'damage', text: `${h.nameOf(e.entityId)} ${e.band || 'damaged'} — ${money(cost)}`, seat: -1, rank: cost };
+      /* M31: an ITEM's damage names its holder too, from the same `by` (damage.js holderOf —
+       * heldBy at the window's first contact). A drop, a throw and a shelf collapse have
+       * nobody's hands on them and keep the blank column: that is the honest answer, not a
+       * missing one, and §15.3 forbids turning either into a score. */
+      return { kind: 'damage', text: `${h.nameOf(e.entityId)} ${e.band || 'damaged'} — ${money(cost)}`, seat: h.seat(e.by), rank: cost };
     }
     case EVENTS.ROAD_FORCE:
       return { kind: 'road', text: `${e.label || e.roadType || 'road event'} — cargo rode it out`, seat: -1 };
@@ -216,6 +258,19 @@ export class InvoiceScreen {
     /** main.js sets this true when resetContract honours { keepLoadout }; false disables
      *  the box and its title says why (the brief's honest fallback). */
     this.loadoutHook = false;
+    /* M31: the box is the SHELL KEY's view, not its own state — the pause card's Restart has
+     * the same box against the same key, so the two restarts cannot disagree about the tools
+     * (KNOWN_ISSUES Phase 26, M24 gap 4). `keepLoadoutDefault` reads the key when the sheet is
+     * built; `onKeepLoadout` writes it when a player ticks the box. Both default to the M24
+     * behaviour — a box that starts unticked and remembers nothing — so an InvoiceScreen built
+     * without a shell (a suite's) is exactly what it was. */
+    this.keepLoadoutDefault = () => false;
+    this.onKeepLoadout = null;
+    this.el.addEventListener('change', (e) => {
+      const box = e.target;
+      if (!box || !box.classList || !box.classList.contains('keep-loadout')) return;
+      if (this.onKeepLoadout) this.onKeepLoadout(!!box.checked);
+    });
 
     // The screen is the one place the UI layer accepts input, so it opts back in — #ui is
     // pointer-events:none precisely so a panel can never swallow a grip (§21.1).
@@ -413,8 +468,9 @@ export class InvoiceScreen {
     /* §21.2 "optionally preserves loadout" (M24): the tools that are in the cargo box stay
      * there for the next run. Disabled, and the title says why, when main.js has not wired
      * the hook — never a box that does nothing. */
+    const keepTicked = !!(this.loadoutHook && this.keepLoadoutDefault());
     const keepBox = this.loadoutHook
-      ? '<input type="checkbox" class="keep-loadout">'
+      ? `<input type="checkbox" class="keep-loadout"${keepTicked ? ' checked' : ''}>`
       : '<input type="checkbox" class="keep-loadout" disabled title="keep loadout is not wired: resetContract puts every tool back at its rack">';
 
     const loss = invoice.profit < 0;
@@ -454,7 +510,7 @@ export class InvoiceScreen {
           <div class="stats">${statRows}</div>
           ${telemetry}
 
-          <label class="keep">${keepBox} keep the tools on the truck for the next run</label>
+          <label class="keep">${keepBox} keep the tools on the truck for the next run — remembered, and the pause card's Restart reads the same box</label>
           <button class="replay" data-act="replay">Run it again</button>
           <div class="foot">${loss
             ? 'A loss still completes the job (§15.2). Nothing here is a failure state.'

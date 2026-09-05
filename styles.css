@@ -36,6 +36,15 @@
      the 1.6× the settings range allows. It is 1 at every size a player can pick here (measured),
      so the shipping layout is untouched by its existence. */
   --help-squeeze: 1;
+  /* …and the THIRD term in that stack (M32). --help-lift says how much taller the help line
+     got; --band-lift says how high the first-minute BADGE reaches under a narrow window — its
+     measured TOP above the window's bottom, plus WALKTHROUGH.bandGapPx. It is 0 at every width
+     above WALKTHROUGH.narrowPx and whenever no card is up, and the boxes over the help line
+     take the LARGER of it and their own offset, so the shipping 1262 px layout is bit-for-bit
+     the one Phase 15 measured (m36 S2); under it the card becomes one row above the help line
+     and the route bar and the caption step over it instead of into it. Written by
+     src/ui/walkthrough.js — one forced layout when the card changes, never per frame. */
+  --band-lift: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -128,7 +137,12 @@ html, body {
      came off, the line wrapped to two rows at 1.0× in a 631 px box (measured). max-content asks
      for the whole line and max-width is what then wraps it, at the window's edge. */
   width: max-content;
-  max-width: calc(100vw - 20px);
+  /* 100% of #ui, not 100vw (M32). They are the same number in a real window — #ui is
+     position:fixed inset:0 — and they differ exactly when a suite narrows #ui to emulate one,
+     which is the only way this harness can measure a narrow band at all. Reading the
+     containing block keeps the emulation honest instead of leaving the help line at full
+     viewport width inside an 800 px band. */
+  max-width: calc(100% - 20px);
   padding: 6px 14px;
   background: rgba(23, 21, 34, 0.72);
   border: 1px solid var(--line);
@@ -298,7 +312,10 @@ html, body {
    itself keeps its px: a 320 px progress bar is a length, not type (SETTINGS.textSize.pxAllowed). */
 .route-bar {
   position: absolute;
-  left: 50%; bottom: calc(42px * var(--ts) + var(--help-lift, 0px));
+  /* max(), not a sum (M32): --band-lift is the height the badge needs cleared, measured from
+     the window's bottom, and it is 0 whenever there is no badge — so this is bit-for-bit the
+     Phase 15 offset at every width above WALKTHROUGH.narrowPx (m36 S2). */
+  left: 50%; bottom: max(calc(42px * var(--ts) + var(--help-lift, 0px)), var(--band-lift, 0px));
   transform: translateX(-50%);
   width: 320px; height: 6px;
   background: rgba(23,21,34,.8);
@@ -327,7 +344,9 @@ html, body {
    below sets display, and an author `display` beats the UA stylesheet's `[hidden]`. */
 .caption {
   position: absolute;
-  left: 50%; bottom: calc(72px * var(--ts) + var(--help-lift, 0px));
+  /* …and 30 px above the route bar, which is the gap it has always kept (72 − 42), whichever
+     of the two terms wins (M32). */
+  left: 50%; bottom: max(calc(72px * var(--ts) + var(--help-lift, 0px)), calc(var(--band-lift, 0px) + 30px * var(--ts)));
   transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 11px;
@@ -1088,7 +1107,9 @@ body.coop #build-stamp { opacity: .45; }
      HORIZONTALLY at every text size and its height stops mattering. Without it a 1.6× card is
      499 px wide and 134 px tall, and a two-line help line under it leaves 124 px — measured, it
      reached 10 px into the band. 312 px is unchanged at 1.0× (m29 W1's rects). */
-  width: min(calc(312px * var(--ts)), calc(33vw - 12px));
+  /* 33% of #ui, not 33vw (M32) — identical in a real window, and the difference is exactly
+     what lets a suite emulate a narrow band by narrowing #ui (m39 E4). */
+  width: min(calc(312px * var(--ts)), calc(33% - 12px));
   padding: 7px 10px 8px;
   background: rgba(23,21,34,.88);
   border: 1px solid var(--line);
@@ -1142,8 +1163,31 @@ body.coop #build-stamp { opacity: .45; }
   text-align: center;
   vertical-align: baseline;
 }
+/* THE BADGE FORM (Phase 11 build-side M32; §21.4 Vision "a narrow window is a scaled UI").
+   Under WALKTHROUGH.narrowPx the card and the centred boxes below it stop competing for the
+   same band: the card gives up its body line and becomes ONE row — the step count, the device
+   chip, the ✕ and the title, in that order — and everything above the help line rises by
+   --band-lift, which is this box's measured height plus WALKTHROUGH.bandGapPx. The class is
+   put on by walkthrough.js from #ui's own width, NOT by a @media query: a media query reads
+   the viewport, and the harness cannot move the viewport, so the rule would ship unmeasured
+   for a second phase. The title still wraps rather than clipping — one row at the 800 px this
+   is measured at, two below ~700 px, and --band-lift follows either way. */
+#walkthrough.narrow {
+  width: min(calc(430px * var(--ts)), calc(60% - 20px));
+  padding: 4px 9px 5px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+#walkthrough.narrow .wt-head { margin-bottom: 0; flex: none; align-items: baseline; }
+#walkthrough.narrow .wt-head .wt-skip { margin-left: 0; }
+#walkthrough.narrow .wt-title {
+  flex: 1 1 auto; min-width: 0;
+  font: 700 calc(12px * var(--ts))/1.35 Quicksand, system-ui, sans-serif;
+}
+#walkthrough.narrow .wt-text { display: none; }
+
 /* High contrast (M19's rule): opaque, 2 px with 1 px less padding, nothing dimmed. */
 .hc #walkthrough { background: var(--panel); border-width: 2px; border-left-width: 3px; padding: 6px 9px 7px; }
+.hc #walkthrough.narrow { padding: 3px 8px 4px; }
 .hc #walkthrough .wt-text, .hc #walkthrough .wt-dev, .hc #walkthrough .wt-skip { opacity: 1; }
 /* The two chips in the head row set its height: their 2 px border is paired with a −1 px
    vertical margin so the row, and the card's rect, do not grow (m29 W1z2: < 0.5 px). */

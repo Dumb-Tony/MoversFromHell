@@ -743,6 +743,38 @@ lines.push('--- M24. the reveal is off here: the sheet is final the instant sett
        return !!s && !!f && !!r && !!(s.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) &&
          !!(f.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) && !!f.closest('.sheet'); })());
 }
+/* ── M31. R2's key list, at the EVENT level: DAMAGE_APPLIED names who was holding it ──────
+ * Phase 11 build-side M31 (§8.4 "player attribution when reliable", §15.3, §21.2's recap).
+ * M24's recap read `by` and only the door events carried one, so 'legs off', the damage rows
+ * and the property rows were blank whoever did them (KNOWN_ISSUES Phase 26, gap 2). The key is
+ * ADDED, never renamed: every assertion above about counters, the ledger and the round-trip is
+ * unchanged, and a run whose damage was a FALL — this suite's, the TV from 1.5 m — reads `by`
+ * null, which is the honest blank the recap still prints. m38 F1 has the held case and the
+ * seat column; here only that the record carries the key and survives JSON. */
+lines.push('--- M31. the run record\'s DAMAGE_APPLIED carries `by` (null for a fall) ---');
+{
+  // A fresh run of its own: the sheet is up from M24 above, and a paused game records nothing.
+  if (M.invoiceScreen.visible) { M.invoiceScreen.onReplay(); frames(5); drainNotices(); }
+  const e0 = recorder.events.length;
+  dropTv();
+  damage.flush(game.clock.simTimeMs);
+  const dmg = recorder.events.slice(e0).filter((e) => e.type === EVENTS.DAMAGE_APPLIED);
+  ok('M31-R2m the run has damage events to look at', dmg.length >= 1, `${dmg.length}`);
+  ok('M31-R2n every DAMAGE_APPLIED carries the `by` key', dmg.every((e) => 'by' in e),
+     `${dmg.filter((e) => !('by' in e)).length} without it`);
+  ok('M31-R2o …a string id or null, never undefined (§22.4 plain data)',
+     dmg.every((e) => e.by === null || typeof e.by === 'string'), JSON.stringify(dmg.map((e) => e.by)));
+  ok('M31-R2p …and this suite\'s falls name nobody (nothing was in anyone\'s hands)',
+     dmg.every((e) => e.by === null), JSON.stringify(dmg.map((e) => e.by)));
+  const rt = JSON.parse(JSON.stringify(M.runSummary()));
+  const rtDmg = (rt.events || []).filter((e) => e.type === EVENTS.DAMAGE_APPLIED);
+  ok('M31-R2q the record JSON round-trips with the key intact (null survives)',
+     rtDmg.length >= dmg.length && rtDmg.every((e) => 'by' in e && e.by === null),
+     `${rtDmg.length} round-tripped, ${dmg.length} since the drop`);
+  ok('M31-R2r the counters are unchanged by the added key (damageEvents still the ledger\'s)',
+     counters().damageEvents === game.state.ledger.itemDamage.length,
+     `${counters().damageEvents} vs ${game.state.ledger.itemDamage.length}`);
+}
 emit('perf...');
 
 /* ── P. the recorder inside the fixed step ────────────────────────────────── */

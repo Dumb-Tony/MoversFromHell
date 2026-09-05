@@ -37,7 +37,7 @@
  *   lay    'wall' | 'room'   how a REMOVED leaf is laid flat beside the doorway (leafRestPose)
  */
 
-import { DOOR } from '../config.js';
+import { DOOR, RECOVERY } from '../config.js';
 
 /** The house shell. Phases 0-1 built this as a single room behind the aperture wall and
  *  m1 still asserts against its bounds; Phase 5 subdivides it rather than replacing it.
@@ -250,7 +250,34 @@ export function doorRecords(apertures = [], doors = INTERIOR_DOORS) {
     wallT: ROOM.wallT, leaf: a.leaf || null, label: a.label || a.id,
   }));
   const inner = doors.map((d) => ({ ...d, wallT: PARTITION_T, leaf: d.leaf || null, label: d.label || d.id }));
-  return [...front, ...inner];
+  const all = [...front, ...inner];
+  for (const d of all) KNOWN_DOORS.set(d.id, d);
+  return all;
+}
+
+/* THE RECORDS THIS MODULE HAS PRODUCED, keyed by id (M32).
+ *
+ * A leaf's serializable state carries its doorId and its two poses and NOTHING ELSE (§22.4) —
+ * which was enough while there was one authored rest spot, and is not enough to CHOOSE one.
+ * The front wall's openings live in scene.js APERTURES and scene.js imports this file, so this
+ * file cannot import them and every function here takes them as an argument; making
+ * interact.js or damage.js import the renderer to get at them would be the worse trade.
+ *
+ * So doorRecords() remembers what it folded. main.js calls leafDoors(world.apertures) at boot,
+ * before any leaf can come off, and every suite that touches a door calls doorById(id,
+ * APERTURES) — so by the time a chooser asks, the record is here. It is a cache of PURE DATA
+ * keyed by a stable string id, never game state; a caller that misses falls back to the
+ * interior table and then to the leaf's own authored `rest`. */
+const KNOWN_DOORS = new Map();
+
+/** The door record for an id, from whatever doorRecords() has been given this session
+ *  (see KNOWN_DOORS above), falling back to the interior table. Null if neither knows it. */
+export function doorRecordById(id, doors = INTERIOR_DOORS) {
+  const known = KNOWN_DOORS.get(id);
+  if (known) return known;
+  const d = doors.find((r) => r.id === id);
+  // The same fold doorRecords() applies, so a fallback record is never missing wallT.
+  return d ? { ...d, wallT: PARTITION_T, leaf: d.leaf || null, label: d.label || d.id } : null;
 }
 
 export function doorById(id, apertures = [], doors = INTERIOR_DOORS) {
@@ -328,25 +355,130 @@ export function leafPose(door, floorY = 0) {
  * face. `lay: 'wall'` runs its 2.00 m height along the wall; `lay: 'room'` runs its 0.80 m
  * length along the wall and its height out into the room. Which one is authored per door
  * by what the room has space for (INTERIOR_DOORS, scene.js APERTURES).
+ * SINCE M32 THIS IS CANDIDATE 0 and nothing more: config DOOR.restCandidates lists the strips
+ * a door's leaf may go to in priority order, the first of which is this one, and the chooser
+ * (interact.js chooseLeafRest) sweeps them and takes the first that is clear. For the three
+ * interior leaves candidate 0 is the pose M11 authored, to the bit; interior32's is now on the
+ * porch instead of the lawn (config DOOR.restCandidates, WORLD.porchBounds).
  * The rotation is given as a quaternion: with the height along world x it is a quarter
  * turn about z (local x → up, local y → −x); with the height along world z it is the cyclic
  * axes swap x→y→z→x, a third of a turn about (1,1,1).
  * @returns {{x:number, y:number, z:number, rot:{x:number,y:number,z:number,w:number}, alongLen:number, acrossLen:number}}
  */
 export function leafRestPose(door, floorY = 0) {
+  return leafRestPoseOn(door, restCandidatesFor(door)[0], floorY);
+}
+
+/** The default candidate — M11's authored strip, and what every door gets when config names
+ *  no list for it: beside the HINGE jamb, on the side the door swings into, laid the way the
+ *  door record says (`leaf.lay`), hard against DOOR.restPad. */
+function defaultCandidate(door) {
+  return { id: 'authored', side: 'hinge', lay: door.leaf.lay, out: 'swing', shift: 0 };
+}
+
+/** The ordered candidate strips for a door (config DOOR.restCandidates), or M11's single
+ *  authored one. The order IS the priority (m14 soak). Object.freeze is SHALLOW, so the table's
+ *  arrays and descriptors are mutable: nothing here writes through them (every read spreads into
+ *  a new object) and nothing else may either. */
+export function restCandidatesFor(door, table = DOOR.restCandidates) {
+  const list = table && door && table[door.id];
+  return (list && list.length) ? list : [defaultCandidate(door)];
+}
+
+/**
+ * A REST pose from a candidate descriptor (M32). The same arithmetic leafRestPose has always
+ * used, with the three things a candidate may vary made explicit:
+ *   side  which jamb the strip starts from   dir = ±leaf.hinge along the wall's own axis
+ *   lay   'wall' runs the 2.00 m height along the wall, 'room' runs the 0.80 m length along it
+ *   out   'swing' is the side the door opens into (M11's only option); 'back' is the other face
+ * plus `shift`, further along the wall past DOOR.restPad. Pure data in, pure data out.
+ * @returns {{x:number, y:number, z:number, rot:{x:number,y:number,z:number,w:number}, alongLen:number, acrossLen:number}}
+ */
+export function leafRestPoseOn(door, cand, floorY = 0) {
   const L = door.leaf, t = L.t, len = DOOR.leaf.length, H = DOOR.leaf.height, pad = DOOR.restPad;
-  const alongLen = L.lay === 'wall' ? H : len;           // extent along the wall
-  const acrossLen = L.lay === 'wall' ? len : H;          // extent out into the room
-  const jamb = door.centre + L.hinge * door.gap / 2;
-  const along = jamb + L.hinge * (pad + alongLen / 2);
-  const across = door.at + L.swing * (door.wallT / 2 + pad + acrossLen / 2);
+  const c = cand || defaultCandidate(door);
+  const lay = c.lay || L.lay;
+  const dir = c.side === 'latch' ? -L.hinge : L.hinge;
+  const out = c.out === 'back' ? -L.swing : L.swing;
+  const alongLen = lay === 'wall' ? H : len;             // extent along the wall
+  const acrossLen = lay === 'wall' ? len : H;            // extent out into the room
+  const jamb = door.centre + dir * door.gap / 2;
+  const along = jamb + dir * (pad + alongLen / 2 + (c.shift || 0));
+  const across = door.at + out * (door.wallT / 2 + pad + acrossLen / 2);
   const x = door.axis === 'x' ? along : across;
   const z = door.axis === 'x' ? across : along;
-  const heightAlongX = (door.axis === 'x') === (L.lay === 'wall');
+  const heightAlongX = (door.axis === 'x') === (lay === 'wall');
   const rot = heightAlongX
     ? { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }
     : { x: 0.5, y: 0.5, z: 0.5, w: 0.5 };
   return { x, y: floorY + t / 2, z, rot, alongLen, acrossLen };
+}
+
+/**
+ * EVERY PLACE THE CHOOSER MAY TRY, in the order it tries them (M32; §8.2, §7.3, §26.6).
+ *
+ * The authored candidates first, in config order — so with nothing in the way the answer is
+ * candidate 0, which is M11's pose to the bit. Then the SEARCH: the same candidates displaced
+ * further along the wall, a rung of DOOR.restSearchStepM at a time out to DOOR.restSearchM,
+ * NEAREST RUNG FIRST — "laid it down further along" should be as near the door as the floor
+ * allows. Deterministic and free of physics: the caller decides what "clear" means.
+ *
+ * `half` is the pose's AXIS-ALIGNED half-extents, which is all a shape cast needs because a
+ * leaf lying flat is axis-aligned (the rot above is a quarter turn about a world axis).
+ * @returns {{id:string, index:number, shift:number, searched:boolean, pose:object, half:{x:number,y:number,z:number}}[]}
+ */
+export function leafRestOptions(door, floorY = 0, table = DOOR.restCandidates) {
+  const cands = restCandidatesFor(door, table);
+  const t = door.leaf.t;
+  const out = [];
+  const push = (cand, index, extra, searched) => {
+    const c = extra ? { ...cand, shift: (cand.shift || 0) + extra } : cand;
+    const pose = leafRestPoseOn(door, c, floorY);
+    const ex = door.axis === 'x' ? pose.alongLen / 2 : pose.acrossLen / 2;
+    const ez = door.axis === 'x' ? pose.acrossLen / 2 : pose.alongLen / 2;
+    out.push({ id: cand.id || `cand${index}`, index, shift: c.shift || 0, searched,
+               pose, half: { x: ex, y: t / 2, z: ez } });
+  };
+  cands.forEach((c, i) => push(c, i, 0, false));
+  const rungs = Math.max(0, Math.floor(DOOR.restSearchM / DOOR.restSearchStepM + 1e-9));
+  for (let r = 1; r <= rungs; r++) {
+    const extra = Number((r * DOOR.restSearchStepM).toFixed(6));
+    cands.forEach((c, i) => push(c, i, extra, true));
+  }
+  return out;
+}
+
+/**
+ * §24.4's content validator for those strips: every AUTHORED candidate of every leaf-bearing
+ * door must sit OUTSIDE every doorway's clear box (m13 B1's predicate — a strip that reaches
+ * into an opening un-does the removal it was meant to complete) and INSIDE RECOVERY.bounds
+ * (M15 — a strip off the plot is a soft lock). Pure; returns the problems as strings so a boot
+ * check and a suite can share one definition (m39 E0).
+ * @param {object[]} apertures  scene.js APERTURES
+ */
+export function restCandidateProblems(apertures = [], doors = INTERIOR_DOORS, bounds = RECOVERY.bounds) {
+  const problems = [];
+  const all = doorRecords(apertures, doors);
+  // m13 B1's clear box, from config so the validator and the suite cannot drift apart.
+  const CB = DOOR.clearBox;
+  const boxes = all.map((d) => {
+    const w = (d.gap - 2 * CB.jambInsetM) / 2;
+    return d.axis === 'x'
+      ? { id: d.id, minX: d.centre - w, maxX: d.centre + w, minZ: d.at - CB.crossM, maxZ: d.at + CB.crossM }
+      : { id: d.id, minX: d.at - CB.crossM, maxX: d.at + CB.crossM, minZ: d.centre - w, maxZ: d.centre + w };
+  });
+  const hits = (a, b) => a.minX < b.maxX && b.minX < a.maxX && a.minZ < b.maxZ && b.minZ < a.maxZ;
+  for (const d of all.filter((r) => !!r.leaf)) {
+    for (const o of leafRestOptions(d).filter((x) => !x.searched)) {
+      const a = { minX: o.pose.x - o.half.x, maxX: o.pose.x + o.half.x,
+                  minZ: o.pose.z - o.half.z, maxZ: o.pose.z + o.half.z };
+      for (const b of boxes) if (hits(a, b)) problems.push(`${d.id}/${o.id} reaches into ${b.id}'s clear box`);
+      if (a.minX < bounds.minX || a.maxX > bounds.maxX || a.minZ < bounds.minZ || a.maxZ > bounds.maxZ) {
+        problems.push(`${d.id}/${o.id} is outside RECOVERY.bounds`);
+      }
+    }
+  }
+  return problems;
 }
 
 /**
