@@ -571,7 +571,21 @@ export function disassemble(registry, entity, partName) {
  * says which are missing (partStatus). `force` is the contract reset's override: it gathers
  * the pieces from wherever they were lost, because a replay starts whole (§26.6).
  *
- * @returns {{restored, piecesRemoved}|null}
+ * M20: REATTACHING IS LABOUR TOO. §8.2 prices "preparation time" and a disassembly has two
+ * directions; until M20 the legs came off for 60 s and went back for nothing, so the round
+ * trip through a doorway was priced once (KNOWN_ISSUES 'Reattaching is free'). The returned
+ * `seconds` are the entry's own, scaled by TOOLS.screwdriver.timeScale exactly as
+ * disassemble() scales them, and BILLED by the interaction system through the same
+ * chargeWorkMs hook (m11 P2d). They are 0 when forced (a reset is not a player putting a
+ * part back) and 0 for an entry authored `reversible: false` — nothing is billed for what
+ * nobody may do. That entry is NOT refused here: the refusal is the PLAYER's, at the prompt
+ * (interact.js reads `reversible` off partStatus and Q says 'the legs cannot be put back'),
+ * because this function is also the reset's way back — main.js's boot-time unwind forces it
+ * and its replay reset calls it plain, and both must get the collider back whatever the
+ * entry says (m11 P2d). `reversible` rides on the return so any caller can refuse the way
+ * the prompt does. Every shipped entry is reversible.
+ *
+ * @returns {{restored, piecesRemoved, seconds, reversible}|null}
  */
 export function reassemble(registry, entity, partName, { force = false } = {}) {
   const removed = entity.state.removedParts || [];
@@ -592,7 +606,11 @@ export function reassemble(registry, entity, partName, { force = false } = {}) {
   entity.state.removedParts = removed.filter((p) => p !== partName);
   entity.body.wakeUp();
   if (piecesRemoved && registry.physics && registry.physics.primeQueries) registry.physics.primeQueries();
-  return { restored: { ...d }, piecesRemoved };
+  return {
+    restored: { ...d }, piecesRemoved,
+    seconds: force || !status.reversible ? 0 : status.seconds,
+    reversible: status.reversible,
+  };
 }
 
 /** Current dimensions, which are the definition's unless something has been taken off. */
@@ -734,11 +752,18 @@ function spawnPieces(registry, parent, def, count, tag) {
  * how many are within PARTS.reattachRange, and which are not. The prompt's
  * 'find the legs (1 of 4 missing)' and reassemble()'s refusal both read this.
  *
- * @returns {{part, of, present, missing, ids, farIds, name}}
+ * M20: `reversible` and `seconds` come off the same disassembly entry — what putting the part
+ * back may do and what it costs (entry.seconds × TOOLS.screwdriver.timeScale, the number
+ * disassemble() charged for taking it off) — so the prompt, reassemble() and the notice read
+ * one record. An entry that cannot be found reads as reversible at no cost.
+ *
+ * @returns {{part, of, present, missing, ids, farIds, name, reversible, seconds}}
  */
 export function partStatus(registry, entity, partName) {
   const ids = ((entity.state.parts || {})[partName]) || [];
   const entry = (entity.def.disassembly || []).find((p) => p.part === partName);
+  const reversible = !entry || entry.reversible !== false;
+  const seconds = entry ? (entry.seconds || 0) * TOOLS.screwdriver.timeScale : 0;
   const of = ids.length || (entry && entry.piece ? entry.piece.count : 0);
   const c = entity.body.translation();
   let present = 0;
@@ -753,7 +778,8 @@ export function partStatus(registry, entity, partName) {
     else farIds.push(id);
   }
   return { part: partName, of, present, missing: of - present, ids, farIds,
-           name: entry && entry.piece ? entry.piece.name : partName };
+           name: entry && entry.piece ? entry.piece.name : partName,
+           reversible, seconds };
 }
 
 /** Every loose piece that belongs to `entity`: its detached parts' bodies and its fragments. */

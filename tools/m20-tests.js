@@ -239,7 +239,7 @@ eq('P0b baseline: no piece bodies before anything is taken apart', baselinePiece
   parkAt(legs2[0], PAD.x + 0.9, 0.05, PAD.z + 0.9);   // brought back within reach
   step(4);
   const d2 = interact.describe(me());
-  ok('P2i with the leg brought back the line reads "put the legs back on" again', d2.secondary === 'put the legs back on', `"${d2.secondary}"`);
+  ok('P2i with the leg brought back the line reads "put the legs back on" again', d2.secondary === 'put the legs back on — 60 s', `"${d2.secondary}"`);
   const restored = reassemble(registry, couch, 'legs');
   ok('P2j …and reassemble() succeeds: 4 pieces removed, 0.85 m, nothing missing',
      !!restored && restored.piecesRemoved === 4 && Math.abs(couch.collider.halfExtents().y * 2 - 0.85) < 1e-6 &&

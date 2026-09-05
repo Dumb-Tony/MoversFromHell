@@ -30,6 +30,15 @@
  * shake existed (the m13/m15 shots). `shakeEnabled` (the §26.5 switch, from the settings
  * store) makes nudge() a no-op and clears whatever was in flight.
  *
+ * THE SHAKE MOVES WHAT YOU SEE, NEVER WHERE THE RAY STARTS (Phase 11 build-side M20; §4.4
+ * "what you see is what you aim"). The boom solve is remembered in `_baseEye` before the
+ * offset lands on camera.position, and `unshakenEye()` hands it to GripSystem.aimOrigin(),
+ * so the grab/interaction ray keeps its origin through a jolt while the frame wobbles
+ * around it. M16 recorded the alternative as a known issue: aim() read camera.position, so
+ * for up to settleMs after a nudge a grab could start up to maxOffset (0.12 m) from where
+ * the player was aiming (m24 K6c/K6d pin the fix). At rest unshakenEye() IS
+ * camera.position — the same numbers — so nothing that never nudges can tell the difference.
+ *
  * No copy: AirportBaggageCrew\src\render\fx.js records "No screen shake … there is no
  * settings screen until M5" and never got one, so this is the first in Dev\.
  */
@@ -63,6 +72,10 @@ export class ThirdPersonCamera {
     this._rot = { pitch: 0, roll: 0 };
     this._rotV = { pitch: 0, roll: 0 };
     this._shakeEye = new THREE.Vector3();
+    /** The boom solve of the last update, BEFORE the shake offset (M20, unshakenEye()). */
+    this._baseEye = new THREE.Vector3();
+    /** True when the last update displaced camera.position from that solve. */
+    this._shaken = false;
     /** Sim-time source (ms) — set by setClock; without one the shake runs on frame time. */
     this._clock = null;
     this._shakeLastMs = null;
@@ -143,6 +156,19 @@ export class ThirdPersonCamera {
   shakeMagnitude() { const o = this._shake; return Math.sqrt(o.x * o.x + o.y * o.y + o.z * o.z); }
   /** The current rotational part, radians (a copy). */
   shakeRot() { return { pitch: this._rot.pitch, roll: this._rot.roll }; }
+
+  /**
+   * Where the eye WOULD be without the shake (M20; §4.4): the boom solve — follow lerp,
+   * occlusion probe, floor clamp — as it stood before the offset was added, a plain {x,y,z}
+   * copy. This is the origin of the grab and interaction rays (grip.js aimOrigin()), so a
+   * jolt moves the picture and not the aim. When the last update applied no offset (at rest,
+   * or with the switch off) it is camera.position itself, byte for byte — the m2/m3/m4 grab
+   * fixtures, which never nudge, see exactly the numbers they always did.
+   */
+  unshakenEye() {
+    const e = this._shaken ? this._baseEye : this.camera.position;
+    return { x: e.x, y: e.y, z: e.z };
+  }
 
   /** How much time the shake should integrate for this update. Sim time when the sim moved;
    *  frame time once the sim has been still for S.simStallS (paused, or a suite that steps
@@ -230,6 +256,9 @@ export class ThirdPersonCamera {
     if (len > 1e-5) dir.multiplyScalar(this._currentDistance / len);
     this.camera.position.copy(this.target).add(dir);
     if (this.camera.position.y < 0.22) this.camera.position.y = 0.22;  // never below ground
+    // The solve, remembered before the shake touches it (M20, unshakenEye()).
+    this._baseEye.copy(this.camera.position);
+    this._shaken = false;
 
     /* ---- shake (M16): after the boom solve, before its own probe ------------------------
      * The offset applied this frame is the spring's state as it stands — a nudge that
@@ -251,6 +280,7 @@ export class ThirdPersonCamera {
       this.shakeClamped = camOcclude(this.target, eye, this.colliders);
       if (eye.y < RENDER.camera.eyeFloorY) eye.y = RENDER.camera.eyeFloorY;
       this.camera.position.copy(eye);
+      this._shaken = true;
     }
     this.camera.lookAt(this.target);
     if (this._rot.pitch !== 0 || this._rot.roll !== 0) {

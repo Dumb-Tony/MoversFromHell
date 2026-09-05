@@ -109,6 +109,19 @@ export class GripSystem {
     return { x: p.x, y: p.y + PLAYER.height * 0.78, z: p.z };
   }
 
+  /** Where the aim RAY starts: the camera's boom solve WITHOUT the M16 shake offset (Phase 11
+   *  build-side M20; §4.4 "what you see is what you aim"). The shake moves what you see, never
+   *  where the ray starts — a grab attempted inside the half-second after a jolt lands where
+   *  the reticle was, not up to maxOffset (0.12 m) to one side of it (m24 K6c/K6d). At rest
+   *  the rig's unshakenEye() IS camera.position, so a fixture that never nudges sees the
+   *  numbers it always did. A rig without the method (a bare probe's stub) falls back to the
+   *  camera. The DIRECTION is aimYaw/aimPitch, which the shake never touches (m24 K6/K6b). */
+  aimOrigin() {
+    const rig = this.rig;
+    const e = rig && typeof rig.unshakenEye === 'function' ? rig.unshakenEye() : this.camera.position;
+    return { x: e.x, y: e.y, z: e.z };
+  }
+
   /** Aim basis — a full orthonormal frame, not just a direction.
    *  The rig owns yaw/pitch; this derives the 3D vectors, because forwardFlat() is
    *  deliberately flattened and cannot aim up or down at a box on the floor. */
@@ -120,8 +133,8 @@ export class GripSystem {
     const dir = { x: -sy * cp, y: sp, z: -cy * cp };
     const right = { x: cy, y: 0, z: -sy };
     const up = { x: sy * sp, y: cp, z: cy * sp };    // cross(right, dir)
-    const c = this.camera.position;
-    return { origin: this.shoulder(), camOrigin: { x: c.x, y: c.y, z: c.z }, dir, right, up };
+    // camOrigin: the un-nudged eye (aimOrigin, M20), not camera.position.
+    return { origin: this.shoulder(), camOrigin: this.aimOrigin(), dir, right, up };
   }
 
   /** The hand target for a grip: the stored view-relative offset, rebuilt in world space

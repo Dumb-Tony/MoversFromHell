@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 23,
-  label: 'phase-23',
+  phase: 24,
+  label: 'phase-24',
   date: '2026-09-05',
 });
 
@@ -1162,6 +1162,16 @@ export const SETTINGS = Object.freeze({
      *  boot default is `!prefers-reduced-motion` (save.js reducedMotionPreferred) — this is
      *  the value when the OS has no preference; a saved choice always wins. */
     cameraShake: true,
+    /** §21.4 Cognition "reduced HUD", "optional hints" and Vision "high contrast" (Phase 11
+     *  build-side M19). reducedHud → every HUD's setReduced (the cargo panel, the route label
+     *  and the contract panel's secondary rows go; the objective, the prompt, the reticle,
+     *  notices and captions never do — §21.1). highContrast → the `.hc` class on <body>, every
+     *  HUD root and every card (styles.css: opaque panels, white text, 2 px borders, a hatched
+     *  route fill); `?hc=1` forces it on at boot. hints → M5's stall hint never counts while
+     *  off, and interact.js's ' → room' suffix on the prompt is dropped. */
+    reducedHud: false,
+    highContrast: false,
+    hints: true,
   },
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
@@ -1229,6 +1239,13 @@ export const DEBUG = Object.freeze({
   overlayEnabledByDefault: false,
   frameSampleSize: 120,      // frames averaged for the FPS readout
   eventLogLines: 8,
+  /** §21.4 Cognition "objective history" (Phase 11 build-side M19): how many of the last
+   *  HUD notices the pause card's 'What happened' block lists, with their sim-time stamps.
+   *  A shell ring (main.js noticeHistory, never game.state), fed by the notice drain — one
+   *  entry per queued notice, so a broadcast to both seats is one line — and cleared by
+   *  resetContract. Eight: a screen's worth to read while paused, more than the four the
+   *  HUD stacks, fewer than a log (§21.1 "not a checklist"). */
+  historyLen: 8,
   /** M15's §26.6 soft-lock sweep (tools/m23-softlock-tests.js): how many seeded sessions of
    *  the common verbs it plays, from which seed, with how many teleports-to-void each. The
    *  seed is printed in every FAIL line so a failure reproduces; change it here to sweep a

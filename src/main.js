@@ -54,7 +54,7 @@ import { InvoiceScreen } from './ui/invoiceScreen.js';
 import { TitleScreen } from './ui/titleScreen.js';
 import { PauseScreen } from './ui/pauseScreen.js';
 import { SettingsPanel } from './ui/settings.js';
-import { load as loadSave, save as writeSave, SHELL_DEFAULTS, reducedMotionPreferred } from './core/save.js';
+import { load as loadSave, save as writeSave, SHELL_DEFAULTS, reducedMotionPreferred, highContrastForced } from './core/save.js';   // highContrastForced: M19 ?hc=1
 import { RunRecorder, buildRunSummary, compactRun } from './telemetry/runLog.js';
 import { GameAudio, audioEnabledFrom, directionGlyph } from './audio/audio.js';
 import { InteractionSystem } from './player/interact.js';
@@ -71,6 +71,7 @@ import { ContactBlobs } from './render/contactBlobs.js';
 import { updateRimCamera } from './render/materials.js';
 import { BUILD, MOVERS, COOP, RENDER, PLAYER, SETTINGS, PROMPTS, CONTRACT, ECONOMY, TELEMETRY, WORLD } from './config.js';   // WORLD: M15
 import { TRUCK, AUDIO } from './config.js';   // M16: the shake's road severities and the impact silence threshold
+import { DEBUG } from './config.js';   // M19: DEBUG.historyLen bounds the pause card's notice history
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -130,6 +131,14 @@ async function boot() {
    *  drained on the render frame. A system must never touch the DOM (§22.2), and a notice
    *  raised between two frames must not be lost, so it goes through a queue. */
   const pendingNotices = [];
+  /** §21.4 Cognition "objective history" (Phase 11 build-side M19): the last DEBUG.historyLen
+   *  notices as they were SHOWN — text, kind, the seat they were addressed to (null = everyone)
+   *  and the sim time — for the pause card's 'What happened' block. SHELL state, never
+   *  game.state (§22.4): fed only by drainNotices below (one entry per queued notice, so a
+   *  broadcast to both seats is one line; a notice for a seat nobody is in is not shown and
+   *  not recorded), cleared by resetContract. Not the bus ring: that is a diagnostic tail of
+   *  events, this is what the player was told. */
+  const noticeHistory = [];
   let strapsPlacedTotal = 0;
   /** Per mover, the controller.recoveries count last announced as a RECOVERY event (M6). */
   const recoveriesSeen = new Map();
@@ -154,6 +163,16 @@ async function boot() {
    * font-size in styles.css multiplies by), the solo camera boom, the quality tier. Held
    * here, beside seatCount, and never in game.state. */
   const shell = { ...SHELL_DEFAULTS, ...saved.shell };
+  /* `?hc=1` (M19, §21.4 Vision): high contrast on at boot regardless of the save — the
+   * screenshot path, and a link a tester can open readable. A boot-time override of the LOADED
+   * value, so the card shows it on and a player can turn it off; with no parameter the save
+   * wins (m27 A7). */
+  const hcForced = highContrastForced(location.search);
+  // The override lives beside the saved choice, not in it: persist() writes the LOADED value
+  // until the player touches the row (settingsStore.apply clears the override) — M19 review.
+  const hcLoaded = shell.highContrast;
+  let hcOverride = hcForced;
+  if (hcForced) shell.highContrast = true;
   document.documentElement.style.setProperty('--ts', String(shell.uiScale));
 
   /* ---- audio (Phase 11 build-side M9; §20.4, §21.4 Hearing, §26.5) ------------------------
@@ -732,7 +751,12 @@ async function boot() {
   let shownDevice = [];
   game.addSystem('stallHint', (state, stepMs) => {
     if (!stallHint.armed || stallHint.done || state.phase !== PHASES.PICKUP) return;
+    /* §21.4 Cognition "optional hints" (M19): the shell's hints switch disarms the timer AT
+     * THE SOURCE — off, it neither counts nor fires, so nothing is queued and nothing has to
+     * be hidden (m27 A5 asserts the queue, not the DOM). On again, it counts on from where it
+     * stopped; once per run still holds. */
     for (const m of movers) if (hasAnyGrip(state.players[m.id])) { stallHint.done = true; return; }
+    if (!shell.hints) return;   // after the grip check: a grip retires the hint whether or not hints are on (M19 review)
     stallHint.ms += stepMs;
     if (stallHint.ms < CONTRACT.stallHintMs) return;
     stallHint.done = true; stallHint.fired = true;
@@ -874,6 +898,7 @@ async function boot() {
     bus,
     isPaused: () => game.state.paused,
     suppressed: () => title.visible || invoiceScreen.visible,
+    history: () => noticeHistory,   // M19: the 'What happened' block reads the shell's ring
   });
   pauseScreen.onResume = () => {
     audio.arm();   // a click on the card: arm, or resume a suspended context (M9)
@@ -905,7 +930,8 @@ async function boot() {
   let currentRunIndex = -1;
   function persist() {
     // bindings (M18): the live table's diff from the defaults — never the whole table.
-    return writeSave({ settings: input.getSettings(), shell, bestInvoice, runs: keptRuns, bindings: input.bindingDiff() });
+    const shellOut = hcOverride ? { ...shell, highContrast: hcLoaded } : shell;
+    return writeSave({ settings: input.getSettings(), shell: shellOut, bestInvoice, runs: keptRuns, bindings: input.bindingDiff() });
   }
   function storeRun(summary) {
     keptRuns.push(compactRun(summary));
@@ -985,6 +1011,17 @@ async function boot() {
         shell.cameraShake = !!shellPatch.cameraShake;
         for (const m of movers) m.rig.setShakeEnabled(shell.cameraShake);
       }
+      /* §21.4 Cognition / Vision (M19): the three switches are booleans, pushed together to
+       * their consumers by applyAccessibility below — every HUD, <body> and the cards, the
+       * interaction system; the stall hint reads shell.hints itself. */
+      let access = false;
+      for (const k of ['reducedHud', 'highContrast', 'hints']) {
+        if (!Object.prototype.hasOwnProperty.call(shellPatch, k)) continue;
+        shell[k] = !!shellPatch[k];
+        if (k === 'highContrast') hcOverride = false;   // the player chose: from here the save says what they said
+        access = true;
+      }
+      if (access) applyAccessibility();
       persist();
     },
     reset() {
@@ -1007,6 +1044,21 @@ async function boot() {
     endCapture: () => input.endCapture(),
   };
   const settingsPanel = new SettingsPanel(ui, settingsStore);
+  /* §21.4's Cognition and Vision rows (Phase 11 build-side M19): each shell switch pushed to
+   * the thing that consumes it (m16 U2 "assert consumption"). Reduced HUD → every seat's HUD
+   * (hud.js setReduced — both halves in co-op, m27 A1). High contrast → the `.hc` class on
+   * <body>, on every HUD root and on every card, so styles.css can key off any of them and a
+   * HUD or a card asked on its own answers the same (m27 A2). Hints → the interaction
+   * system's room suffix (interact.js _roomHint); the stall-hint system reads shell.hints
+   * itself. Called once here with the loaded (or ?hc=1-forced) values and again by the store
+   * on every change. */
+  function applyAccessibility() {
+    for (const h of huds) { h.setReduced(shell.reducedHud); h.setHighContrast(shell.highContrast); }
+    document.body.classList.toggle('hc', !!shell.highContrast);
+    for (const el of [title.el, pauseScreen.el, invoiceScreen.el, settingsPanel.el]) el.classList.toggle('hc', !!shell.highContrast);
+    interact.hints = !!shell.hints;
+  }
+  applyAccessibility();
   // Reachable from the title card and the pause card (§21.4; INDEX "settings panel").
   title.onSettings = () => settingsPanel.show();
   pauseScreen.onSettings = () => settingsPanel.show();
@@ -1329,6 +1381,7 @@ async function boot() {
     cargoShift.snapshot = null;
     cargoShift.event = null;   // M17: an event window never crosses a reset
     recoveriesSeen.clear();
+    noticeHistory.length = 0;   // M19: the new run's 'What happened' starts empty
     game.reset();
     // AFTER game.reset(): the damage system reads game.state through a getter, so this
     // clears the NEW run's ledger and windows rather than the state just thrown away.
@@ -1705,6 +1758,30 @@ async function boot() {
     }
   }
 
+  /**
+   * The notice drain, in ONE function the render loop and a suite can both call (the loop
+   * never runs under headless Chrome — 1-3 rAF callbacks total). A notice with no seat
+   * belongs to the contract, not to a person, so everyone sees it; a seat notice reaches its
+   * seat. Each queued notice that is shown is ONE history entry (M19 — a broadcast is one
+   * line, stamped with the sim time it went up), bounded to DEBUG.historyLen.
+   */
+  function drainNotices() {
+    while (pendingNotices.length) {
+      const n = pendingNotices.shift();
+      const broadcast = n.seat === undefined || n.seat === null;
+      if (broadcast) {
+        for (let s = 0; s < seatCount; s++) huds[s].notice(n.text, n.kind);
+      } else if (n.seat < seatCount) {
+        huds[n.seat].notice(n.text, n.kind);
+      } else {
+        continue;   // addressed to a seat nobody is in: not shown, so not history
+      }
+      noticeHistory.push({ text: n.text, kind: n.kind || 'info', seat: broadcast ? null : n.seat, tMs: game.clock.simTimeMs });
+      if (noticeHistory.length > DEBUG.historyLen) noticeHistory.splice(0, noticeHistory.length - DEBUG.historyLen);
+    }
+    for (let s = 0; s < seatCount; s++) huds[s].tickNotices();
+  }
+
   // ---- main loop ------------------------------------------------------------------------
   let lastT = performance.now();
   function loop(now) {
@@ -1752,16 +1829,7 @@ async function boot() {
     audioFrame(dt);
     divider.update(rects);
 
-    while (pendingNotices.length) {
-      const n = pendingNotices.shift();
-      // A notice with no seat belongs to the contract, not to a person, so everyone sees it.
-      if (n.seat === undefined || n.seat === null) {
-        for (let s = 0; s < seatCount; s++) huds[s].notice(n.text, n.kind);
-      } else if (n.seat < seatCount) {
-        huds[n.seat].notice(n.text, n.kind);
-      }
-    }
-    for (let s = 0; s < seatCount; s++) huds[s].tickNotices();
+    drainNotices();
 
     const seatList = Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));
     if (blobs) blobs.update(blobSources(), blobProbe, seatList.map((m) => m.camera));
@@ -1845,6 +1913,9 @@ async function boot() {
      * (M5): the render loop never runs under headless Chrome, so a suite feeds the HUD the
      * way the loop does and reads back what it showed (m11 O, m12 K). */
     feedHuds, objectiveFor, shownDevice: (s) => shownDevice[s], stallHint, resetStallHint,
+    /* M19: the notice drain the loop runs (so a suite can run it too), the pause card's
+     * history ring it feeds, and whether ?hc=1 forced high contrast at this boot. */
+    drainNotices, noticeHistory, hcForced,
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,

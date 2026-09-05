@@ -17,6 +17,14 @@
  *                             carry over plus the leg (T4, §3.4).
  *   PRICED IN ADVANCE         the cab prompt names the trip back AND the cost of settling
  *                             without it, to the cent, before either key is pressed (T3, §4.4).
+ *                             M20: priced by the INVOICE's definition — every undelivered row,
+ *                             a box still on the truck included, and the prompt says so
+ *                             ('1 still on the truck'); manifest.js undeliveredRows is the one
+ *                             function both read, and T3c deep-equals the two sets (T3b/T3c).
+ *                             The on-truck key is PRESSED for real in T3d — a fifth leg after
+ *                             T8's replay — and the invoice settle() built bills the count the
+ *                             line named; with nothing away E is the settlement and carries
+ *                             the same price, payload and notice as Q (T3e, interact._settle).
  *   THE INVOICE REPORTS TRIPS ACCURATELY (§26.1)   fuel per leg (2n − 1), a line for every
  *                             item left behind that reconcile() re-derives from the rows, no
  *                             one-trip bonus on trip 2, and the single-trip invoice untouched
@@ -33,7 +41,8 @@ import { EVENTS, PHASES } from '../src/core/eventBus.js';
 import { routeSteps } from '../src/drive/route.js';
 import { cabPoint, cargoInterior } from '../src/world/truck.js';
 import { DEST_ZONES } from '../src/world/destination.js';
-import { LINE_KINDS, contributionStats } from '../src/contract/invoice.js';
+import { LINE_KINDS, contributionStats, itemsLeftBehind } from '../src/contract/invoice.js';   // itemsLeftBehind: M20, T3c
+import { undeliveredRows } from '../src/contract/manifest.js';                                  // M20, T3c
 import { TARGET } from '../src/player/interact.js';
 
 const lines = [];
@@ -235,6 +244,117 @@ lines.push('--- T3. the choice at the cab: drive back, or settle and pay (GDD §
   ok('T3 Q offers to settle up leaving 22 behind', /settle/.test(d.secondary || '') && /\b22\b/.test(d.secondary || ''), d.secondary || '');
   ok(`T3 …priced in advance: the prompt carries ${want} (22 x ECONOMY.leftBehindFee ${ECONOMY.leftBehindFee})`,
      (d.secondary || '').includes(want) && want === '1320.00', d.secondary || '');
+
+  /* T3b/T3c (Phase 11 build-side M20; §4.4, §15.1, §26.1). ONE definition of "left behind":
+   * the prompt prices every undelivered required row — the set the invoice's LEFT_BEHIND line
+   * bills (manifest.js undeliveredRows ← invoice.js itemsLeftBehind, interact.js settlement())
+   * — not only the rows that need another trip. Until M20 a box still on the truck made the
+   * settlement one item larger than the prompt had promised. Fixture: a second box loaded
+   * onto the truck HERE, at the destination — 21 away, 1 on the truck, 22 not delivered. The
+   * invoice Q would settle with is built on this very state (buildInvoice + reconcile, exactly
+   * what T6 does after its own Q); pressing Q here would end the run T4-T6 still need, so the
+   * on-truck key is pressed FOR REAL in T3d, on a fifth leg after T8's replay (the invoice
+   * settle() built: -1320.00 citing 22 rows, the on-truck row's among them). T6 presses it
+   * with nothing on the truck (its 21 / 1260.00 unchanged), and the on-truck fixture is
+   * unloaded again before T4. */
+  const box2Home = posOf(box2);
+  const dwell2 = loadIntoTruck(box2);
+  eq('T3b fixture: a second box parked in the truck at the destination counts as loaded', box2.state.loaded, true);
+  lines.push(`      box 2 loaded at the destination after ${dwell2} frames`);
+  eq('T3b …so contractFacts().away is 21 (the box on the truck needs no trip)', M.contractFacts().away, 21);
+  atCab();
+  const d2 = interact.describe(me());
+  ok('T3b E still offers the trip back for the 21 away', /drive back/.test(d2.primary || '') && /\b21\b/.test(d2.primary || ''), d2.primary || '');
+  const want22 = (22 * ECONOMY.leftBehindFee).toFixed(2);
+  ok(`T3b Q prices 22 not delivered — not 21 — and the prompt carries ${want22}`,
+     /settle/.test(d2.secondary || '') && /\b22\b/.test(d2.secondary || '') && (d2.secondary || '').includes(want22) && want22 === '1320.00', d2.secondary || '');
+  ok('T3b …and names "1 still on the truck"', /1 still on the truck/.test(d2.secondary || ''), d2.secondary || '');
+  lines.push(`      Q: "${d2.secondary}"`);
+  const st = interact.settlement();
+  eq('T3b interact.settlement(): 22 not delivered = 21 away + 1 on the truck + 0 at the site', `${st.n}/${st.away}/${st.inTruck}/${st.atSite}`, '22/21/1/0');
+  near(`T3b …priced at 22 x ECONOMY.leftBehindFee = ${want22}`, st.cost, 22 * ECONOMY.leftBehindFee, 1e-9);
+  const invNow = M.buildInvoice(game.state, M.manifestSummary(game.state.manifest), invoiceOpts());
+  const leftNow = findLine(invNow, LINE_KINDS.LEFT_BEHIND) || { amount: NaN, from: [], detail: '' };
+  near(`T3b the invoice this state settles to bills exactly 22 x ${ECONOMY.leftBehindFee} = -${want22} on its items-left-behind line`,
+       leftNow.amount, -22 * ECONOMY.leftBehindFee, 0.005);
+  eq('T3b …citing 22 rows', leftNow.from.length, 22);
+  ok('T3b …the on-truck row\'s id among them', leftNow.from.includes(rowOf(box2).id), `${rowOf(box2).id} not in [${leftNow.from.join(',')}]`);
+  const recNow = M.reconcile(invNow, game.state, invoiceOpts());
+  ok('T3b …and reconcile() agrees', recNow.ok, recNow.problems.join(' | '));
+  // T3c — one definition, exported and used by both.
+  const idsOf = (rows) => rows.map((r) => r.id).sort().join(',');
+  const fromInvoice = itemsLeftBehind(game.state);
+  const fromManifest = undeliveredRows(game.state.manifest);
+  eq('T3c itemsLeftBehind(state) is the set the prompt priced — deep-equal ids — with the box on the truck', idsOf(fromInvoice), [...st.ids].sort().join(','));
+  eq('T3c …and both are manifest.js undeliveredRows: ONE definition, exported and used by both', idsOf(fromManifest), idsOf(fromInvoice));
+  eq('T3c …22 rows', fromInvoice.length, 22);
+  eq('T3c …and the invoice line cites exactly that set', [...leftNow.from].sort().join(','), idsOf(fromInvoice));
+  // The fixture, undone: the box back at the old house, unloaded, 22 away again for T4.
+  parkAt(box2, box2Home.x, box2Home.y, box2Home.z);
+  let un = 0;
+  while (box2.state.loaded && un < 240) { frames(1); un++; }
+  eq('T3b fixture undone: the box is back at the old house and no longer loaded', box2.state.loaded, false);
+  eq('T3b …contractFacts().away === 22 again', M.contractFacts().away, 22);
+  atCab();
+  const d3 = interact.describe(me());
+  const st3 = interact.settlement();
+  eq('T3c with nothing on the truck the prompt prices 22, none on the truck — the same set the invoice bills', `${st3.n}/${st3.inTruck}`, '22/0');
+  eq('T3c …deep-equal ids again', idsOf(itemsLeftBehind(game.state)), [...st3.ids].sort().join(','));
+  ok('T3 (unchanged) Q offers 22 at 1320.00 with nothing on the truck, and does not mention the truck',
+     /\b22\b/.test(d3.secondary || '') && (d3.secondary || '').includes('1320.00') && !/on the truck/.test(d3.secondary || ''), d3.secondary || '');
+
+  /* T3e (M20). With nothing away E IS the settlement, and M20 prices its line by the same
+   * definition as Q's — bare 'finish the job and settle up' when nothing is undelivered (T8,
+   * m11 E7 unchanged), priced when something still is — and the E press carries the same
+   * SETTLEMENT payload and notice as the Q press: interact.js _settle() is the one call both
+   * make. The states are faked at the seam interact READS (tripStatus, an injected function)
+   * and the phase change captured at the seam it WRITES (setPhase), so the run T4-T6 still
+   * need is untouched — the route stays arrived, the phase DELIVERY. T3d presses Q for real. */
+  {
+    const realTrip = interact.tripStatus, realSetPhase = interact.setPhase;
+    const captured = [];
+    interact.setPhase = (to, v) => { captured.push({ to, v }); return to; };
+    const last = () => captured[captured.length - 1];
+    const fee = (n) => (n * ECONOMY.leftBehindFee).toFixed(2);
+    const fake = (away, inTruck, atSite) => () => ({
+      away, inTruck, atSite, notDelivered: away + inTruck + atSite,
+      notDeliveredIds: game.state.manifest.slice(0, away + inTruck + atSite).map((r) => r.id),
+    });
+    atCab();
+    interact.tripStatus = fake(0, 1, 0);
+    let dE = interact.describe(me());
+    eq(`T3e nothing away, one box still on the truck: E is the settlement and prices it — "finish the job and settle up — 1 not delivered (${fee(1)}), 1 still on the truck"`,
+       dE.primary, `finish the job and settle up — 1 not delivered (${fee(1)}), 1 still on the truck`);
+    eq('T3e …and there is no Q line', dE.secondary, null);
+    let saidE = interact.act(me());
+    eq('T3e …pressing E says what Q would: "settling up — 1 not delivered (1 still on the truck)"', saidE, 'settling up — 1 not delivered (1 still on the truck)');
+    eq('T3e …with the SETTLEMENT payload Q would carry: ok, leftBehind 1, away 0, inTruck 1, atSite 0',
+       JSON.stringify(last()), JSON.stringify({ to: PHASES.SETTLEMENT, v: { ok: true, leftBehind: 1, away: 0, inTruck: 1, atSite: 0 } }));
+    interact.tripStatus = fake(0, 0, 2);
+    dE = interact.describe(me());
+    eq(`T3e two rows here but not yet in a room: "finish the job and settle up — 2 not delivered (${fee(2)}), 2 here but not yet in a room"`,
+       dE.primary, `finish the job and settle up — 2 not delivered (${fee(2)}), 2 here but not yet in a room`);
+    saidE = interact.act(me());
+    eq('T3e …and E says "settling up — 2 not delivered" (the truck unmentioned: nothing is on it)', saidE, 'settling up — 2 not delivered');
+    eq('T3e …payload leftBehind 2 / atSite 2', `${last().v.leftBehind}/${last().v.away}/${last().v.inTruck}/${last().v.atSite}`, '2/0/0/2');
+    interact.tripStatus = fake(3, 1, 2);
+    dE = interact.describe(me());
+    ok('T3e with rows away, E is the trip back for 3 and Q carries every clause', /drive back for 3 more/.test(dE.primary || '') &&
+       dE.secondary === `settle up — 6 not delivered (${fee(6)}), 1 still on the truck, 2 here but not yet in a room`, `${dE.primary} / ${dE.secondary}`);
+    saidE = interact.secondary(me());
+    eq('T3e …and Q says "settling up — 6 not delivered (1 still on the truck)" with payload 6/3/1/2',
+       `${saidE} ${last().v.leftBehind}/${last().v.away}/${last().v.inTruck}/${last().v.atSite}`, 'settling up — 6 not delivered (1 still on the truck) 6/3/1/2');
+    interact.tripStatus = fake(0, 0, 0);
+    dE = interact.describe(me());
+    eq('T3e nothing undelivered: the bare "finish the job and settle up" it always was', dE.primary, 'finish the job and settle up');
+    saidE = interact.act(me());
+    eq('T3e …and E says the bare "settling up"', saidE, 'settling up');
+    eq('T3e …with leftBehind 0 on the payload', JSON.stringify(last().v), JSON.stringify({ ok: true, leftBehind: 0, away: 0, inTruck: 0, atSite: 0 }));
+    interact.tripStatus = realTrip; interact.setPhase = realSetPhase;
+    eq('T3e seams restored: four presses captured, the route still arrived, the phase still DELIVERY',
+       `${captured.length}/${route.state}/${game.state.phase}`, `4/arrived/${PHASES.DELIVERY}`);
+    eq('T3e …and the real tripStatus reads 22 not delivered again', interact.settlement().n, 22);
+  }
 }
 emit('running...');
 
@@ -457,16 +577,77 @@ lines.push('--- T8. one real drive, everything delivered: the single-trip invoic
   const d = interact.describe(me());
   ok('T8 …and the cab offers to settle with nothing away, no secondary (m11 E7, m14 cabPrompt)',
      /settle/.test(d.primary || '') && !/drive back/.test(d.primary || '') && d.secondary === null, `${d.primary} / ${d.secondary}`);
+  ok('T8 …the bare "finish the job and settle up": nothing undelivered, nothing priced (M20 T3e is the priced case)',
+     d.primary === 'finish the job and settle up', d.primary || '');
+}
+emit('running...');
+
+/* ── T3d. the on-truck settlement, pressed for real (M20) ─────────────────── */
+lines.push('--- T3d. the on-truck settlement pressed for real: the invoice bills the count the line named (M20: GDD §4.4, §15.1, §26.1) ---');
+{
+  /* T3b asserted the prompt and the invoice-on-this-state with the run still ahead of it; here
+   * the key is pressed. T7's replay again, then one more real leg (the fifth): box 1 aboard,
+   * delivered at the destination, box 2 loaded THERE — 21 away, 1 on the truck, 22 not
+   * delivered — and Q. The invoice is the one settle() built and handed to the sheet, caught
+   * at invoiceScreen.show the way T6 counts it. */
+  M.invoiceScreen.onReplay();
+  eq('T3d replayed: trip 1, pickup, 23 away', `${game.state.tripCount}/${game.state.phase}/${M.contractFacts().away}`, `1/${PHASES.PICKUP}/23`);
+  frames(60);
+  loadIntoTruck(box1);
+  eq('T3d box 1 loaded at the old house', box1.state.loaded, true);
+  atCab();
+  interact.act(me());
+  frames(LEG);
+  eq('T3d …one leg later: arrived, DELIVERY, trip 1', `${route.state}/${game.state.phase}/${game.state.tripCount}`, `arrived/${PHASES.DELIVERY}/1`);
+  deliver(box1);
+  eq('T3d box 1 delivered', rowOf(box1).delivered, true);
+  const dwell = loadIntoTruck(box2);
+  eq('T3d box 2 loaded at the destination: 21 away, loaded', `${M.contractFacts().away}/${box2.state.loaded}`, '21/true');
+  lines.push(`      box 2 loaded at the destination after ${dwell} frames`);
+  atCab();
+  const d = interact.describe(me());
+  const want22 = (22 * ECONOMY.leftBehindFee).toFixed(2);
+  eq('T3d the Q line before the key', d.secondary, `settle up — 22 not delivered (${want22}), 1 still on the truck`);
+  const promised = interact.settlement();
+  eq('T3d …settlement() 22/21/1/0', `${promised.n}/${promised.away}/${promised.inTruck}/${promised.atSite}`, '22/21/1/0');
+
+  let payload = null;
+  const offPayload = bus.on(EVENTS.CONTRACT_PHASE, (e) => { if (e.to === PHASES.SETTLEMENT) payload = e.validation; });
+  const ownShow = Object.prototype.hasOwnProperty.call(M.invoiceScreen, 'show');
+  const realShow = M.invoiceScreen.show;
+  let shown = null, shows = 0;
+  M.invoiceScreen.show = function (...args) { shows++; shown = args[0]; return realShow.apply(this, args); };
+  const said = interact.secondary(me());
+  offPayload();
+  if (ownShow) M.invoiceScreen.show = realShow; else delete M.invoiceScreen.show;
+
+  eq('T3d Q settles', game.state.phase, PHASES.SETTLEMENT);
+  eq('T3d …and the notice names the count and the truck', said, 'settling up — 22 not delivered (1 still on the truck)');
+  eq('T3d …the SETTLEMENT event carries the count the invoice bills: leftBehind 22, away 21, inTruck 1, atSite 0',
+     JSON.stringify(payload), JSON.stringify({ ok: true, leftBehind: 22, away: 21, inTruck: 1, atSite: 0 }));
+  ok('T3d the invoice settle() built reached the sheet, once', shows === 1 && !!shown && Array.isArray(shown.lines), `${shows} shows`);
+  const left = (shown && findLine(shown, LINE_KINDS.LEFT_BEHIND)) || { amount: NaN, from: [], detail: '' };
+  near(`T3d after Q the items-left-behind line is exactly 22 x ECONOMY.leftBehindFee = -${want22}`, left.amount, -22 * ECONOMY.leftBehindFee, 0.005);
+  eq('T3d …which is -1320.00', Number(left.amount.toFixed(2)), -1320);
+  eq('T3d …citing 22 rows', left.from.length, 22);
+  ok('T3d …the on-truck row\'s id among them', left.from.includes(rowOf(box2).id), `${rowOf(box2).id} not in [${left.from.join(',')}]`);
+  eq('T3d …exactly the set the line priced before the key (settlement().ids, deep-equal)',
+     [...left.from].sort().join(','), [...promised.ids].sort().join(','));
+  lines.push(`      ${left.detail}`);
+  const rec = shown ? M.reconcile(shown, game.state, invoiceOpts()) : { ok: false, problems: ['no invoice'] };
+  ok('T3d reconcile() agrees', rec.ok, rec.problems.join(' | '));
+  near('T3d …and M.runSummary().invoice.profit is that invoice\'s to the cent', M.runSummary().invoice ? M.runSummary().invoice.profit : NaN, shown ? shown.profit : NaN, 0.005);
 }
 emit('running...');
 
 /* ── T9. budget ───────────────────────────────────────────────────────────── */
 lines.push('--- T9. budget: frames driven and sim time (tools/smoketest.ps1 240 s virtual time) ---');
 {
-  // Four legs: out (T2), back (T4), out again (T5), and T8's single-trip drive after the replay.
-  lines.push(`      game.frame() calls: ${framesTotal} (4 legs = ${4 * LEG} + ${framesTotal - 4 * LEG} fixture frames); ` +
-             `game.clock.simTimeMs ${game.clock.simTimeMs.toFixed(0)} ms (since the T7 replay reset the clock)`);
-  ok(`T9 four legs were driven through game.frame() (${framesTotal} >= ${4 * LEG})`, framesTotal >= 4 * LEG, `${framesTotal}`);
+  // Five legs: out (T2), back (T4), out again (T5), T8's single-trip drive after the replay,
+  // and T3d's on-truck settlement after a second replay (M20).
+  lines.push(`      game.frame() calls: ${framesTotal} (5 legs = ${5 * LEG} + ${framesTotal - 5 * LEG} fixture frames); ` +
+             `game.clock.simTimeMs ${game.clock.simTimeMs.toFixed(0)} ms (since the T3d replay reset the clock)`);
+  ok(`T9 five legs were driven through game.frame() (${framesTotal} >= ${5 * LEG}; was four before M20's T3d)`, framesTotal >= 5 * LEG, `${framesTotal}`);
   ok('T9 the suite ran inside the harness (this line printing is the proof); sim time under the 240 s budget', game.clock.simTimeMs < 240000, `${game.clock.simTimeMs.toFixed(0)} ms`);
   ok('T9 game.state stays JSON-serializable (tripCount a number, the heading lives on the route)',
      (() => { try { const s = JSON.parse(JSON.stringify(game.state)); return typeof s.tripCount === 'number'; } catch (e) { return false; } })());

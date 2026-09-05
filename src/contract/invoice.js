@@ -26,6 +26,7 @@
  */
 
 import { ECONOMY, DAMAGE, PARTS } from '../config.js';
+import { undeliveredRows } from './manifest.js';   // M20: the ONE definition of "left behind"
 
 /** §15.1's line items, in the order the formula names them. `sign` is +1 for money in. */
 export const LINE_KINDS = Object.freeze({
@@ -58,9 +59,13 @@ export const LINE_KINDS = Object.freeze({
  */
 export function legsDriven(state) { return 2 * Math.max(1, state.tripCount || 1) - 1; }
 
-/** The undelivered required rows — the LEFT_BEHIND line's evidence, and reconcile()'s. */
+/** The undelivered required rows — the LEFT_BEHIND line's evidence, and reconcile()'s.
+ *  M20: NOT a second definition. This is manifest.js undeliveredRows over state.manifest —
+ *  the same function the cab prompt prices through tripStatus — kept here in the state-shaped
+ *  signature the invoice's callers use, so the line and the prompt cannot disagree about
+ *  which rows are 'left behind' (m21 T3c deep-equals the two). */
 export function itemsLeftBehind(state) {
-  return (state.manifest || []).filter((r) => r.required !== false && !r.delivered);
+  return undeliveredRows(state.manifest || []);
 }
 
 /* 'couch_3seat_01' -> 'couch 3seat', the words every prompt uses for the object. */

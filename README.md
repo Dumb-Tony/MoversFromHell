@@ -192,6 +192,24 @@ default says so on that row.
 
 ![Phase 23](docs/phase23-controls.png)
 
+**Reading the screen** (Phase 24, M19) — a settings group with three switches. **Reduced HUD**
+keeps only the objective, the prompt, the reticle, notices, the caption and the phase word with
+its manifest count (an OVERTIME row stays while it is billing). **High contrast** makes every
+panel opaque with white text and 2 px borders and hatches the route bar, without moving a
+single panel (also `?hc=1` in the address for a screenshot). **Hints** off silences the 30 s
+'how to grab' nudge at its source and the → room on each item. The pause card lists **What
+happened**: the last 8 notices with the sim time they went up. Every notice leads with a glyph
+(→ ✓ ✗ !) and the cargo band carries [ok] / [!] / [!!], so no state depends on colour alone.
+
+![Phase 24](docs/phase24-hc.png)
+
+**The prompt prices what the ledger bills** (Phase 24, M20). Q on a disassembled object prices
+the reattach on the line ('put the legs back on — 60 s') and bills it like the disassembly. At
+the destination the cab prices every undelivered item on whichever key settles — 'settle up —
+22 not delivered (1320.00), 1 still on the truck' — and that is the number the invoice bills,
+from one definition both read. And the grab ray now starts from the un-nudged camera while the
+picture shakes.
+
 ## Test it
 
 ```bash
@@ -255,7 +273,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**2459 assertions across twenty-seven suites, all passing** — plus a GPU-only suite that the
+**2837 assertions across twenty-eight suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -298,8 +316,11 @@ from out of bounds mid-run, a seeded sweep of forty random sessions proves no co
 produces an unrecoverable soft lock, and camera shake exists with the switch §26.5 names. Batch 8
 proved §26.3 with three packs of the same six items driven the whole route (LOW 0.030 m, TALL
 0.577 m and leaning at 27°, SLIDE 1.520 m and a holed headboard; two straps take SLIDE to
-0.135 m) and closed §21.4's last Input row with a Rebind on every on-foot action. Batch 9 (the
-last §21.4 rows and a consistency pass) is briefed in the plan.
+0.135 m) and closed §21.4's last Input row with a Rebind on every on-foot action. Batch 9
+closed the last §21.4 rows (reduced HUD, objective history, a hints switch, high contrast at
+18:1) and a consistency pass (the aim ray ignores the shake, reattaching costs what removing
+cost, the cab prompt's count is the invoice's). Batch 10 (the evidence page for §26.7; a
+three-card first minute) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -595,9 +616,9 @@ Names were kept so the lineage stays greppable.
   unstable at 1/60 s, so strap the heavy things and wedge the light ones; the speed bump moves
   nothing. **Rebinding (M18)** keeps one binding per device class per action, chords are not
   bindings (the first keydown wins), and only the on-foot table is listed.
-- **The grab ray's origin follows the shaken camera** for up to 0.6 s after a nudge (its direction
-  does not); the seat that feels road events is the one whose mover stood nearest the cab when
-  the drive began; shake intensity is on/off only.
+- **The seat that feels road events** is the one whose mover stood nearest the cab when the
+  drive began; shake intensity is on/off only. The shake moves the picture, never the aim: the
+  grab ray starts from the un-nudged camera (Phase 24).
 - **Nothing is uploaded, ever.** The project rule is zero external requests, so §27.4's
   "opt-in upload" is the Copy button; a playtest group sends the pasted JSON by hand. The
   recorder's frame cost was measured in a real Chrome (0.03 ms per step at worst), not in the

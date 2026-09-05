@@ -1170,13 +1170,37 @@ lines.push('--- P. couch legs and the prep-time charge (M8: GDD §7.1, §8.2, §
     const gap1 = Object.values(game.state.telemetry.phaseMs).reduce((a, b) => a + b, 0) - game.state.elapsedWorkMs;
     near('P3a …phase durations minus elapsedWorkMs is unchanged by the charge', gap1, gap0, 1e-6);
 
-    // Q puts them back on — free, and the record clears (§8.2 "reattach").
+    /* Q puts them back on — and since Phase 11 build-side M20 that is LABOUR too (§8.2: both
+     * directions of a disassembly are "preparation time"; §4.4: priced on the line before the
+     * key). P2d IS REWRITTEN DELIBERATELY: until M20 it asserted 'reassembly charged nothing
+     * (recorded as a seam in KNOWN_ISSUES)' — the seam KNOWN_ISSUES called 'Reattaching is
+     * free'. It now asserts the same 60 s (entry.seconds × TOOLS.screwdriver.timeScale) on
+     * the same chargeWorkMs hook, on both clocks, and totals the whole off/frames/on sequence
+     * so a double bill would show. */
     const w1 = game.state.elapsedWorkMs;
+    const pm1 = game.state.telemetry.phaseMs[phase0];
+    const dq = interact.describe(me());
+    eq('P2d (M20) the Q line prices the reattach in advance: "put the legs back on — 60 s" (§4.4)',
+       dq.secondary, `put the legs back on — ${(60 * TOOLS.screwdriver.timeScale).toFixed(0)} s`);
+    // A subscriber, not the recorder's list: by section P the run's ring may be past its cap.
+    let restoredEv = null;
+    const offRestored = bus.on(EVENTS.PART_CHANGED, (e) => { if (e.action === 'restored') restoredEv = e; });
     const back = interact.secondary(me());
+    offRestored();
     ok('P1c Q puts the legs back on', (couch.state.removedParts || []).length === 0 && /back on/.test(back || ''),
        `${JSON.stringify(couch.state.removedParts)} "${back}"`);
     near('P1d …and the collider is 0.85 m again', couch.collider.halfExtents().y * 2, 0.85, 1e-6);
-    eq('P2d …reassembly charged nothing (recorded as a seam in KNOWN_ISSUES)', game.state.elapsedWorkMs - w1, 0);
+    near(`P2d (M20, rewritten from "reassembly charged nothing") Q charged the same ${charged} ms — entry.seconds x timeScale, through M8's chargeWorkMs hook`,
+         game.state.elapsedWorkMs - w1, charged, 1e-6);
+    ok('P2d …and the notice names it: /legs back on/ and /60 s/', /legs back on/.test(back || '') && /60 s/.test(back || ''), back || '');
+    near(`P2d …the ${phase0} phase's §27.4 line took the reattach too`, game.state.telemetry.phaseMs[phase0] - pm1, charged, 1e-6);
+    near(`P2d …over the whole sequence elapsedWorkMs is off + six frames + on = 2 x ${charged} + ${simMs.toFixed(3)} ms — billed once each way, never twice`,
+         game.state.elapsedWorkMs - w0, 2 * charged + simMs, 1e-6);
+    near(`P2d …and telemetry.phaseMs.${phase0} carries both charges plus the sim time`,
+         game.state.telemetry.phaseMs[phase0] - pm0, 2 * charged + simMs, 1e-6);
+    ok('P2d …and the PART_CHANGED restored event on the bus carries the seconds, for the run record',
+       !!restoredEv && restoredEv.entityId === couch.id && restoredEv.part === 'legs' && restoredEv.seconds === 60 * TOOLS.screwdriver.timeScale,
+       JSON.stringify(restoredEv));
 
     /* P2e — the two phases that bill no labour bill none here either (same rule as Game.step). */
     game.state.phase = PHASES.SETTLEMENT;
@@ -1187,6 +1211,7 @@ lines.push('--- P. couch legs and the prep-time charge (M8: GDD §7.1, §8.2, §
     near('P2f …while the settlement phase\'s own §27.4 line records the minute', game.state.telemetry.phaseMs[PHASES.SETTLEMENT] - s2, charged, 1e-6);
     interact.secondary(me());
     game.state.phase = phase0;
+    // The non-reversible half of P2d is section M20 below, under its own header.
 
     /* P5 — the packed-volume payoff, through the cargo system's own accounting (cargo.js reads
      * currentDimensions). The couch alone in the box: intact 2.10 x 0.85 x 0.90 = 1.6065 m3,
@@ -1204,6 +1229,69 @@ lines.push('--- P. couch legs and the prep-time charge (M8: GDD §7.1, §8.2, §
     near('P5b legs off it takes 1.4553 m3 — 9.4% of a couch back (§10.5)', vLegless, 1.4553, 1e-3);
     lines.push(`      cargo volumeUsed: intact ${vIntact.toFixed(4)} m³, legless ${vLegless.toFixed(4)} m³ (-${((1 - vLegless / vIntact) * 100).toFixed(1)}%)`);
     reassemble(registry, couch, 'legs');
+    parkAt(couch, home.x, home.y, home.z);
+    reset();
+  }
+}
+emit('running...');
+
+/* ── M20. A PART AUTHORED NON-REVERSIBLE (Phase 11 build-side M20: GDD §4.4, §8.2) ───────────
+ *
+ * The brief's P2d, second half: "a non-reversible entry's Q path charges nothing and the undo
+ * label says 'cannot be put back'" — in M20's own section (a milestone's new assertions live
+ * under its own header in a shared suite), on section P's couch fixture; the ids stay P2d so
+ * the brief's reviewer can find them. No shipped entry is non-reversible (every disassembly
+ * row says reversible: true), so the entity's `def` is swapped for a copy whose entry says
+ * false (OBJECT_DEFS is frozen; the entity's own binding is the registry's) and restored
+ * before the fixture is unwound.
+ *
+ * The refusal is the PROMPT's, not the API's: tools.js reassemble() reports `reversible` and
+ * puts the part back for whoever calls it, because it is also the reset's way back — main.js
+ * forces it in the boot-time unwind and calls it PLAIN in the replay reset, then clears
+ * removedParts; a refusal in the API would leave that path with the collider at 0.77 m for
+ * the rest of the session. The last assertion pins the plain call. */
+lines.push('--- M20. a part authored non-reversible: the line says so, Q does nothing, nothing is billed (M20: GDD §4.4, §8.2) ---');
+{
+  reset();
+  const couch = byDef('couch_3seat_01');
+  const sd = toolByDef('screwdriver_01');
+  ok('P2d fixture: the couch and the screwdriver', !!couch && !!sd);
+  if (couch && sd) {
+    const home = posOf(couch);
+    parkAt(couch, -22, 0.45, 30);
+    // The screwdriver picked up from open ground with an exact aim (section DL's pickup).
+    parkAt(sd, -50, 0.05, 40);
+    const ps = posOf(sd);
+    lookAt(me(), standOffFrom(ps, 1.1), ps, true);
+    step(2);
+    interact.act(me());
+    step(6);
+    ok('P2d fixture: the screwdriver is in hand', interact._for(me().id).carriedTool === sd.id);
+    lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
+    step(4);
+    const charged = 60 * TOOLS.screwdriver.timeScale * 1000;
+    const wOff = game.state.elapsedWorkMs;
+    interact.act(me(), game.clock.simTimeMs);
+    ok(`P2d fixture: E takes the legs off and bills the ${charged} ms section P measured`,
+       (couch.state.removedParts || []).includes('legs') && Math.abs(game.state.elapsedWorkMs - wOff - charged) < 1e-6,
+       `${JSON.stringify(couch.state.removedParts)} billed ${game.state.elapsedWorkMs - wOff} ms`);
+    const realDef = couch.def;
+    couch.def = { ...realDef, disassembly: realDef.disassembly.map((p) => ({ ...p, reversible: false })) };
+    const wn = game.state.elapsedWorkMs;
+    const dn = interact.describe(me());
+    ok('P2d a non-reversible entry: the undo label says the legs cannot be put back (§4.4)',
+       (couch.state.removedParts || []).includes('legs') && /cannot be put back/.test(dn.secondary || ''), `"${dn.secondary}"`);
+    const saidN = interact.secondary(me());
+    ok('P2d …Q says the same, the legs stay off (collider 0.77), and nothing is billed',
+       /cannot be put back/.test(saidN || '') && (couch.state.removedParts || []).includes('legs') &&
+       Math.abs(couch.collider.halfExtents().y * 2 - 0.77) < 1e-6 && game.state.elapsedWorkMs - wn === 0,
+       `"${saidN}" off=${JSON.stringify(couch.state.removedParts)} billed ${game.state.elapsedWorkMs - wn} ms`);
+    const rr = reassemble(registry, couch, 'legs');
+    ok('P2d …while reassemble() itself — the reset\'s path, called plain as main.js\'s replay reset calls it — still puts the part back: collider 0.85, reversible false, 0 s',
+       !!rr && rr.reversible === false && rr.seconds === 0 && (couch.state.removedParts || []).length === 0 &&
+       Math.abs(couch.collider.halfExtents().y * 2 - 0.85) < 1e-6,
+       rr ? JSON.stringify({ reversible: rr.reversible, seconds: rr.seconds, height: couch.collider.halfExtents().y * 2 }) : 'null');
+    couch.def = realDef;
     parkAt(couch, home.x, home.y, home.z);
     reset();
   }

@@ -133,7 +133,9 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     settings: { ...DEFAULT_SETTINGS, mouseSensitivity: 1.7, gripMode: 'toggle', invertLookY: true, stickDeadzone: 0.3 },
     // M9 (Phase 11 build-side): the shell carries the three bus levels and the captions switch.
     // M16: …and the camera-shake switch (a non-default, so the round-trip is real).
-    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false },
+    // M19: …and the reduced-HUD, high-contrast and hints switches (all three off their defaults).
+    shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false,
+             reducedHud: true, highContrast: true, hints: false },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
     // M18: the §21.4 remap section — the DIFF from the shipped bindings (m26 B6 fills it; empty here).
@@ -426,6 +428,12 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     // M16 (Phase 11 build-side): the §26.5 camera-shake switch, at its consumer — every rig's
     // shakeEnabled (camera.js nudge() is a no-op while it is off; m24 K5).
     cameraShake:        () => M.rig.shakeEnabled,
+    // M19 (Phase 11 build-side): §21.4's Cognition/Vision rows, at their consumers — every
+    // HUD's reduced class, the `.hc` class on <body>, the interaction system's hints flag
+    // (the stall hint reads the same shell key; m27 A5 asserts the queue).
+    reducedHud:         () => huds[0].reduced,
+    highContrast:       () => document.body.classList.contains('hc'),
+    hints:              () => M.interact.hints,
   };
   const keys = M.settingsPanel.keys();
   eq('U2 the card has exactly one control per consumer', keys.slice().sort().join(','), Object.keys(consumers).sort().join(','));
@@ -523,6 +531,27 @@ lines.push('--- M16. the camera-shake switch is a shell key (§26.5, §21.4 Moti
   eq('M16-3 save(false) → load() false', load().shell.cameraShake, false);
   localStorage.setItem(SAVE_KEY, JSON.stringify({ schema: SAVE_SCHEMA, shell: { cameraShake: 'no' } }));
   eq('M16-4 a non-boolean in the blob is the default, not a truthy string', load().shell.cameraShake, true);
+  localStorage.removeItem(SAVE_KEY);
+}
+
+/* ── M19 (Phase 11 build-side): the reduced-HUD, high-contrast and hints switches in the shell
+ * payload — §21.4 Cognition / Vision. Booleans under `shell` (never new sections: V4c still
+ * counts seven), defaulting false / false / true; m27 A6 covers the consumers. */
+lines.push('--- M19. reducedHud / highContrast / hints are shell keys (§21.4 Cognition, Vision) ---');
+{
+  eq('M19-1 SHELL_DEFAULTS: reducedHud false, highContrast false, hints true',
+     `${SHELL_DEFAULTS.reducedHud}/${SHELL_DEFAULTS.highContrast}/${SHELL_DEFAULTS.hints}`, 'false/false/true');
+  localStorage.removeItem(SAVE_KEY);
+  ok('M19-2 load() hands back three booleans', ['reducedHud', 'highContrast', 'hints'].every((k) => typeof load().shell[k] === 'boolean'));
+  save({ shell: { ...SHELL_DEFAULTS, reducedHud: true, highContrast: true, hints: false } });
+  eq('M19-3 save(true/true/false) → load() true/true/false',
+     `${load().shell.reducedHud}/${load().shell.highContrast}/${load().shell.hints}`, 'true/true/false');
+  localStorage.setItem(SAVE_KEY, JSON.stringify({ schema: SAVE_SCHEMA, shell: { reducedHud: 'yes', highContrast: 1, hints: 0 } }));
+  eq('M19-4 non-booleans in the blob are the defaults, not truthy strings or numbers',
+     `${load().shell.reducedHud}/${load().shell.highContrast}/${load().shell.hints}`, 'false/false/true');
+  eq('M19-5 the blob still has exactly the seven sections (the keys are under shell)',
+     (() => { save({}); return Object.keys(JSON.parse(localStorage.getItem(SAVE_KEY))).sort().join(','); })(),
+     'bestInvoice,bindings,build,runs,schema,settings,shell');
   localStorage.removeItem(SAVE_KEY);
 }
 

@@ -890,3 +890,135 @@ body.coop #build-stamp { opacity: .45; }
   margin-top: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
   font-size: calc(10px * var(--ts)); opacity: .55;
 }
+
+/* ---- the pause card's 'What happened' block (Phase 11 build-side M19) ------------------
+   §21.4 Cognition "objective history": the last DEBUG.historyLen notices, oldest first, each
+   a sim-time stamp, the HUD's own kind glyph (never the colour alone, §26.5), the text, and a
+   seat chip when it was one player's. Hidden outright when the ring is empty. Scrolls inside
+   itself past ~30vh so the buttons under it never leave the card. */
+#pause-screen .history {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+#pause-screen .history[hidden] { display: none; }
+#pause-screen .hhead {
+  margin-bottom: 6px;
+  font: 700 calc(10px * var(--ts))/1 Quicksand, system-ui, sans-serif;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--violet);
+}
+#pause-screen .hlist {
+  margin: 0; padding: 0; list-style: none;
+  max-height: 30vh; overflow: auto;
+}
+#pause-screen .hlist li {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  font: calc(11px * var(--ts))/1.5 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+}
+#pause-screen .hlist .t {
+  font: calc(10px * var(--ts))/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: .55;
+}
+#pause-screen .hlist .g { min-width: 14px; text-align: center; font-weight: 700; }
+#pause-screen .hlist li.info   .g { color: var(--violet); }
+#pause-screen .hlist li.good   .g { color: var(--lime); }
+#pause-screen .hlist li.warn   .g { color: var(--amber); }
+#pause-screen .hlist li.damage .g { color: var(--coral); }
+#pause-screen .hlist .x { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pause-screen .hlist .s {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 700 calc(9px * var(--ts))/1.6 Quicksand, system-ui, sans-serif;
+  letter-spacing: .08em;
+  opacity: .7;
+}
+
+/* The notice's kind glyph (M19): a chip before the words, so the kind is readable with the
+   border colour gone. */
+.notices .notice .glyph { display: inline-block; min-width: 12px; text-align: center; font-weight: 700; }
+.notices .notice.info   .glyph { color: var(--violet); }
+.notices .notice.good   .glyph { color: var(--lime); }
+.notices .notice.damage .glyph { color: var(--coral); }
+.notices .notice.warn   .glyph { color: var(--amber); }
+/* The cargo band's bracketed token (M19), a shade quieter than the word it follows. */
+.cargo-status .row .tok { opacity: .8; font-weight: 700; letter-spacing: .02em; }
+
+/* ---- reduced HUD (Phase 11 build-side M19; §21.4 Cognition) ---------------------------
+   Shell key reducedHud → hud.js setReduced → `.hud.reduced`. Gone: the cargo panel, the
+   route bar's label, and the contract panel's rows other than the manifest count — except an
+   OVERTIME row, because a cost being paid is never hidden (§2.2). Kept, by omission here and
+   by rule (§21.1, §26.5): the phase word, the objective line, the prompt, the reticle, the
+   notices, the caption, the seat tag. Display only — every feed still lands. */
+.hud.reduced .contract .row:not(.manifest):not(.over) { display: none; }
+.hud.reduced .cargo-status { display: none; }
+.hud.reduced .route-bar .label { display: none; }
+
+/* ---- high contrast (Phase 11 build-side M19; §21.4 Vision) ----------------------------
+   Shell key highContrast (or ?hc=1) → the `.hc` class on <body>, every `.hud` root and every
+   card, so any of them alone carries the mode. Colours, borders and alpha ONLY: the panels go
+   opaque (alpha 1.0), the paper and line tokens go full white, every border is 2 px — with
+   1 px less padding so each box's outer rect is exactly what it was (m27 A2 measures it; the
+   §21.1 centre-clear rects of m11 O5 / m15 F2r cannot move) — every dimmed opacity comes up
+   to 1, and the route bar's fill is hatched so its progress is a texture as well as a lime
+   length. The notice glyphs and the cargo tokens are always on; they are not part of this. */
+.hc, body.hc, .hud.hc { --paper: #ffffff; --line: #ffffff; }
+
+.hc .contract, .hc .objective, .hc .cargo-status, .hc .caption, .hc .notices .notice,
+.hc .route-bar, .hc .seat-tag, .hc #help, .hc #build-stamp, .hc #debug-overlay {
+  background: var(--panel);
+  border-width: 2px;
+  border-color: var(--line);
+  color: var(--paper);
+}
+.hc .contract, .hc .cargo-status { padding: 7px 9px; }
+.hc .objective { padding: 3px 8px; }
+.hc .caption { padding: 3px 10px; }
+.hc .notices .notice { padding: 3px 8px; border-left-width: 4px; }
+.hc .seat-tag { padding: 1px 8px; opacity: 1; }
+.hc #help { padding: 5px 13px; }
+.hc #build-stamp { padding: 3px 8px; }
+.hc #debug-overlay { padding: 8px 10px; }
+.hud.split.hc .contract, .hud.split.hc .cargo-status { padding: 5px 7px; }
+.hc .notices .notice.damage { color: var(--paper); }
+.hc .contract .row span, .hc .cargo-status .row span, .hc .cargo-status .row .tok,
+.hc .route-bar .label, .hc .prompt .hint, .hc .grip-label, .hc .reticle .dot { opacity: 1; }
+.hc .prompt .sep { opacity: .8; }
+.hc .prompt { text-shadow: 0 0 2px #000, 0 1px 3px #000, 0 -1px 3px #000; }
+.hc .route-bar .fill {
+  background: repeating-linear-gradient(-45deg, var(--lime) 0 5px, #101408 5px 8px);
+}
+.hc .route-bar .label { text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+
+/* The cards: the same rule — opaque, 2 px, white text, no dimmed lines. */
+.hc #title-screen .card, .hc #pause-screen .card, .hc #settings-screen .card, .hc #settlement .sheet {
+  background: var(--panel);
+  border: 2px solid var(--line);
+}
+.hc #title-screen, .hc #pause-screen { background: rgba(9,10,16,.9); backdrop-filter: none; }
+.hc #settings-screen, .hc #settlement { background: rgba(9,10,16,.9); }
+.hc #pause-screen button, .hc #settings-screen button, .hc #settlement button.minor,
+.hc .set-row select, .hc #settlement .questionnaire input[type=text], .hc #settlement textarea.export,
+.hc #title-screen .alt .settings, .hc .set-bind .key.none, .hc #pause-screen .hlist .s {
+  border-width: 2px;
+  border-color: var(--line);
+}
+.hc #pause-screen button.primary, .hc #settings-screen button.primary { border-color: var(--lime); }
+.hc #pause-screen .tag, .hc #pause-screen .foot, .hc #pause-screen .hlist .t, .hc #pause-screen .hlist .s,
+.hc #title-screen .pitch, .hc #title-screen .cols li, .hc #title-screen .foot, .hc #title-screen .alt,
+.hc .set-note, .hc .set-v, .hc .set-seat, .hc .set-bind .set-glyphs, .hc .set-bind .set-fixed,
+.hc #settlement .sub, .hc #settlement .line .detail, .hc #settlement .stat span, .hc #settlement .foot,
+.hc #settlement .kept, .hc #settlement .best, .hc #settlement .grade .score, .hc #settlement .review .tags span,
+.hc #settlement .questionnaire .anchor, .hc #settlement .questionnaire legend.qtext,
+.hc #settlement .export-row, .hc #settlement .export-row .copy-note { opacity: 1; }
+.hc #build-stamp, .hc #debug-overlay .ev { color: var(--paper); }
+.hc #settlement .line.out .amt { color: var(--coral); }

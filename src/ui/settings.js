@@ -23,7 +23,10 @@
  * its own, because shake is the only motion this build adds. The Sound group (Phase 11
  * build-side M9) exists because src/audio/audio.js now does: three §21.4 "volume categories"
  * routed to audio.setMaster / setBus, and captions (§21.4 Hearing, §26.5 "subtitles … exist")
- * routed to every HUD's caption line (m18 A11).
+ * routed to every HUD's caption line (m18 A11). The 'Reading the screen' group (Phase 11
+ * build-side M19) closes §21.4's last Cognition and Vision rows: reduced HUD (every HUD's
+ * setReduced), high contrast (the `.hc` class — m27 A2), hints (the stall hint's gate and the
+ * prompt's room suffix — m27 A5).
  *
  * The four controls §21.4 lists that were already true by construction, so nobody rediscovers
  * it: colour-independent cues (every HUD state carries words or a shape, styles.css), visible
@@ -42,7 +45,7 @@
  * fixed: the shell reads them, and the card itself closes on Escape.
  */
 
-import { SETTINGS, INPUT } from '../config.js';
+import { SETTINGS, INPUT, CONTRACT } from '../config.js';   // CONTRACT: M19's hints row names the stall time
 import { GRIP_MODES, CONTEXTS, glyphOf, tokenLabel, parseToken } from '../core/input.js';
 
 /** MouseEvent.button of the secondary (context-menu) button — a DOM constant, not tuning. */
@@ -98,6 +101,20 @@ const ROWS = Object.freeze({
       note: 'Impacts, straps, tools, the truck and your own strain. Sound starts on the first click or key.' },
     { key: 'captions', label: 'Captions for sounds (with a direction arrow)', kind: 'check' },
   ],
+  /* §21.4 Cognition "reduced HUD", "optional hints" and Vision "high contrast" (Phase 11
+   * build-side M19). Shell keys reducedHud / highContrast / hints; the store routes the first
+   * to every HUD's setReduced, the second to the `.hc` class on <body>, the HUD roots and the
+   * cards, the third to interact.js's room suffix and the stall hint's own gate. The hints row
+   * SAYS what it silences, because a switch whose effect is invisible is a switch nobody
+   * trusts (§2.1). */
+  access: [
+    { key: 'reducedHud', label: 'Reduced HUD — only the objective, the prompt, notices and the manifest count', kind: 'check',
+      note: 'Hides the cargo panel, the route label and the contract panel’s truck and clock rows. The objective line and the prompt never go (§21.1); an OVERTIME row stays.' },
+    { key: 'highContrast', label: 'High contrast — solid panels, white text, thicker borders, a hatched route bar', kind: 'check',
+      note: 'Every notice already leads with a glyph and every state carries a word; this makes the panels opaque over a bright scene. ?hc=1 in the address forces it on.' },
+    { key: 'hints', label: `Hints — the ${Math.round(CONTRACT.stallHintMs / 1000)} s “how to grab” nudge and the → room on each item`, kind: 'check',
+      note: 'Off silences the stall hint (it never fires, not merely hidden) and drops the room suffix from the prompt. The objective line stays.' },
+  ],
 });
 
 export class SettingsPanel {
@@ -150,6 +167,7 @@ export class SettingsPanel {
         <div class="set-group"><div class="set-head">Grip and look</div>${ROWS.grip.map(row).join('')}</div>
         <div class="set-group"><div class="set-head">Display</div>${ROWS.display.map(row).join('')}</div>
         <div class="set-group"><div class="set-head">Sound</div>${ROWS.audio.map(row).join('')}</div>
+        <div class="set-group"><div class="set-head">Reading the screen</div>${ROWS.access.map(row).join('')}</div>
         <div class="set-group set-controls"><div class="set-head">Controls</div>
           <p class="set-note">Rebind, then press the key, mouse button or pad button you want. Esc cancels. A key another action already has is refused and named.</p>
           <div class="set-binds"></div>
@@ -162,7 +180,7 @@ export class SettingsPanel {
       </div>`;
 
     this._defs = new Map();
-    for (const d of [...ROWS.grip, ...ROWS.display, ...ROWS.audio]) this._defs.set(d.key, d);
+    for (const d of [...ROWS.grip, ...ROWS.display, ...ROWS.audio, ...ROWS.access]) this._defs.set(d.key, d);
     this._controls = Array.from(this.el.querySelectorAll('[data-setting]'));
 
     for (const c of this._controls) {

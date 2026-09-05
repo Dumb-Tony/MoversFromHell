@@ -949,10 +949,18 @@ lines.push('--- E13-E16. the couch\'s legs come off (M8: GDD §7.1, §8.2, §3.3
       near('E15g …and currentDimensions() agrees', currentDimensions(couch).y, 0.77, 1e-9);
       lines.push(`      couch ${r.before.y} -> ${r.after.y} m tall; volume ${r.volumeBefore.toFixed(4)} -> ${r.volumeAfter.toFixed(4)} m³; ` +
                  `${r.seconds.toFixed(0)} s of prep`);
-      ok('E15h reassemble() puts them back', !!reassemble(registry, couch, 'legs'));
+      const rb = reassemble(registry, couch, 'legs');
+      ok('E15h reassemble() puts them back', !!rb);
       near('E15i …to exactly 0.85', couch.collider.halfExtents().y * 2, 0.85, 1e-6);
       ok('E15j …with nothing recorded as missing', (couch.state.removedParts || []).length === 0,
          JSON.stringify(couch.state.removedParts));
+      /* E15k (Phase 11 build-side M20): reattaching is labour too — reassemble() returns the
+       * entry's seconds the way disassemble() does (60 × TOOLS.screwdriver.timeScale), and the
+       * collider numbers above are untouched by it. */
+      near(`E15k reassemble() returns seconds ${60 * TOOLS.screwdriver.timeScale} for the couch legs — 60 x TOOLS.screwdriver.timeScale, the same number disassemble() charged (M20, §8.2)`,
+           rb ? rb.seconds : NaN, 60 * TOOLS.screwdriver.timeScale, 1e-9);
+      ok('E15k …and says the entry is reversible', !!rb && rb.reversible === true, rb ? JSON.stringify(rb.reversible) : 'null');
+      near('E15k …the disassemble() seconds it mirrors are the same 60', r.seconds, 60 * TOOLS.screwdriver.timeScale, 1e-9);
     }
   }
 

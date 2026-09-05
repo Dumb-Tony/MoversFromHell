@@ -26,6 +26,16 @@
  */
 
 import { EVENTS } from '../core/eventBus.js';
+import { NOTICE_GLYPHS } from './hud.js';
+
+/* THE 'WHAT HAPPENED' BLOCK (Phase 11 build-side M19 — §21.4 Cognition "objective history").
+ * A notice lives 3.2 s on the HUD and is then gone; a player who looked away for the 'strap
+ * gave way' has no way to find out what that thud was. The pause card is the one screen a
+ * player opens to take stock, so it lists the last DEBUG.historyLen notices — sim-time stamp,
+ * kind glyph (the HUD's own NOTICE_GLYPHS, so a kind reads the same in both places), the
+ * text, and the seat it was addressed to when it was not everyone's. The ring is main.js's
+ * (`history` below reads it); this card only draws it, on refresh(), and draws nothing when
+ * it is empty. Never a checklist of the manifest (§21.1) — it is what was SAID, in order. */
 
 export class PauseScreen {
   /**
@@ -34,8 +44,10 @@ export class PauseScreen {
    * @param {import('../core/eventBus.js').EventBus} [opts.bus]
    * @param {() => boolean} [opts.isPaused]    reads game.state.paused
    * @param {() => boolean} [opts.suppressed]  the title or the settlement sheet is up
+   * @param {() => Array<{text: string, kind: string, seat: number|null, tMs: number}>} [opts.history]
+   *        the shell's notice ring, oldest first (M19)
    */
-  constructor(root, { bus = null, isPaused = () => false, suppressed = () => false } = {}) {
+  constructor(root, { bus = null, isPaused = () => false, suppressed = () => false, history = () => [] } = {}) {
     this.el = document.createElement('div');
     this.el.id = 'pause-screen';
     this.el.hidden = true;
@@ -44,6 +56,10 @@ export class PauseScreen {
         <div class="word">PAUSED</div>
         <div class="tag">the clock is stopped — nothing moves and no labour is billed</div>
         <div class="why" hidden></div>
+        <div class="history" hidden>
+          <div class="hhead">What happened</div>
+          <ol class="hlist"></ol>
+        </div>
         <div class="buttons">
           <button class="primary" type="button" data-act="resume">Resume</button>
           <button type="button" data-act="restart">Restart the contract</button>
@@ -54,6 +70,10 @@ export class PauseScreen {
         </div>
       </div>`;
     root.appendChild(this.el);
+    this.history = typeof history === 'function' ? history : () => [];
+    this._history = this.el.querySelector('.history');
+    this._historyList = this.el.querySelector('.hlist');
+    this._historyHtml = '';
 
     // The card is one of the places the UI layer accepts input, so it opts back in — #ui is
     // pointer-events:none precisely so a panel can never swallow a grip (§21.1).
@@ -106,5 +126,35 @@ export class PauseScreen {
     this._why.hidden = !this.reason;
     this._why.textContent = this.reason ? `paused — ${this.reason}` : '';
     this._settings.hidden = !this.onSettings;
+    if (show) this._renderHistory();
   }
+
+  /** The 'What happened' rows from the shell's ring: oldest first, stamp · glyph · text · seat.
+   *  Hidden outright when there is nothing to say. The DOM is touched only when the rows
+   *  changed (the card redraws on every pause). */
+  _renderHistory() {
+    const list = this.history() || [];
+    const rows = list.map((n) => {
+      const kind = NOTICE_GLYPHS[n.kind] ? n.kind : 'info';
+      const seat = n.seat === null || n.seat === undefined ? '' : `<span class="s">P${Number(n.seat) + 1}</span>`;
+      return `<li class="h ${kind}" data-t="${Math.round(n.tMs || 0)}"><span class="t">${stamp(n.tMs)}</span>` +
+        `<span class="g">${NOTICE_GLYPHS[kind]}</span><span class="x">${esc(n.text)}</span>${seat}</li>`;
+    }).join('');
+    this._history.hidden = rows.length === 0;
+    if (rows !== this._historyHtml) { this._historyHtml = rows; this._historyList.innerHTML = rows; }
+  }
+
+  /** The rows on show right now — for a suite (m27 A4). */
+  historyRows() { return Array.from(this._historyList.querySelectorAll('li')); }
+}
+
+/** m:ss of sim time, the clock the notice was raised on. */
+function stamp(ms) {
+  const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }

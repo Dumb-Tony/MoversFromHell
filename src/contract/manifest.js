@@ -300,18 +300,44 @@ export function rowWhere(row, registry) {
 }
 
 /**
+ * THE ONE DEFINITION OF "LEFT BEHIND" (Phase 11 build-side M20; §15.1 the invoice names what
+ * it bills, §26.1 "invoice reports … accurately", §4.4 the prompt prices what the key does):
+ * every REQUIRED manifest row that is not delivered — whatever its whereabouts: the old
+ * house, the road, the truck, or the new house's hallway not yet settled in a room.
+ *
+ * The invoice's LEFT_BEHIND line bills exactly these rows (invoice.js itemsLeftBehind is this
+ * function over state.manifest) and the cab's Q prompt prices exactly these rows (tripStatus
+ * below → interact.js settlement()). Until M20 there were two definitions: the prompt priced
+ * only the rows that needed another trip ('away'), the invoice billed every undelivered row,
+ * and a box still on the truck made the settlement one item (60.00) larger than the prompt had
+ * promised (KNOWN_ISSUES, Phase 21 M13). Not to be confused with DELIVERED, which this never
+ * touches: a row is delivered by MANIFEST.dwellMs of settled dwell at the destination
+ * (stepManifest) and nothing here re-decides it.
+ */
+export function undeliveredRows(rows) {
+  return (rows || []).filter((r) => r.required !== false && !r.delivered);
+}
+
+/**
  * The counts the cab prompt and the objective line need every frame (M13), without
  * deliveryStatus()'s per-row records: how many undelivered rows are away (another trip),
  * loaded (on the truck) or at the site (carry them in). Pure; 23 rows and their pieces.
  *
- * @returns {{away: number, inTruck: number, atSite: number, delivered: number, total: number}}
+ * M20: the rows are undeliveredRows() — the set the invoice bills — so away + inTruck +
+ * atSite === notDelivered by construction, and `notDeliveredIds` names them for the prompt.
+ *
+ * @returns {{away: number, inTruck: number, atSite: number, delivered: number, total: number,
+ *            notDelivered: number, notDeliveredIds: string[]}}
  */
 export function tripStatus(rows, registry) {
-  const out = { away: 0, inTruck: 0, atSite: 0, delivered: 0, total: rows.length };
-  for (const row of rows) {
-    if (row.delivered) { out.delivered++; continue; }
+  const out = { away: 0, inTruck: 0, atSite: 0, delivered: 0, total: rows.length,
+                notDelivered: 0, notDeliveredIds: [] };
+  for (const row of rows) if (row.delivered) out.delivered++;
+  for (const row of undeliveredRows(rows)) {
     const w = rowWhere(row, registry).where;
     if (w === 'away') out.away++; else if (w === 'truck') out.inTruck++; else out.atSite++;
+    out.notDelivered++;
+    out.notDeliveredIds.push(row.id);
   }
   return out;
 }

@@ -78,11 +78,14 @@ export class InteractionSystem {
    *        seconds are spent HERE, on the clock the invoice reads, rather than by freezing
    *        the player for a minute — the cost is real and the hands stay free. Defaults to
    *        a no-op for suites that build this system without a Game. Phase 11 M8.
-   * @param {()=>{away:number}} [tripStatus]  how many manifest rows still need another
-   *        trip (manifest.js tripStatus — 'away' rows: not on the truck, not at the
-   *        destination, or with a loose piece that is neither). The cab reads it at the
-   *        destination to offer §3.4's "crew elects another trip" beside settling up (M13).
-   *        Defaults to nothing away, which is today's single-trip cab.
+   * @param {()=>{away:number, inTruck?:number, atSite?:number, notDelivered?:number, notDeliveredIds?:string[]}} [tripStatus]
+   *        how many manifest rows still need another trip (manifest.js tripStatus — 'away'
+   *        rows: not on the truck, not at the destination, or with a loose piece that is
+   *        neither). The cab reads it at the destination to offer §3.4's "crew elects another
+   *        trip" beside settling up (M13). M20: the same call carries `notDelivered` and its
+   *        ids — manifest.js undeliveredRows, the set the invoice bills — so settlement()
+   *        can price what Q will actually settle for. Defaults to nothing away and nothing
+   *        undelivered, which is today's single-trip cab.
    */
   constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus,
                 setPhase = null, now = null, manifestRow = null, roomLabel = null,
@@ -101,12 +104,16 @@ export class InteractionSystem {
     this.manifestRow = typeof manifestRow === 'function' ? manifestRow : () => null;
     this.roomLabel = typeof roomLabel === 'function' ? roomLabel : (id) => id;
     this.chargeWorkMs = typeof chargeWorkMs === 'function' ? chargeWorkMs : () => {};
-    this.tripStatus = typeof tripStatus === 'function' ? tripStatus : () => ({ away: 0 });
+    this.tripStatus = typeof tripStatus === 'function' ? tripStatus
+      : () => ({ away: 0, inTruck: 0, atSite: 0, notDelivered: 0, notDeliveredIds: [] });
 
     /** Per-mover interaction state, keyed by the mover's stable id (§22.4). */
     this.state = new Map();
     this.anchors = cargoAnchors();
     this.lastMessage = '';
+    /** §21.4 Cognition "optional hints" (Phase 11 build-side M19): the shell's `hints` switch,
+     *  written by main.js. Off, _roomHint returns '' and the prompt names the object alone. */
+    this.hints = true;
   }
 
   _for(moverId) {
@@ -137,6 +144,9 @@ export class InteractionSystem {
     const grips = mover.grips;
     const frame = grips.aim();
     const origin = frame.origin;
+    /* The ray's origin is the camera's UN-NUDGED solve (grip.js aimOrigin → camera.js
+     * unshakenEye, M20): a road jolt or a nearby impact moves the picture for up to
+     * settleMs, never where this ray starts (§4.4 "what you see is what you aim"; m24 K6d). */
     const camOrigin = frame.camOrigin;
     const dir = frame.dir;
 
@@ -354,6 +364,7 @@ export class InteractionSystem {
    *  panel's 'right room' line appears only AFTER the first delivery; this names the room
    *  BEFORE the pickup, which is when the choice is made (§21.1, §26.7). */
   _roomHint(entity) {
+    if (!this.hints) return '';   // M19: the hints switch, at the source
     // A loose piece (M12) goes where its parent goes: the leg's room is the couch's row.
     const link = entity.state.partOf || entity.state.fragmentOf;
     const row = this.manifestRow(link ? link.entityId : entity.id);
@@ -361,15 +372,20 @@ export class InteractionSystem {
     return ` → ${this.roomLabel(row.toZone)}`;
   }
 
-  /** Q's line for an object with a part off (M12): 'put the legs back on' when every piece
-   *  is within PARTS.reattachRange, else 'find the legs (1 of 4 missing)' — the same
-   *  partStatus reassemble() refuses on, so the prompt never promises what Q cannot do. */
+  /** Q's line for an object with a part off (M12): 'put the legs back on — 60 s' when every
+   *  piece is within PARTS.reattachRange, else 'find the legs (1 of 4 missing)' — the same
+   *  partStatus reassemble() refuses on, so the prompt never promises what Q cannot do.
+   *  M20: the line CARRIES THE COST (§4.4, §8.2 — both directions of a disassembly are
+   *  preparation, and the price is on the screen before the key), and a part authored
+   *  non-reversible reads 'the legs cannot be put back' — Q says the same and does nothing,
+   *  the M12 refusal's shape. */
   _partLabel(entity) {
     const part = (entity.state.removedParts || [])[0];
     if (!part) return null;
     const st = partStatus(this.registry, entity, part);
+    if (!st.reversible) return `the ${part} cannot be put back`;
     if (st.missing > 0) return `find the ${part} (${st.missing} of ${st.of} missing)`;
-    return `put the ${part} back on`;
+    return `put the ${part} back on — ${st.seconds.toFixed(0)} s`;
   }
 
   _applyLabel(tool, t) {
@@ -458,15 +474,63 @@ export class InteractionSystem {
     }
     if (this.route.state === 'arrived') {
       const away = this._away();
-      return away > 0 ? `drive back for ${away} more` : 'finish the job and settle up';
+      // M20: with nothing away, E is the settlement — priced like Q's would be when anything
+      // is still undelivered (on the truck, or here but not yet in a room); bare otherwise.
+      return away > 0 ? `drive back for ${away} more` : `finish the job and settle up${this._settlementWords()}`;
     }
     return null;
   }
 
+  /**
+   * What settling up NOW would bill, priced the way the invoice will bill it (M20; §4.4,
+   * §15.1, §26.1). ONE definition: every undelivered required row — manifest.js
+   * undeliveredRows, which invoice.js itemsLeftBehind reads for the LEFT_BEHIND line —
+   * with where those rows are, so the line can say '1 still on the truck'. Until M20 the
+   * prompt priced only the rows that needed another trip (`away`), and a box still on the
+   * truck made the settlement one item larger than the prompt had promised (KNOWN_ISSUES,
+   * Phase 21). Only at the destination; elsewhere the question does not arise.
+   * @returns {{n:number, cost:number, away:number, inTruck:number, atSite:number, ids:string[]}}
+   */
+  settlement() {
+    if (this.route.state !== 'arrived') return { n: 0, cost: 0, away: 0, inTruck: 0, atSite: 0, ids: [] };
+    const s = this.tripStatus() || {};
+    const away = s.away > 0 ? s.away : 0;
+    const inTruck = s.inTruck > 0 ? s.inTruck : 0;
+    const atSite = s.atSite > 0 ? s.atSite : 0;
+    const n = Number.isFinite(s.notDelivered) ? s.notDelivered : away + inTruck + atSite;
+    const ids = Array.isArray(s.notDeliveredIds) ? s.notDeliveredIds.slice() : [];
+    return { n, cost: n * ECONOMY.leftBehindFee, away, inTruck, atSite, ids };
+  }
+
+  /** The price, in words, appended to a cab line: ' — 22 not delivered (1320.00), 1 still on
+   *  the truck'. Empty when nothing is undelivered. */
+  _settlementWords() {
+    const st = this.settlement();
+    if (st.n <= 0) return '';
+    let words = ` — ${st.n} not delivered (${st.cost.toFixed(2)})`;
+    if (st.inTruck > 0) words += `, ${st.inTruck} still on the truck`;
+    if (st.atSite > 0) words += `, ${st.atSite} here but not yet in a room`;
+    return words;
+  }
+
   _cabSecondary() {
-    const away = this._away();
-    if (away <= 0) return null;
-    return `settle up — leave ${away} behind (${(away * ECONOMY.leftBehindFee).toFixed(2)})`;
+    // With nothing away, E settles (the cab is what it always was) and Q offers nothing.
+    if (this._away() <= 0) return null;
+    return `settle up${this._settlementWords()}`;
+  }
+
+  /** Settle NOW — M13's Q with rows still away, or E with nothing away. ONE place (M20), so
+   *  the two keys cannot carry different numbers: the SETTLEMENT phase event carries what the
+   *  invoice will bill (settlement(): the M20 count and where those rows are) and the notice
+   *  names it — 'settling up — 22 not delivered (1 still on the truck)' — or is the bare
+   *  'settling up' when nothing is undelivered, as it always was (m21 T3d/T3e, T6, T8). */
+  _settle() {
+    const st = this.settlement();
+    this.setPhase(PHASES.SETTLEMENT,
+      { ok: true, leftBehind: st.n, away: st.away, inTruck: st.inTruck, atSite: st.atSite });
+    if (st.n <= 0) return this._say('settling up');
+    return this._say(`settling up — ${st.n} not delivered` +
+                     (st.inTruck > 0 ? ` (${st.inTruck} still on the truck)` : ''));
   }
 
   /* ── acting ───────────────────────────────────────────────────────────────────── */
@@ -544,10 +608,11 @@ export class InteractionSystem {
      * the put-downs above, because describe() promises "put down the …" whenever a tool is
      * carried, whatever is under the reticle — m11 B6 holds the prompt to its word. */
     if (t.kind === TARGET.CAB) {
-      const away = this._away();
-      if (away <= 0) return null;
-      this.setPhase(PHASES.SETTLEMENT, { ok: true, leftBehind: away });
-      return this._say(`settling up — ${away} left behind`);
+      if (this._away() <= 0) return null;
+      /* M20: the count is the invoice's — every undelivered row, on the truck or not — so
+       * the notice, the prompt and the LEFT_BEHIND line say one number (m21 T3b/T3c/T3d);
+       * _settle() is the same call E makes with nothing away, so E and Q cannot differ. */
+      return this._settle();
     }
 
     if (t.kind === TARGET.OBJECT) {
@@ -567,19 +632,31 @@ export class InteractionSystem {
       }
       const part = (e.state.removedParts || [])[0];
       if (part) {
+        /* M20: a part authored non-reversible stays off — the prompt said so (§4.4), Q says
+         * the same, and nothing is billed for nothing done. Every shipped entry is reversible. */
+        const st = partStatus(this.registry, e, part);
+        if (!st.reversible) return this._say(`the ${part} cannot be put back`);
         /* M12: reassemble() refuses while a piece is out of PARTS.reattachRange — the part
          * is not back on, nothing changes, and Q says what the prompt said (§4.4: the key
          * means what the line under the reticle said it would). */
         const r = reassemble(this.registry, e, part);
         if (!r) {
-          const st = partStatus(this.registry, e, part);
           return this._say(`${part}: ${st.missing} of ${st.of} missing — find them first`);
         }
         if (this.bus) {
           this.bus.emit(EVENTS.PART_CHANGED,
-            { entityId: e.id, part, action: 'restored', pieces: r.piecesRemoved }, this.now());
+            { entityId: e.id, part, action: 'restored', pieces: r.piecesRemoved, seconds: r.seconds }, this.now());
         }
-        return this._say(`${part} back on`);
+        /* §8.2 "unscrew and REATTACH" — and both directions are "preparation time" (M20).
+         * Until M20 the legs came off for 60 s and went back for nothing, so the round trip
+         * through a doorway was priced once (KNOWN_ISSUES 'Reattaching is free'). The same
+         * entry.seconds × timeScale, on the same chargeWorkMs hook M8 wired for disassembly
+         * (main.js: the labour clock the invoice reads AND the phase's §27.4 line; never in
+         * BRIEFING/SETTLEMENT). A reset's forced reassemble goes through tools.js directly
+         * and never lands here, so a replay cannot bill it (m11 P2d totals the sequence). */
+        const prepMs = r.seconds * 1000;
+        if (prepMs > 0) this.chargeWorkMs(prepMs, { entityId: e.id, part, seconds: r.seconds, action: 'restored' });
+        return this._say(`${part} back on — ${r.seconds.toFixed(0)} s`);
       }
       /* §8.2 "reattach", for the house's own doors (M11): a leaf within DOOR.rehangRange of
        * its jamb goes back on its hinges — Fixed again at its home pose, the clear width
@@ -751,8 +828,10 @@ export class InteractionSystem {
         this.setPhase(PHASES.TRANSIT, { ok: true, returning: true, remaining: away });
         return this._say(`driving back for ${away} more`);
       }
-      this.setPhase(PHASES.SETTLEMENT);
-      return this._say('settling up');
+      /* M20: with nothing away E IS the settlement, and _cabLabel priced it the way Q's line
+       * would ('finish the job and settle up — 1 not delivered (60.00), 1 still on the
+       * truck'); the press carries the same payload and notice as Q's (m21 T3e). */
+      return this._settle();
     }
     return null;
   }

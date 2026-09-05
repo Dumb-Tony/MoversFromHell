@@ -14,7 +14,8 @@
  *                panel, the constructor and this file (INDEX: "route it through the SAME
  *                validator")
  *   shell        UI scale, camera distance, quality tier, the sound levels and captions, the
- *                camera-shake switch (M16) — the shell's, not the input's
+ *                camera-shake switch (M16), the reduced-HUD, high-contrast and hints switches
+ *                (M19) — the shell's, not the input's
  *   bestInvoice  §13.4's "saved best invoice" stub: profit, grade, build
  *   runs         §27.4's local run records (Phase 11 build-side M6): the last
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
@@ -198,7 +199,21 @@ export function sanitiseShell(obj, { reducedMotion = false } = {}) {
     if (Number.isFinite(v) && r[k]) out[k] = clamp(v, r[k]);
   }
   if (typeof obj.captions === 'boolean') out.captions = obj.captions;
+  /* M19: the three §21.4 Cognition/Vision switches are booleans or their defaults — a hand
+   * edit's 'yes', 1 or 'off' is refused the way cameraShake's is (m16 M16-4). */
+  for (const k of ['reducedHud', 'highContrast', 'hints']) {
+    if (typeof obj[k] === 'boolean') out[k] = obj[k];
+  }
   return out;
+}
+
+/** `?hc=1` — high contrast forced on at boot regardless of the save (§21.4 Vision, M19): the
+ *  screenshot path, and a tester's link that arrives readable before they find the card. A
+ *  pure function of the search string, like audio.js audioEnabledFrom, so a suite can ask it
+ *  without a reboot. Only the literal '1' counts; no parameter, or any other value, is "the
+ *  save wins". Never throws. */
+export function highContrastForced(search = '') {
+  try { return new URLSearchParams(search || '').get('hc') === '1'; } catch (e) { return false; }
 }
 
 /** A best invoice is a handful of finite numbers and short strings, or nothing. */

@@ -33,6 +33,15 @@ import { glyphsFor } from '../core/input.js';
 /** Tokens a device-neutral hint may carry; setPrompt resolves them from the glyph set. */
 const GLYPH_TOKEN = /\{(primary|secondary|gripL|gripR)\}/g;
 
+/** §26.5 "states understandable without color alone" / §21.4 Vision (Phase 11 build-side
+ *  M19): each notice KIND's glyph, printed BEFORE the text so a kind is never its border
+ *  colour alone. The pause card's 'What happened' block prints the same table (m27 A3/A4). */
+export const NOTICE_GLYPHS = Object.freeze({ info: '→', good: '✓', warn: '!', damage: '✗' });
+
+/** §11.2's three cargo bands, as a bracketed token beside the word — the row's colour is the
+ *  third cue, never the only one (§26.5). Keyed by the band's CSS class. */
+const CARGO_TOKENS = Object.freeze({ ok: '[ok]', warn: '[!]', bad: '[!!]' });
+
 export class Hud {
   /* CLASSES, NOT IDS. There is one HUD per SEAT in co-op (§6.4), and two elements sharing an
    * id is invalid HTML whose symptom is subtle rather than loud: `document.querySelector`
@@ -116,6 +125,33 @@ export class Hud {
   /** §4.4 and §26.5: which mover this half belongs to, and which device drives it, in words
    *  rather than by the body colour alone — the two movers differ by hue and nothing else. */
   setSeatTag(text) { this._set(this.seatTag, 'seatTag', text ? esc(text) : ''); }
+
+  /**
+   * §21.4 Cognition "reduced HUD" (Phase 11 build-side M19; shell key `reducedHud`). The
+   * contract panel keeps its phase word and manifest count, the cargo panel and the route
+   * bar's label go, and the contract panel's other rows go — except an OVERTIME row, because
+   * a cost being paid right now is never hidden (§2.2 "overtime costs money and work
+   * continues"). What stays is what §21.1 and §26.5 make non-optional: the objective line,
+   * the prompt, the reticle, notices and the caption. CSS does the hiding (styles.css
+   * `.hud.reduced`), so nothing here is rewritten and every feed keeps landing — switching
+   * it back on shows the current numbers at once.
+   */
+  setReduced(on) {
+    const want = !!on;
+    if (this.el.classList.contains('reduced') !== want) this.el.classList.toggle('reduced', want);
+  }
+
+  get reduced() { return this.el.classList.contains('reduced'); }
+
+  /** §21.4 Vision "high contrast" (M19; shell key `highContrast`): the `.hc` class on this
+   *  HUD's root. styles.css keys the opaque panels, white text and 2 px borders off it; main.js
+   *  puts the same class on <body> and on every card, so the whole screen agrees. */
+  setHighContrast(on) {
+    const want = !!on;
+    if (this.el.classList.contains('hc') !== want) this.el.classList.toggle('hc', want);
+  }
+
+  get highContrast() { return this.el.classList.contains('hc'); }
 
   /** Only rewrite a section when its content actually changed. */
   _set(node, key, html) {
@@ -201,7 +237,8 @@ export class Hud {
     const phaseLine = trip > 1 ? `${phase} · trip ${trip}` : phase;
     const html =
       `<div class="phase">${esc(phaseLine)}</div>` +
-      `<div class="row"><span>manifest</span><b>${delivered} / ${total}</b></div>` +
+      // `.manifest`: the one row the reduced HUD keeps beside the phase word (M19, §21.1).
+      `<div class="row manifest"><span>manifest</span><b>${delivered} / ${total}</b></div>` +
       `<div class="row"><span>in the truck</span><b>${loaded}</b></div>` +
       (delivered > 0 ? `<div class="row"><span>right room</span><b>${roomCorrect} / ${delivered}</b></div>` : '') +
       `<div class="row${over ? ' over' : ''}"><span>${over ? 'OVERTIME' : 'time'}</span><b>${time}</b></div>`;
@@ -220,7 +257,8 @@ export class Hud {
     const cls = pct === 0 ? 'ok' : pct < 35 ? 'warn' : 'bad';
     const html =
       `<div class="row"><span>cargo</span><b>${q.loadedCount} items · ${Math.round(q.totalMass)} kg</b></div>` +
-      `<div class="row ${cls}"><span>${band}</span><b>${Number.isFinite(q.quality) ? `${Math.round(q.quality * 100)}% pack · ` : ''}${pct}% unstrapped</b></div>` +
+      // M19: the band's bracketed token beside the word — §26.5, never the colour alone.
+      `<div class="row ${cls}"><span>${band} <span class="tok">${CARGO_TOKENS[cls]}</span></span><b>${Number.isFinite(q.quality) ? `${Math.round(q.quality * 100)}% pack · ` : ''}${pct}% unstrapped</b></div>` +
       `<div class="row"><span>space used</span><b>${Math.round(q.volumeFraction * 100)}%</b></div>`;
     this._set(this.cargoStatus, 'cargo', html);
   }
@@ -233,7 +271,10 @@ export class Hud {
     }
     if (!driving) return;
     this.routeFill.style.width = `${(status.progress * 100).toFixed(1)}%`;
-    const text = status.event ? status.event : 'on the road';
+    /* The route STATE's own word when nothing is happening (M19, §26.5 — the bar's lime fill
+     * is not the only cue), the event's name when something is; the objective line above
+     * says 'on the road — 42% there' already, so the label does not repeat it. */
+    const text = status.event ? status.event : 'driving';
     if (this.routeLabel.textContent !== text) this.routeLabel.textContent = text;
     this.routeLabel.className = 'label' + (status.event ? ' event' : '');
   }
@@ -281,8 +322,9 @@ export class Hud {
   get captionsEnabled() { return !this.caption.hidden; }
 
   _renderNotices() {
+    // M19: the kind's glyph first (NOTICE_GLYPHS), so textContent begins with it (m27 A3).
     const html = this._notices
-      .map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join('');
+      .map((n) => `<div class="notice ${n.kind}"><span class="glyph">${NOTICE_GLYPHS[n.kind] || NOTICE_GLYPHS.info}</span> ${esc(n.text)}</div>`).join('');
     this._set(this.notices, 'notices', html);
   }
 }

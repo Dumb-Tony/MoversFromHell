@@ -22,7 +22,9 @@
  *                 rig, persists, and defaults from prefers-reduced-motion (K5, K7).
  *   PURE          yaw and pitch are the player's: identical before and after a nudge, and
  *                 300 frames of nudges change nothing in game.state that 300 idle frames do
- *                 not (K6).
+ *                 not (K6). M20: nor the AIM — the grab ray starts from the un-nudged solve
+ *                 (grips.aimOrigin = the twin's eye to 1e-6 mid-nudge) and a grab attempted
+ *                 mid-nudge lands where the rest grab did, within 5 mm (K6c/K6d).
  *
  * localStorage 'mfh.save' is cleared at the start and the end (K5 persists a choice).
  */
@@ -125,6 +127,16 @@ function placeMover(m, x, z, y = 0.2) {
   m.controller.carriedMass = 0; m.controller.resistedForce = 0;
   m.controller.pull.x = 0; m.controller.pull.z = 0;
   m.controller.imbalance = 0; m.controller.exertion = 0; m.controller._downMs = 0;
+}
+/** Park a registry entity somewhere, at rest, and make it visible to the next raycast
+ *  (tools/m11-tests.js parkAt). M20, for K6c/K6d's box. */
+function parkAt(e, x, y, z, yaw = 0) {
+  e.body.setTranslation({ x, y, z }, true);
+  e.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+  e.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  e.body.wakeUp();
+  physics.primeQueries();
 }
 /** Snap a rig's follow and boom onto its mover (and its twin's), then let both converge. */
 function settleRig(i, frames = 120) {
@@ -447,11 +459,93 @@ lines.push('--- K6. the shake never touches yaw/pitch or game.state (§22.4) ---
   ok('K6b …so the aim ray\'s direction is untouched (grips.aimYaw after syncAim)', (movers[0].grips.syncAim(), movers[0].grips.aimYaw === yaw));
   tick(180); clearAll();
 
+  /* K6c/K6d — NOR THE AIM RAY'S ORIGIN (Phase 11 build-side M20; §4.4 "what you see is what
+   * you aim"). M16 recorded that GripSystem.aim() read camera.position, so for up to settleMs
+   * after a jolt a grab could start up to maxOffset from where the player aimed. Now the ray
+   * starts from the boom solve BEFORE the offset (camera.js unshakenEye → grip.js aimOrigin):
+   * the shake moves what you see, never where the ray starts. Fixture: mover 0 on the lawn at
+   * (-22, 30) — the m11 B/P spot, clear by construction — looking −z at a small box 1.5 m
+   * ahead. The section's former K6c-K6e (state purity) are K6e-K6g below, unchanged. */
+  {
+    const box = [...M.registry.entities.values()].find((e) => e.defId === 'box_small_01');
+    ok('K6 fixture: a small box to aim at', !!box);
+    if (box) {
+      const boxHome = V3(box.body.translation());
+      const boxRot = (() => { const q = box.body.rotation(); return { x: q.x, y: q.y, z: q.z, w: q.w }; })();
+      const AT = { x: -22, z: 30 };
+      const BOX = { x: AT.x, y: box.def.dimensions.y / 2 + 0.01, z: AT.z - 1.5 };
+      placeMover(movers[0], AT.x, AT.z);
+      parkAt(box, BOX.x, BOX.y, BOX.z);
+      rigOf(0).yaw = 0; rigOf(0).pitch = -0.3;
+      settleRig(0, 120);
+      /* Aim from where the camera actually is (m11 lookAt's second stage) — ITERATED, because
+       * the eye rises as the pitch dips (eye.y = target.y − sin(pitch) × boom): one pass from
+       * a −0.30 rad camera lands at −0.44, whose eye is 0.5 m higher and looks over a 0.5 m
+       * box (measured, tools/_m20-probe). Ten passes converge the fixed point to < 1 mrad. */
+      for (let it = 0; it < 10; it++) {
+        const c = V3(camOf(0).position);
+        rigOf(0).yaw = Math.atan2(-(BOX.x - c.x), -(BOX.z - c.z));
+        rigOf(0).pitch = Math.atan2(BOX.y - c.y, Math.hypot(BOX.x - c.x, BOX.z - c.z));
+        tick(12);
+      }
+      tick(60);
+      physics.primeQueries();
+      const g = movers[0].grips;
+      g.syncAim();
+      eq('K6 fixture: at rest grips.aimOrigin() IS camera.position, byte for byte (the m2/m3/m4 grab fixtures see what they always did)',
+         dist(g.aimOrigin(), V3(camOf(0).position)), 0);
+      eq('K6 fixture: …and the rig and its twin agree at rest', offMag(0), 0);
+      const restHit = g.probe();
+      ok('K6 fixture: the box is under the reticle at rest, within reach', !!restHit && restHit.entity === box,
+         restHit ? `${restHit.entity.id} at ${restHit.armLength.toFixed(2)} m` : 'no hit');
+      const gripRest = g.tryGrab('right', movers[0].id, now());
+      ok('K6 fixture: …and a grab at rest takes it', !!gripRest && gripRest.entityId === box.id, gripRest ? gripRest.entityId : 'null');
+      g.release('right', 'released', now());
+
+      // A 50 mm sideways nudge, applied in full on the next update (K2).
+      rigOf(0).nudge({ x: 0.05, y: 0, z: 0 });
+      tick(1);
+      const twinEye = V3(twinOf(0).camera.position);
+      const origin = g.aimOrigin();
+      const dCam = dist(V3(camOf(0).position), twinEye);
+      ok('K6c during a 50 mm nudge camera.position differs from the shake-free twin\'s eye by > 0.01 m', dCam > 0.01, `${(dCam * 1000).toFixed(2)} mm`);
+      ok('K6c …while grips.aimOrigin() equals the twin\'s eye to 1e-6 on every axis — the ray starts from the un-nudged solve',
+         Math.abs(origin.x - twinEye.x) <= 1e-6 && Math.abs(origin.y - twinEye.y) <= 1e-6 && Math.abs(origin.z - twinEye.z) <= 1e-6,
+         `origin ${JSON.stringify(origin)} twin ${JSON.stringify(twinEye)}`);
+      ok('K6c …so the origin is NOT the shaken camera (differs from camera.position by > 0.01 m)', dist(origin, V3(camOf(0).position)) > 0.01,
+         `${(dist(origin, V3(camOf(0).position)) * 1000).toFixed(2)} mm`);
+      const hit = g.probe();
+      ok('K6d a probe mid-nudge hits the same entity as at rest', !!hit && !!restHit && hit.entity === restHit.entity,
+         hit ? hit.entity.id : 'no hit');
+      const dHit = hit && restHit ? dist(hit.point, restHit.point) : NaN;
+      ok('K6d …at a point within 5 mm of the rest hit', dHit <= 0.005, `${(dHit * 1000).toFixed(2)} mm`);
+      const gripNudged = g.tryGrab('right', movers[0].id, now());
+      const dLocal = gripNudged && gripRest ? dist(gripNudged.localPoint, gripRest.localPoint) : NaN;
+      ok('K6d …and a grab attempted mid-nudge succeeds exactly as at rest: same entity, grip point within 5 mm',
+         !!gripNudged && !!gripRest && gripNudged.entityId === gripRest.entityId && dLocal <= 0.005,
+         `${gripNudged ? gripNudged.entityId : 'null'} vs ${gripRest ? gripRest.entityId : 'null'}, ${(dLocal * 1000).toFixed(2)} mm`);
+      g.release('right', 'released', now());
+      lines.push(`      50 mm nudge: camera moved ${(dCam * 1000).toFixed(2)} mm, aim origin ${(dist(origin, twinEye) * 1e6).toFixed(3)} µm off the un-nudged solve, ` +
+                 `hit point moved ${(dHit * 1000).toFixed(3)} mm, grip point ${(dLocal * 1000).toFixed(3)} mm`);
+      tick(180); clearAll();
+      // The fixture, undone: the box back where it lives, the mover back on the driveway.
+      box.body.setTranslation(boxHome, true);
+      box.body.setRotation(boxRot, true);
+      box.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      box.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      box.body.wakeUp();
+      physics.primeQueries();
+      placeMover(movers[0], HOME.x, HOME.z);
+      rigOf(0).yaw = 1.234; rigOf(0).pitch = -0.31;
+      settleRig(0, 60);
+    }
+  }
+
   // Paused: 300 frames of nudges and updates change NOTHING in the state.
   game.setPaused(true);
   const before = JSON.stringify(game.state);
   for (let k = 0; k < 300; k++) { rigOf(0).nudge({ x: 0.02, y: 0.02, z: 0.02 }, { pitch: 5 }); tick(1); }
-  eq('K6c 300 frames of nudges on a paused sim leave game.state JSON identical', JSON.stringify(game.state), before);
+  eq('K6e 300 frames of nudges on a paused sim leave game.state JSON identical (was K6c before M20)', JSON.stringify(game.state), before);
   game.setPaused(false);
   clearAll(); tick(120);   // steady state before the control run
 
@@ -462,9 +556,9 @@ lines.push('--- K6. the shake never touches yaw/pitch or game.state (§22.4) ---
   for (let k = 0; k < 300; k++) { rigOf(0).nudge({ x: 0.02, y: 0.02, z: 0.02 }, { pitch: 5 }); tick(1); }
   const b1 = snapshot();
   const nudged = diffPaths(b0, b1).sort();
-  eq('K6d 300 running frames of nudges change exactly the state paths 300 idle frames change (the clock\'s)',
+  eq('K6f 300 running frames of nudges change exactly the state paths 300 idle frames change (the clock\'s; was K6d)',
      nudged.join(','), idle.join(','));
-  ok('K6e …and no state path mentions the shake', !/shake/i.test(JSON.stringify(b1)));
+  ok('K6g …and no state path mentions the shake (was K6e)', !/shake/i.test(JSON.stringify(b1)));
   lines.push(`      idle-frame paths: ${idle.join(', ') || '(none)'}`);
   clearAll();
 }

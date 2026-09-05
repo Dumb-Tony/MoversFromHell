@@ -427,6 +427,36 @@ lines.push('--- I. §21.1 centre clear (m11 F2 repaired), the M4 slot, the blur 
 }
 emit('running...');
 
+/* ── M19 (Phase 11 build-side): the 'What happened' block on the card ─────────────
+ * §21.4 Cognition "objective history". The block is main.js's notice ring drawn on refresh():
+ * hidden when the ring is empty (the card reads as it did through P1-P5), rows when it is
+ * not, and it intercepts no keys — an Escape typed over it is still the pause toggle (P5).
+ * m27 A4 pins the ring's contents; here only that the card's behaviour is unchanged. */
+lines.push('--- M19. the pause card\'s history block (§21.4 Cognition) ---');
+{
+  const block = () => card().querySelector('.history');
+  ok('M19-1 the card carries a history block', !!block());
+  M.noticeHistory.length = 0;
+  game.setPaused(true);
+  eq('M19-2 paused with an empty ring, the block is hidden (the card reads as before)', block().hidden, true);
+  ok('M19-2a …and the card still says PAUSED with its two buttons (P1a/P1c)',
+     /PAUSED/.test(text()) && !!card().querySelector('[data-act="resume"]') && !!card().querySelector('[data-act="restart"]'));
+  game.setPaused(false);
+  M.pendingNotices.push({ text: 'a strap gave way', kind: 'damage' });
+  M.drainNotices();
+  game.setPaused(true);
+  eq('M19-3 one drained notice → the block shows one row', card().querySelectorAll('.hlist li').length, 1);
+  ok('M19-3a …with the text and a glyph', /a strap gave way/.test(block().textContent) && block().querySelector('.hlist .g').textContent.length > 0);
+  block().dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true, cancelable: true }));
+  key('keyup', 'Escape');
+  frame();
+  eq('M19-4 an Escape typed over the block still resumes (it intercepts no keys — P5)', game.state.paused, false);
+  eq('M19-4a …and the card is gone', card().hidden, true);
+  M.noticeHistory.length = 0;
+  huds[0]._notices.length = 0;
+}
+emit('running...');
+
 /* ── J. it still runs ───────────────────────────────────────────────────────────── */
 lines.push('--- J. the build survives all of the above ---');
 {
