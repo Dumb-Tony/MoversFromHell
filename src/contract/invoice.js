@@ -272,8 +272,15 @@ export function buildInvoice(state, summary, opts = {}) {
      * agrees with the JSON export, which carried the ids all along. Solo says nothing extra
      * (§21.1 compact), and a thrown object has no holder to name. */
     const who = propertyHolders(propLines, seatCount);
+    /* §8.3's "maximum charge", said out loud (M30). A surface that reached
+     * DAMAGE.property.maxChargePerSurface stopped costing money and did NOT stop being hit —
+     * the further hits are EVENTS.PROPERTY_CAPPED, notices and marks with no line — so the
+     * total under-reports the afternoon unless the sheet says why. One line is flagged per
+     * surface (damage.js: the one whose charge was trimmed), so this is a count of surfaces. */
+    const atCap = new Set(propLines.filter((l) => l.capped).map((l) => l.surfaceId)).size;
     add(LINE_KINDS.PROPERTY_DAMAGE, -propTotal,
         `${propLines.length} impact${propLines.length === 1 ? '' : 's'} on ${surfaces} surface${surfaces === 1 ? '' : 's'}` +
+        (atCap ? ` (${atCap} at the cap)` : '') +
         (who ? ` — ${who}` : ''),
         propLines.map((l) => l.surfaceId || 'surface'));
   }

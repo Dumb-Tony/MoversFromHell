@@ -28,11 +28,12 @@
  */
 
 import { mixFor, atten, RANGE, CUES, SILENT_EVENTS, cueFor, resolveCue, cueVolume, GameAudio,
-         audioEnabledFrom, directionGlyph, panFor, tone, noiseBurst, makeNoise } from '../src/audio/audio.js';
+         audioEnabledFrom, directionGlyph, panFor, tone, noiseBurst, makeNoise,
+         captionText } from '../src/audio/audio.js';   // M30: a caption cell is a string OR a function
 import { EVENTS, PHASES, EventBus } from '../src/core/eventBus.js';
 // M28: §8.4's fourth channel reads the SAME cue-type list — A1g/A1h below extend A1's walk.
 import { HAPTIC_TYPES, hapticFor } from '../src/audio/haptics.js';
-import { AUDIO, SETTINGS, HAPTICS } from '../src/config.js';
+import { AUDIO, SETTINGS, HAPTICS, TELEMETRY } from '../src/config.js';
 import { load, SAVE_KEY, SHELL_DEFAULTS } from '../src/core/save.js';
 
 const lines = [];
@@ -187,9 +188,26 @@ lines.push('--- A1. every EVENTS name has a cue or is silent on purpose (GDD §2
   ok('A1a1 …and every silent name is a real event', silentUnknown.length === 0, silentUnknown.join(','));
   lines.push(`      ${cueKeys.length} cued, ${SILENT_EVENTS.length} silent, ${eventNames.length} events`);
 
-  // Every row and every variant: a bus that exists, a gap, parts, and a §21.4 caption.
+  /* Every row and every variant: a bus that exists, a gap, parts, and a §21.4 caption.
+   *
+   * A1b IS RESTATED HERE, NOT DELETED (Phase 11 build-side M30). From M9 to M28 this line
+   * asserted `typeof v.caption === 'string'`, and that pin is precisely why every property cue
+   * said 'wall scuffed' when a door frame was scuffed — KNOWN_ISSUES Phase 21, M14, "Property
+   * captions are generic ... m18 A1b pins string captions, so the audio cannot name the
+   * surface". The pin is now: a caption cell is a NON-EMPTY STRING **or** a PURE FUNCTION of
+   * the payload, and what is asserted is unchanged in force — every row and every variant
+   * yields a non-empty caption, for a representative payload. A1b1/A1b2 add the two things the
+   * function form has to be held to that a literal never needed: purity (the table walk, two
+   * seats and a replay must all read the same words for the same event) and a bound on the
+   * length, since a template can build a string where a literal could only be one. */
+  const SAMPLE = Object.freeze({
+    surfaceId: 'doorHeader_living_kitchen', location: 'living_kitchen door frame',
+    band: 'scuffed', materials: ['wood'], entityId: 'box_small_01', defId: 'box_small_01',
+    cost: 12.5, reason: 'slipped', state: 'failed', roadType: 'hardBrake', to: PHASES.PICKUP,
+    action: 'removed', doorId: 'living_kitchen', heldBy: [], loaded: true, pieces: 2,
+  });
   const bad = [];
-  let variants = 0;
+  let variants = 0, templates = 0;
   for (const [name, row] of Object.entries(CUES)) {
     if (!['ui', 'world', 'foley'].includes(row.bus)) bad.push(`${name}: bus ${row.bus}`);
     if (!(Number.isFinite(row.minGapMs) && row.minGapMs >= 0)) bad.push(`${name}: minGapMs`);
@@ -197,14 +215,35 @@ lines.push('--- A1. every EVENTS name has a cue or is silent on purpose (GDD §2
     if (row.variants && !row.variants._) bad.push(`${name}: no _ fallback`);
     for (const [k, v] of leaves) {
       variants++;
-      if (!(typeof v.caption === 'string' && v.caption.trim().length > 0)) bad.push(`${name}${k ? '.' + k : ''}: caption`);
-      if (!Array.isArray(v.parts)) bad.push(`${name}${k ? '.' + k : ''}: parts`);
-      if (!v.parts.length && !v.noise) bad.push(`${name}${k ? '.' + k : ''}: no sound at all`);
-      for (const p of v.parts) if (!(p.length >= 5 && p.every((x, i) => i === 3 ? typeof x === 'string' : Number.isFinite(x)))) bad.push(`${name}${k ? '.' + k : ''}: part ${JSON.stringify(p)}`);
+      const where = `${name}${k ? '.' + k : ''}`;
+      const isFn = typeof v.caption === 'function';
+      if (!(isFn || typeof v.caption === 'string')) bad.push(`${where}: caption is ${typeof v.caption}`);
+      const cap = captionText(v.caption, SAMPLE);
+      if (!(typeof cap === 'string' && cap.trim().length > 0)) bad.push(`${where}: caption resolved empty`);
+      if (isFn) {
+        templates++;
+        if (captionText(v.caption, SAMPLE) !== cap) bad.push(`${where}: caption is not pure`);
+        if (cap.length > TELEMETRY.textMax) bad.push(`${where}: caption ${cap.length} chars > ${TELEMETRY.textMax}`);
+        // A template must be TOTAL: an event that arrives with no fields at all is still a
+        // subtitle, never a throw and never a blank line on the HUD.
+        if (!(captionText(v.caption, {}).trim().length > 0)) bad.push(`${where}: caption empty for {}`);
+      }
+      if (!Array.isArray(v.parts)) bad.push(`${where}: parts`);
+      if (!v.parts.length && !v.noise) bad.push(`${where}: no sound at all`);
+      for (const p of v.parts) if (!(p.length >= 5 && p.every((x, i) => i === 3 ? typeof x === 'string' : Number.isFinite(x)))) bad.push(`${where}: part ${JSON.stringify(p)}`);
     }
   }
-  ok('A1b every cue row and every variant has a non-empty caption, a real bus, a gap and a recipe', bad.length === 0, bad.join(' | '));
-  lines.push(`      ${variants} recipes across ${cueKeys.length} rows`);
+  ok('A1b every cue row and every variant yields a non-empty caption (string OR pure function — the M9 string-only pin RESTATED by M30), a real bus, a gap and a recipe',
+     bad.length === 0, bad.join(' | '));
+  lines.push(`      ${variants} recipes across ${cueKeys.length} rows, ${templates} of them caption TEMPLATES`);
+  ok('A1b1 …at least one caption IS a template (M30: the property cues name their surface)', templates >= 6, `${templates}`);
+  eq('A1b2 …and resolveCue evaluates it: DAMAGE_APPLIED {surfaceId:"doorHeader_living_kitchen", band:"scuffed"} captions the DOOR FRAME, not "wall scuffed"',
+     resolveCue('DAMAGE_APPLIED', { surfaceId: 'doorHeader_living_kitchen', band: 'scuffed' }).caption,
+     'living-kitchen door frame scuffed');
+  eq('A1b3 …and a property event with NO surface at all still captions ("a wall holed"), never a blank subtitle',
+     resolveCue('DAMAGE_APPLIED', { band: 'holed' }).caption, 'a wall holed');
+  eq('A1b4 …a caption cell that throws resolves to "" and resolveCue substitutes the variant key',
+     captionText(() => { throw new Error('boom'); }, {}), '');
   // The variant dispatch, on the real payload fields.
   eq('A1c IMPACT on ["wood","furniture"] resolves the wooden thud', resolveCue('IMPACT', { materials: ['wood', 'furniture'] }).variant, 'wood');
   eq('A1c1 …["glass","electronics"] the glass rattle', resolveCue('IMPACT', { materials: ['glass', 'electronics'] }).variant, 'glass');

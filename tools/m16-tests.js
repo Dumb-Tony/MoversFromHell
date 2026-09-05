@@ -408,6 +408,101 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
   eq('U1i back at 1 → prompt 12px', getComputedStyle(huds[0].prompt).fontSize, '12px');
   lines.push(`      styles.css: ${sized.length} font declarations, ${scaled.length} scaled by --ts`);
 
+  /* ---- M29 (Phase 11 build-side): the same walk, for the BOXES that hold that type ---------
+   * U1e says every font-size multiplies by --ts. Until M29 that was only half the sentence:
+   * the panel min-widths, the card widths and the help line were raw px, so the letters grew
+   * inside boxes that did not. Same CSSOM walk, same rule — a width / min-width / max-width
+   * with a px in it either multiplies by var(--ts) or is named in SETTINGS.textSize.pxAllowed
+   * with its reason (the reticle, the route bar, the §21.1 viewport guards, the title card
+   * pinned to its brief sheet). A zero length is not a box. tools/m36-scale-tests.js measures
+   * what the rule buys; this is the rule itself, beside the font one it copies. */
+  const BOX_PROPS = ['width', 'min-width', 'max-width'];
+  const pxAllowed = SETTINGS.textSize.pxAllowed;
+  const rawBoxes = [];
+  let boxCount = 0, allowedBoxes = 0;
+  for (const r of rules) {
+    for (const p of BOX_PROPS) {
+      const v = r.style.getPropertyValue(p);
+      if (!v) continue;
+      const terms = v.match(/-?\d*\.?\d+px/g) || [];
+      if (!terms.length || terms.every((t) => parseFloat(t) === 0)) continue;
+      boxCount++;
+      if (/var\(--ts\)/.test(v)) continue;
+      if (pxAllowed[r.selectorText] && pxAllowed[r.selectorText].includes(p)) { allowedBoxes++; continue; }
+      rawBoxes.push(`${r.selectorText} { ${p}: ${v} }`);
+    }
+  }
+  ok('U1j styles.css: every box that holds type scales by --ts too (M29)', rawBoxes.length === 0, rawBoxes.join(' | '));
+  ok('U1k …over the whole stylesheet, not a sample', boxCount >= 20, `${boxCount} box declarations`);
+  lines.push(`      styles.css: ${boxCount} box declarations, ${allowedBoxes} deliberately px (SETTINGS.textSize.pxAllowed)`);
+
+  /* U1l/U1m — the ONE shape that satisfies U1e's letter and not its meaning. U1e counts the
+   * declarations carrying the substring `var(--ts)`; `min(var(--ts), 1.35)` carries it and still
+   * scales less than every other row on the same card. So walk OUT from each var(--ts) through
+   * the functions enclosing it: a min() or a clamp() around it is a CAP, and a cap has to be
+   * named in SETTINGS.textSize.scaleCapAllowed with the number it uses. M29's title plate is the
+   * only one, and its reason is measured in the config beside it. */
+  /* The cap's own NUMBER, not the declaration's. `decl.includes('1.3')` is satisfied by
+   * min(var(--ts), 1.35), by a clamp bound and by a line-height, so an allow-list entry could
+   * pass against a cap it does not describe. So read the arguments of the enclosing min()/clamp()
+   * itself: split them at top level, drop the one carrying var(--ts), and take the bound that
+   * actually caps — the smallest number for min(), the last argument for clamp(). */
+  const capValue = (text, open, fn) => {
+    let depth = 0, end = text.length;
+    for (let j = open; j < text.length; j++) {
+      if (text[j] === '(') depth++;
+      else if (text[j] === ')') { depth--; if (depth === 0) { end = j; break; } }
+    }
+    const args = []; let start = open + 1; depth = 0;
+    for (let j = start; j < end; j++) {
+      if (text[j] === '(') depth++;
+      else if (text[j] === ')') depth--;
+      else if (text[j] === ',' && depth === 0) { args.push(text.slice(start, j)); start = j + 1; }
+    }
+    args.push(text.slice(start, end));
+    const bounds = args.filter((a) => !a.includes('var(--ts)'))
+                       .map((a) => parseFloat((a.match(/-?\d*\.?\d+/) || [NaN])[0]))
+                       .filter((n) => Number.isFinite(n));
+    if (!bounds.length) return NaN;
+    return fn === 'clamp' ? bounds[bounds.length - 1] : Math.min(...bounds);
+  };
+  const capsOf = (text) => {
+    const found = [];
+    for (let i = text.indexOf('var(--ts)'); i !== -1; i = text.indexOf('var(--ts)', i + 1)) {
+      let depth = 0;                                   // parens CLOSED while walking left
+      for (let j = i - 1; j >= 0; j--) {
+        const c = text[j];
+        if (c === ')') depth++;
+        else if (c === '(') {
+          if (depth > 0) { depth--; continue; }        // a sibling call, not an enclosing one
+          const fn = (text.slice(0, j).match(/([a-zA-Z-]+)$/) || ['', ''])[1];
+          if (fn === 'min' || fn === 'clamp') found.push({ fn, value: capValue(text, j, fn) });
+        }
+      }
+    }
+    return found;
+  };
+  const capAllowed = SETTINGS.textSize.scaleCapAllowed;
+  const cappedRules = scaled.filter((r) => capsOf(decl(r)).length > 0);
+  const badCaps = cappedRules
+    .filter((r) => { const n = capAllowed[r.selectorText]; return !capsOf(decl(r)).every((c) => c.value === n); })
+    .map((r) => `${r.selectorText} {${decl(r)}} caps at ${capsOf(decl(r)).map((c) => `${c.fn}→${c.value}`).join(',')}, ` +
+                `allow-list says ${capAllowed[r.selectorText]}`);
+  ok('U1l …and no font declaration CAPS --ts unless SETTINGS.textSize.scaleCapAllowed names it with that cap (M29)',
+     badCaps.length === 0, badCaps.join(' | '));
+  const staleCaps = Object.keys(capAllowed).filter((sel) => !cappedRules.some((r) => r.selectorText === sel));
+  ok('U1m …and every entry on that list is still a capped rule (no stale exemption)', staleCaps.length === 0, staleCaps.join(','));
+  /* …and the walk must have read a NUMBER out of each cap, or `every(c => c.value === n)` would
+   * be comparing NaN and the check would be sound-looking and empty. */
+  const unread = cappedRules.filter((r) => capsOf(decl(r)).some((c) => !Number.isFinite(c.value)))
+                            .map((r) => r.selectorText);
+  ok('U1m1 …and the cap the walk matched on was read out of the min()/clamp() itself, not the declaration text',
+     unread.length === 0 && cappedRules.every((r) => capsOf(decl(r)).every((c) => c.value === capAllowed[r.selectorText])),
+     unread.join(',') || cappedRules.map((r) => `${r.selectorText}=${capsOf(decl(r)).map((c) => c.value).join('/')}`).join(', '));
+  lines.push(`      styles.css: ${cappedRules.length} capped font declaration(s): ` +
+             cappedRules.map((r) => `${r.selectorText}→${capsOf(decl(r)).map((c) => `${c.fn} ${c.value}`).join('+')}× ` +
+                                    `(allowed ${capAllowed[r.selectorText]})`).join(', '));
+
   /* U2 — EVERY control changes the thing that consumes it. The consumer map is keyed by the
    * card's own data-setting names; a control with no consumer here is an inert control and
    * fails, and a consumer with no control fails the other way. */
@@ -422,7 +517,11 @@ lines.push('--- U. the settings card (GDD §21.4, §26.5; INDEX "assert consumpt
     gripMode:           () => input.settings.gripMode,             // _press / isDown / analog (I4)
     uiScale:            () => tsNow(),                             // every font-size (U1)
     cameraDistance:     () => M.rig.distance,                      // the boom (U3)
-    tier:               () => load().shell.tier,                   // the NEXT boot's detectRenderTier
+    /* The tier's consumer is the SAVE, because that is the half of it U2e can assert: 'auto' is
+     * a choice, not a rig, and Defaults restores the choice. Since M29 the row also rebuilds the
+     * lighting live (m36 Q1) — this walk therefore drives a real dispose-and-rebuild of the rig
+     * each time it flips the row, and leaves it on the tier Defaults asks for. */
+    tier:               () => load().shell.tier,                   // the choice; live too since M29
     // M9 (Phase 11 build-side): the Sound group, at its consumers — the audio layer's bus
     // levels (audio.setMaster / setBus; m18 A11 spies the calls) and the HUD caption line.
     audioMaster:        () => M.audio.levels.master,

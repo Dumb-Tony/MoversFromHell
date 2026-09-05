@@ -93,6 +93,16 @@ export const LIGHTING = Object.freeze({
     dest_kitchen: 0xf6f4ee,
     dest_bedroom: 0xffe6c4,
   },
+  /** WHAT EACH QUALITY TIER IS, as a table rather than as `soft ? 1024 : …` inside the builder
+   *  (Phase 11 build-side M29 — the settings card's Quality row switches this LIVE now, so the
+   *  numbers had to become data the switch and the suite can both read). `roomLights` is
+   *  §20.1's per-room spot; `roomShadows` is whether the pickup house's three cast. The
+   *  software row is the measurement at the top of this file: shadow passes cost ~100× what
+   *  lights do on a rasteriser, so that tier drops both and keeps the hemisphere. */
+  tiers: {
+    gpu:      { sunShadowMap: 2048, roomLights: true,  roomShadows: true },
+    software: { sunShadowMap: 1024, roomLights: false, roomShadows: false },
+  },
   /** The sun's shadow camera half-width. Tighter is sharper: this box is spread across a
    *  fixed 2048 map, so 20 m gives 40/2048 = 19.5 mm per texel where 26 m gave 25 mm. It
    *  must still cover the pickup house, the driveway and the truck at once — the
@@ -181,6 +191,9 @@ export function shadowMapTypeFor(THREE, tier) {
   return vsm ? THREE.VSMShadowMap : THREE.PCFSoftShadowMap;
 }
 
+/** The rig built at boot, or the one the last setQualityTier made. One page, one scene, one rig. */
+let CURRENT = null;
+
 /**
  * Build the whole rig and add it to the scene.
  *
@@ -190,9 +203,94 @@ export function shadowMapTypeFor(THREE, tier) {
  * @returns {{sun, fill, hemi, ambient, roomLights, tier}}
  */
 export function buildLighting(scene, rooms = [], tier = 'gpu') {
+  const rig = makeRig(scene, rooms, tier);
+  /* The one rig this page has, remembered so setQualityTier can rebuild it in place. scene.js
+   * computes `rooms` from ZONES/DEST_ZONES and does not return them (it returns the LIGHTS), so
+   * without this the live switch would need main.js to derive the room list a second time —
+   * two copies of a §20.1 authoring decision, which is exactly how a rebuild starts lighting a
+   * different house than the boot did. */
+  CURRENT = { scene, rooms: rooms.slice(), rig };
+  return rig;
+}
+
+/** The live rig: {sun, fill, hemi, ambient, roomLights, tier}, or null before boot. */
+export function currentLighting() { return CURRENT ? CURRENT.rig : null; }
+
+/**
+ * How many SHADOW MAPS this rig renders per frame — the number the quality tier decides, and
+ * the one KNOWN_ISSUES' "the tier decides how many shadow maps are BUILT" was about (m36 Q1).
+ * @param {object} [rig]  the live rig by default
+ */
+export function shadowMapCount(rig = CURRENT && CURRENT.rig) {
+  if (!rig) return 0;
+  return [rig.sun, rig.fill, rig.hemi, rig.ambient, ...(rig.roomLights || [])]
+    .filter((l) => l && l.castShadow).length;
+}
+
+/**
+ * Take a rig back out of the scene: every map disposed, every light and light target removed.
+ *
+ * ⚠ BOTH HALVES ARE NEEDED (r128). `light.dispose()` on a Directional/Spot light disposes the
+ * shadow's map and mapPass — that is the GPU memory, and renderer.info.memory.textures counts
+ * it — while `scene.remove` is what takes the light out of the lights hash the materials
+ * compile against. Doing one without the other leaks: the maps stay allocated, or the scene
+ * keeps a light with no map and every material recompiles around it. A target is a plain
+ * Object3D the builder added separately (the fill's is never added, so it is checked, not
+ * assumed). Disposing a map twice is safe: the renderer removes its own 'dispose' listener on
+ * the first one (WebGLTextures.onRenderTargetDispose).
+ */
+export function disposeLighting(rig, scene) {
+  if (!rig || !scene) return 0;
+  let removed = 0;
+  for (const l of [rig.hemi, rig.ambient, rig.sun, rig.fill, ...(rig.roomLights || [])]) {
+    if (!l) continue;
+    if (l.shadow && l.shadow.map) l.shadow.map.dispose();
+    if (typeof l.dispose === 'function') l.dispose();
+    if (l.target && l.target.parent) { l.target.parent.remove(l.target); removed++; }
+    if (l.parent) { l.parent.remove(l); removed++; }
+  }
+  return removed;
+}
+
+/**
+ * §21.4 / §15.4 — CHANGE THE QUALITY TIER OF A SCENE THAT IS ALREADY RUNNING (M29).
+ *
+ * KNOWN_ISSUES carried "Quality tier applies on reload, and the card says so" from Phase 17,
+ * for the honest reason that the tier decides how many shadow maps are built before the scene
+ * exists. It decides how many LIGHTS are built — the geometry, the physics world and
+ * game.state have nothing to do with it — so the rebuild is: dispose this rig, build the other
+ * one against the same scene and the same rooms, and hand the renderer the tier's shadow
+ * filter. Nothing else in the frame is touched, which is why a suite can assert the counts
+ * either side of it (m36 Q1) and the state equality across it (m0 E8).
+ *
+ * @param {'gpu'|'software'} tier
+ * @param {{renderer?, THREE?, scene?, rooms?}} [opts]  the renderer whose shadowMap.type follows
+ * @returns {object|null} the new rig, or null when nothing has been built yet
+ */
+export function setQualityTier(tier, opts = {}) {
+  if (!CURRENT && !opts.scene) return null;
+  const scene = opts.scene || CURRENT.scene;
+  const rooms = opts.rooms || (CURRENT ? CURRENT.rooms : []);
+  if (CURRENT) disposeLighting(CURRENT.rig, scene);
+  const rig = makeRig(scene, rooms, tier);
+  CURRENT = { scene, rooms, rig };
+  const renderer = opts.renderer;
+  if (renderer && renderer.shadowMap) {
+    const THREE = opts.THREE || window.THREE;
+    renderer.shadowMap.type = shadowMapTypeFor(THREE, tier);
+    // autoUpdate is false (main.js); present() raises needsUpdate every frame, but a build that
+    // is asserted without presenting should still be marked dirty rather than silently stale.
+    renderer.shadowMap.needsUpdate = true;
+  }
+  return rig;
+}
+
+/** The construction itself — called at boot by buildLighting and again by setQualityTier. */
+function makeRig(scene, rooms, tier) {
   const THREE = window.THREE;
   const L = LIGHTING;
-  const soft = tier === 'software';
+  const T = L.tiers[tier] || L.tiers.gpu;
+  const soft = !T.roomLights;
 
   const hemi = new THREE.HemisphereLight(L.hemi.sky, L.hemi.ground, L.hemi.intensity);
   scene.add(hemi);
@@ -203,7 +301,7 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
   const sun = new THREE.DirectionalLight(L.sun.colour, L.sun.intensity);
   sun.position.set(L.sun.at.x, L.sun.at.y, L.sun.at.z);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(soft ? 1024 : L.sunShadowMap, soft ? 1024 : L.sunShadowMap);
+  sun.shadow.mapSize.set(T.sunShadowMap, T.sunShadowMap);
   const d = L.sunShadowHalfWidth;
   sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
   sun.shadow.camera.top = d;   sun.shadow.camera.bottom = -d;
@@ -245,7 +343,7 @@ export function buildLighting(scene, rooms = [], tier = 'gpu') {
     spot.distance = h + halfDiag * 1.6;
     // In software, room lights light but do not cast. The falloff and the warm colour
     // survive; only the contact shadows go, which is the right thing to lose first.
-    spot.castShadow = !soft && r.castShadow !== false;
+    spot.castShadow = T.roomShadows && r.castShadow !== false;
     if (spot.castShadow) {
       spot.shadow.mapSize.set(L.room.shadowMap, L.room.shadowMap);
       spot.shadow.camera.near = 0.25;

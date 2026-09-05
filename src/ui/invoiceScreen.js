@@ -168,7 +168,11 @@ function classify(e, h) {
          * holder, not the count. Empty (a thrown object) stays the blank column M24 recorded
          * as an open item: nobody was carrying it, so no seat is named. */
         const by = Array.isArray(e.heldBy) ? e.heldBy.find((id) => id != null) : null;
-        return { kind: 'property', text: `${e.location || e.surfaceId || 'a surface'} marked by ${h.nameOf(e.entityId)} — ${money(cost)}`,
+        /* M30: the ONE line on which a surface reached DAMAGE.property.maxChargePerSurface —
+         * its charge was trimmed to the room that was left, and every later hit on it is
+         * free (EVENTS.PROPERTY_CAPPED, no line). Exactly one line per surface is ever
+         * trimmed, so the sheet says it exactly once, and only when it happened. */
+        return { kind: 'property', text: `${e.location || e.surfaceId || 'a surface'} marked by ${h.nameOf(e.entityId)} — ${money(cost)}${e.capped ? ' (capped)' : ''}`,
                  seat: by == null ? -1 : h.seat(by), rank: cost };
       }
       return { kind: 'damage', text: `${h.nameOf(e.entityId)} ${e.band || 'damaged'} — ${money(cost)}`, seat: -1, rank: cost };

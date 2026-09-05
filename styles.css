@@ -15,6 +15,27 @@
      the AirportBaggageCrew pattern (Dev\INDEX.md). The settings card writes it. ⚠ A new rule
      with a raw px size silently opts out; m16 U1 counts the declarations against the calcs. */
   --ts: 1;
+  /* …AND ON EVERY BOX THAT HOLDS THAT TYPE (Phase 11 build-side M29). Until M29 `--ts` grew the
+     letters inside boxes whose min-widths, card widths and bottom offsets were raw px, so at
+     1.6× the help line ran 1377.9 px wide in a 1262 px window (measured, clipped at both ends)
+     and the title card's livery name needed 735 px of a 647 px plate. Every width/min-width/
+     max-width under #ui, a .card or #help is now either `calc(Npx * var(--ts))` or viewport-
+     relative; the exceptions are DATA, in SETTINGS.textSize.pxAllowed, and m36 S3 walks the
+     CSSOM and fails on anything else.
+
+     --help-lift is the ONE measured number in that scheme (main.js syncHelpMetrics): how much
+     taller than a single line the wrapped #help line is, 0 whenever it fits on one. The boxes
+     that sit over the help line add it to their own scaled offset, so they rise exactly as far
+     as the help line grew and NOTHING MOVES AT 1.0× (m36 S2 pins the Phase 15 rects to 0.5 px). */
+  --help-lift: 0px;
+  /* …and the one thing that keeps --help-lift's budget honest. SETTINGS.textSize.helpMaxLines
+     says the help line may take two rows and no more; a third would lift the route bar and the
+     caption into the working area (§21.1). This factor is what main.js steps DOWN
+     (SETTINGS.textSize.helpSqueeze) when the line still needs a third row at the size and window
+     width it has been given — a narrower window than the harness's 1262 px, or a text size past
+     the 1.6× the settings range allows. It is 1 at every size a player can pick here (measured),
+     so the shipping layout is untouched by its existence. */
+  --help-squeeze: 1;
 }
 
 * { box-sizing: border-box; }
@@ -48,7 +69,7 @@ html, body {
   position: absolute;
   top: 10px;
   left: 10px;
-  min-width: 300px;
+  min-width: calc(300px * var(--ts));
   padding: 9px 11px;
   background: rgba(23, 21, 34, 0.86);
   border: 1px solid var(--line);
@@ -60,7 +81,7 @@ html, body {
 }
 
 #debug-overlay .row { display: flex; gap: 10px; }
-#debug-overlay .k { color: var(--violet); min-width: 62px; }
+#debug-overlay .k { color: var(--violet); min-width: calc(62px * var(--ts)); }
 #debug-overlay .v { flex: 1; }
 #debug-overlay .ok   { color: var(--lime); }
 #debug-overlay .warn { color: var(--amber); }
@@ -74,7 +95,7 @@ html, body {
 #build-stamp {
   position: absolute;
   right: 10px;
-  bottom: 8px;
+  bottom: calc(8px * var(--ts) + var(--help-lift, 0px));
   padding: 4px 9px;
   background: rgba(23, 21, 34, 0.72);
   border: 1px solid var(--line);
@@ -87,21 +108,36 @@ html, body {
 
 /* Control hints. §21.1: "no persistent panel should cover the object-doorway
    relationship" — so this sits along the bottom edge, out of the working area, and
-   §26.5 requires essential actions to have visible prompts. */
+   §26.5 requires essential actions to have visible prompts.
+
+   IT WRAPS RATHER THAN CLIPS (M29). `white-space: nowrap` was the last box in the shell that
+   contradicted §21.4's scalable UI: the line is derived from the live binding table and is
+   872.5 px long at 1.0×, so at 1.6× it wanted 1377.9 px of a 1262 px window and lost ~58 px off
+   each end with no scrollbar to say so (measured). The wrap rule is now simply "wrap when it no
+   longer fits": one line up to ~1.3×, two from ~1.4× (SETTINGS.textSize.helpMaxLines), and the
+   boxes above it rise by --help-lift so the second line takes the space instead of the route
+   bar. The max-width is the viewport minus the same 10 px inset the corner panels keep. */
 #help {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
   bottom: 8px;
+  /* `width: max-content` is REQUIRED with the centring above, not a flourish. An absolutely
+     positioned box with `left: 50%` and an auto width shrinks to fit the space between that
+     left edge and the containing block's right edge — half the window — so the moment nowrap
+     came off, the line wrapped to two rows at 1.0× in a 631 px box (measured). max-content asks
+     for the whole line and max-width is what then wraps it, at the window's edge. */
+  width: max-content;
+  max-width: calc(100vw - 20px);
   padding: 6px 14px;
   background: rgba(23, 21, 34, 0.72);
   border: 1px solid var(--line);
   border-radius: 5px;
-  font: calc(12px * var(--ts))/1.4 Quicksand, system-ui, sans-serif;
+  font: calc(12px * var(--ts) * var(--help-squeeze, 1))/1.4 Quicksand, system-ui, sans-serif;
   color: var(--paper);
+  text-align: center;
   pointer-events: none;
   user-select: none;
-  white-space: nowrap;
 }
 #help b { color: var(--lime); }
 
@@ -177,7 +213,7 @@ html, body {
 .prompt:empty { display: none; }
 .prompt .key {
   display: inline-block;
-  min-width: 17px; padding: 1px 5px;
+  min-width: calc(17px * var(--ts)); padding: 1px 5px;
   background: var(--lime); color: #14180a;
   border-radius: 3px;
   font: 700 calc(11px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
@@ -198,7 +234,7 @@ html, body {
 }
 .contract {
   position: static;
-  min-width: 178px;
+  min-width: calc(178px * var(--ts));
   padding: 8px 10px;
   background: rgba(23,21,34,.78);
   border: 1px solid var(--line);
@@ -241,7 +277,7 @@ html, body {
 .cargo-status {
   position: absolute;
   right: 10px; top: 10px;
-  min-width: 190px;
+  min-width: calc(190px * var(--ts));
   padding: 8px 10px;
   background: rgba(23,21,34,.78);
   border: 1px solid var(--line);
@@ -257,10 +293,12 @@ html, body {
 .cargo-status .row.warn span, .cargo-status .row.warn b { color: var(--amber); opacity: 1; }
 .cargo-status .row.bad  span, .cargo-status .row.bad  b { color: var(--coral); opacity: 1; font-weight: 700; }
 
-/* Route progress, only while driving. Bottom edge, clear of the help line. */
+/* Route progress, only while driving. Bottom edge, clear of the help line — the offset scales
+   with the type under it and rises again by --help-lift when that line wraps (M29). The BAR
+   itself keeps its px: a 320 px progress bar is a length, not type (SETTINGS.textSize.pxAllowed). */
 .route-bar {
   position: absolute;
-  left: 50%; bottom: 42px;
+  left: 50%; bottom: calc(42px * var(--ts) + var(--help-lift, 0px));
   transform: translateX(-50%);
   width: 320px; height: 6px;
   background: rgba(23,21,34,.8);
@@ -276,7 +314,7 @@ html, body {
   transition: width .1s linear;
 }
 .route-bar .label {
-  position: absolute; left: 50%; top: -19px;
+  position: absolute; left: 50%; top: calc(-19px * var(--ts));
   transform: translateX(-50%);
   font: calc(11px * var(--ts))/1.4 Quicksand, system-ui, sans-serif;
   color: var(--paper); opacity: .7; white-space: nowrap;
@@ -289,7 +327,7 @@ html, body {
    below sets display, and an author `display` beats the UA stylesheet's `[hidden]`. */
 .caption {
   position: absolute;
-  left: 50%; bottom: 72px;
+  left: 50%; bottom: calc(72px * var(--ts) + var(--help-lift, 0px));
   transform: translateX(-50%);
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 11px;
@@ -304,7 +342,7 @@ html, body {
 .caption:empty, .caption[hidden] { display: none; }
 .caption .dir {
   display: inline-block;
-  min-width: 16px; padding: 0 4px;
+  min-width: calc(16px * var(--ts)); padding: 0 4px;
   background: var(--amber); color: #1a1408;
   border-radius: 3px;
   font: 700 calc(11px * var(--ts))/1.5 ui-monospace, Consolas, monospace;
@@ -314,7 +352,7 @@ html, body {
 /* §8.4's "one small cost notice" at impact. Transient, stacked, bottom-right. */
 .notices {
   position: absolute;
-  right: 10px; bottom: 34px;
+  right: 10px; bottom: calc(34px * var(--ts) + var(--help-lift, 0px));
   display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
 }
 .notices .notice {
@@ -344,7 +382,7 @@ html, body {
 }
 #settlement[hidden] { display: none; }
 #settlement .sheet {
-  width: 540px; max-height: 92vh; overflow: auto;
+  width: min(calc(540px * var(--ts)), 94vw); max-height: 92vh; overflow: auto;
   padding: 22px 26px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -378,7 +416,7 @@ html, body {
 
 #settlement .grade { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 #settlement .grade .letter {
-  width: 40px; height: 40px; border-radius: 8px;
+  width: calc(40px * var(--ts)); height: calc(40px * var(--ts)); border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   font: 700 calc(22px * var(--ts))/1 'Baloo 2', Quicksand, system-ui, sans-serif;
   background: var(--line); color: var(--paper);
@@ -461,16 +499,16 @@ html, body {
    legibility and give up their margins, because the thing that must not be crowded is the
    middle (§21.1). Only the horizontal insets shrink. */
 .hud.split .corner-tl     { left: 6px;  top: 6px; }
-.hud.split .contract      { min-width: 150px; padding: 6px 8px; }
+.hud.split .contract      { min-width: calc(150px * var(--ts)); padding: 6px 8px; }
 .hud.split .objective     { max-width: 40vw; }
-.hud.split .cargo-status  { right: 6px; top: 6px;  min-width: 158px; padding: 6px 8px; }
+.hud.split .cargo-status  { right: 6px; top: 6px;  min-width: calc(158px * var(--ts)); padding: 6px 8px; }
 .hud.split .notices       { right: 6px; }
 .hud.split .route-bar     { left: 8px; right: 8px; }
 .hud.split .prompt        { max-width: 94%; }
 
 /* The solo build's help line and build stamp span the whole window, so in co-op they would
    sit across the divider. Both are shell chrome rather than either player's HUD. */
-body.coop #help { left: 50%; transform: translateX(-50%); max-width: 96vw; font-size: calc(10px * var(--ts)); }
+body.coop #help { left: 50%; transform: translateX(-50%); max-width: 96vw; font-size: calc(10px * var(--ts) * var(--help-squeeze, 1)); }
 body.coop #build-stamp { opacity: .45; }
 
 /* ---- title card (Phase 13) ----------------------------------------------------------
@@ -497,6 +535,12 @@ body.coop #build-stamp { opacity: .45; }
    zeroes the opacity — but anything that reaches for .hidden deserves to be obeyed. */
 #title-screen[hidden] { display: none; }
 
+/* THE CARD'S WIDTH DOES NOT SCALE, and that is deliberate (M29). It is pinned to the §21.2
+   brief sheet beside it — m31 B2 measures both rects — and the pair only fits side by side down
+   to 1180 px (the media query at the end of this file). A 1.6× card is 1216 px wide, which
+   leaves the sheet 3.2 px of column in a 1262 px window (measured), so the card keeps its box
+   and everything INSIDE it scales and wraps: pitch, columns, foot, and the livery name below.
+   Listed in SETTINGS.textSize.pxAllowed with this reason; measured 743/743 at 1.6×. */
 #title-screen .card {
   width: min(760px, 96vw);
   max-height: 94vh;
@@ -516,8 +560,14 @@ body.coop #build-stamp { opacity: .45; }
   padding: 16px 18px 12px;
   margin: 0 0 16px;
 }
+/* The name is set on a fixed plate and its three words are separate inline boxes with margins
+   between them — no space, so no break opportunity, so it cannot wrap and simply ran out of the
+   card: 735 px of name in a 647 px plate at 1.6× (measured, the card's only overflow at that
+   size). It therefore scales to 1.35× and stops, which is where it fills the plate: 78.3 px of
+   font, 620 px of name, 27 px to spare. This is the box holding the type, not the type opting
+   out — the declaration still multiplies by --ts (m16 U1e). */
 #title-screen .name {
-  font: 700 calc(clamp(30px, 6.4vw, 58px) * var(--ts))/0.94 Impact, Haettenschweiler, 'Arial Black', sans-serif;
+  font: 700 calc(clamp(30px, 6.4vw, 58px) * min(var(--ts), 1.35))/0.94 Impact, Haettenschweiler, 'Arial Black', sans-serif;
   letter-spacing: .012em;
   color: #171522;
 }
@@ -557,7 +607,7 @@ body.coop #build-stamp { opacity: .45; }
 
 #title-screen .cols {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(calc(240px * var(--ts)), 1fr));
   gap: 10px 26px;
   margin: 20px 0 4px;
   text-align: left;
@@ -625,7 +675,7 @@ body.coop #build-stamp { opacity: .45; }
 #pause-screen[hidden] { display: none; }
 
 #pause-screen .card {
-  width: min(420px, 94vw);
+  width: min(calc(420px * var(--ts)), 94vw);
   padding: 24px 28px 18px;
   background: rgba(23,21,34,.93);
   border: 1px solid var(--line);
@@ -704,7 +754,7 @@ body.coop #build-stamp { opacity: .45; }
 }
 #settings-screen[hidden] { display: none; }
 #settings-screen .card {
-  width: min(560px, 94vw);
+  width: min(calc(560px * var(--ts)), 94vw);
   max-height: 92vh;
   overflow: auto;
   padding: 20px 24px 16px;
@@ -731,7 +781,7 @@ body.coop #build-stamp { opacity: .45; }
 }
 .set-row {
   display: grid;
-  grid-template-columns: 160px 1fr 62px;
+  grid-template-columns: calc(160px * var(--ts)) 1fr calc(62px * var(--ts));
   align-items: center;
   gap: 10px;
   padding: 4px 0;
@@ -740,7 +790,7 @@ body.coop #build-stamp { opacity: .45; }
 }
 .set-row.set-check { grid-template-columns: auto 1fr; }
 .set-row input[type="range"] { width: 100%; margin: 0; accent-color: var(--lime); }
-.set-row input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var(--lime); }
+.set-row input[type="checkbox"] { width: calc(15px * var(--ts)); height: calc(15px * var(--ts)); margin: 0; accent-color: var(--lime); }
 .set-row select {
   padding: 4px 6px;
   background: #0d0c14;
@@ -786,7 +836,7 @@ body.coop #build-stamp { opacity: .45; }
   color: var(--paper);
   opacity: .8;
 }
-.set-row.set-bind { grid-template-columns: 160px 1fr auto; padding: 3px 0; }
+.set-row.set-bind { grid-template-columns: calc(160px * var(--ts)) 1fr auto; padding: 3px 0; }
 .set-bind .set-glyphs {
   display: flex;
   align-items: center;
@@ -797,7 +847,7 @@ body.coop #build-stamp { opacity: .45; }
 }
 .set-bind .key {
   display: inline-block;
-  min-width: 18px;
+  min-width: calc(18px * var(--ts));
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--lime);
@@ -880,7 +930,7 @@ body.coop #build-stamp { opacity: .45; }
 }
 #settlement button.minor:hover { border-color: var(--violet); }
 #settlement textarea.export {
-  width: 100%; box-sizing: border-box; height: 140px; margin-top: 6px; padding: 6px;
+  width: 100%; box-sizing: border-box; height: calc(140px * var(--ts)); margin-top: 6px; padding: 6px;
   background: rgba(0,0,0,.3); color: var(--paper);
   border: 1px solid var(--line); border-radius: 5px;
   font: calc(10px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
@@ -928,7 +978,7 @@ body.coop #build-stamp { opacity: .45; }
   font-variant-numeric: tabular-nums;
   opacity: .55;
 }
-#pause-screen .hlist .g { min-width: 14px; text-align: center; font-weight: 700; }
+#pause-screen .hlist .g { min-width: calc(14px * var(--ts)); text-align: center; font-weight: 700; }
 #pause-screen .hlist li.info   .g { color: var(--violet); }
 #pause-screen .hlist li.good   .g { color: var(--lime); }
 #pause-screen .hlist li.warn   .g { color: var(--amber); }
@@ -945,7 +995,7 @@ body.coop #build-stamp { opacity: .45; }
 
 /* The notice's kind glyph (M19): a chip before the words, so the kind is readable with the
    border colour gone. */
-.notices .notice .glyph { display: inline-block; min-width: 12px; text-align: center; font-weight: 700; }
+.notices .notice .glyph { display: inline-block; min-width: calc(12px * var(--ts)); text-align: center; font-weight: 700; }
 .notices .notice.info   .glyph { color: var(--violet); }
 .notices .notice.good   .glyph { color: var(--lime); }
 .notices .notice.damage .glyph { color: var(--coral); }
@@ -1033,7 +1083,12 @@ body.coop #build-stamp { opacity: .45; }
 #walkthrough {
   position: absolute;
   left: 10px; bottom: 46px;
-  width: min(312px, 42vw);
+  /* The second term is .objective's §21.1 guard, for the same reason: 10 px of inset plus this
+     width ends before the centre third begins (33vw), so the card clears the working area
+     HORIZONTALLY at every text size and its height stops mattering. Without it a 1.6× card is
+     499 px wide and 134 px tall, and a two-line help line under it leaves 124 px — measured, it
+     reached 10 px into the band. 312 px is unchanged at 1.0× (m29 W1's rects). */
+  width: min(calc(312px * var(--ts)), calc(33vw - 12px));
   padding: 7px 10px 8px;
   background: rgba(23,21,34,.88);
   border: 1px solid var(--line);
@@ -1080,7 +1135,7 @@ body.coop #build-stamp { opacity: .45; }
 #walkthrough .wt-text { margin-top: 2px; opacity: .8; }
 #walkthrough .key {
   display: inline-block;
-  min-width: 17px; padding: 0 5px;
+  min-width: calc(17px * var(--ts)); padding: 0 5px;
   background: var(--lime); color: #14180a;
   border-radius: 3px;
   font: 700 calc(11px * var(--ts))/1.4 ui-monospace, Consolas, monospace;

@@ -1449,6 +1449,36 @@ lines.push('--- M15. a lost screwdriver comes back, and the verb is reachable ag
 }
 emit('running...');
 
+/* ── M29 (Phase 11 build-side): the shipping default is still the layout O5 measured ─────
+ * The HUD suite's rects (F2, O5) are all read at --ts 1 with the help line on one row, and
+ * everything M29 added to the bottom edge — the route bar's offset, the caption's, the
+ * notices' — is `calc(<the same px> * var(--ts) + var(--help-lift))`. Both terms are therefore
+ * identity in the build a player boots into, and this is the assertion that says so: if a
+ * future milestone ships a --ts other than 1, or a help line long enough to wrap at 1.0×, the
+ * O-series numbers move and this fails first, in the suite that owns them. */
+lines.push('--- M29. the default layout is unscaled and unlifted (Phase 11 build-side M29) ---');
+{
+  const root = getComputedStyle(document.documentElement);
+  eq('M29-1 --ts is 1 in the shipping default', root.getPropertyValue('--ts').trim(), '1');
+  eq('M29-2 …and --help-lift is 0 px (the help line is on one row)', root.getPropertyValue('--help-lift').trim(), '0.00px');
+  const helpEl = document.getElementById('help');
+  const cs = getComputedStyle(helpEl);
+  const rows = Math.round((helpEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / parseFloat(cs.lineHeight));
+  eq('M29-3 …measured on the line itself, not on the variable', rows, 1);
+  ok('M29-4 …and the line is not clipped (it wraps rather than overflowing now)',
+     helpEl.scrollWidth <= helpEl.clientWidth + 0.5 && helpEl.getBoundingClientRect().left >= -0.5,
+     `${helpEl.scrollWidth}/${helpEl.clientWidth} at left ${helpEl.getBoundingClientRect().left.toFixed(1)}`);
+  /* …and the third identity term. SETTINGS.textSize.helpMaxLines is enforced by shrinking the
+   * help line (--help-squeeze, main.js syncHelpMetrics), which is a real change to the shipping
+   * layout the moment it is spent. It is not spent here: one row needs no ladder. */
+  eq('M29-5 …and --help-squeeze is 1 (the line budget is not being spent to hold the layout)',
+     root.getPropertyValue('--help-squeeze').trim(), '1');
+  eq('M29-6 …which the line\'s own font-size shows: 12px, not a squeezed one', cs.fontSize, '12px');
+  /* …and the ladder did not merely fail to help: the floor flag says the line is INSIDE the
+   * budget here, not over it with nothing left to spend (m36 S1g drives the other branch). */
+  eq('M29-7 …and the budget is met rather than lapsed (helpMetrics.overBudget)', M.helpMetrics.overBudget, false);
+}
+
 /* ── H. integration (§26.6) ──────────────────────────────────────────────── */
 lines.push('--- H. integration (GDD §26.6) ---');
 {

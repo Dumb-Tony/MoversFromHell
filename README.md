@@ -222,6 +222,15 @@ and HUD say "trip 2", and the invoice prices every item left behind at 60 each, 
 completion is an outcome with a number on it rather than a free settlement. Leave twenty-three
 behind and the job loses money, by design.
 
+**Property damage is attributed to the surface, and to all of them.** A hit is priced on the
+object's own momentum change and charged to the static surfaces the narrow phase says stopped
+it, shared between them in proportion to what each took — so a couch forced through a doorway is
+billed for the frame AND the wall, each with its own line, notice, mark and subtitle. The shares
+add up to what one line used to cost: splitting a hit never makes it dearer. A surface stops
+costing money at its maximum and does not stop responding: a further hit still marks it and
+still says 'already at its maximum', while a tap too light to have cost anything stays as silent
+as it always was.
+
 **Walls are billed.** A wall, a door frame or the truck body that an object hits above 12 N·s of
 the object's own lost momentum writes one property-damage entry at 1.6 per N·s (capped at 400
 per surface), with a notice naming the surface ("front wall — scuffed · 30.82"), a caption, a
@@ -337,7 +346,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**3779 assertions across thirty-six suites, all passing** — plus a GPU-only suite that the
+**4045 assertions across thirty-eight suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -398,8 +407,12 @@ on the property line, and a speed bump that finally does something. Batch 13
 put the trigger's pressure into the hand — a half-pulled trigger is now half the force cap, live,
 with every validated grip number proven bit-identical at a full pull — added §6.5's bounded
 grip-strength assist, and built §8.4's fourth feedback channel, a pad pulse routed by the same
-cue table the sounds and captions read. Batch 14 (settings that keep their word; property damage
-that tells the whole story) is briefed in the plan.
+cue table the sounds and captions read. Batch 14
+made two settings keep their word — text size now scales the boxes as well as the letters, and
+the quality tier rebuilds the lighting rig in the running game — and taught property damage to
+tell the whole story: a corner hit is split across the surfaces that stopped it, a full surface
+stops charging without going silent, and a subtitle names which wall it was. Batch 15 (contract-UX
+follow-through; the world's edges) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -694,6 +707,15 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
+- **A live quality switch changes the lights, not the surfaces.** Room lights, shadow maps, the
+  shadow filter and the post chain rebuild as you pick; bump, gloss and reflections are minted
+  before the scene is built and follow the next reload. Switching up also leaves twenty-five
+  geometries resident that a reduced boot never uploads — not a leak, but a count that does not
+  come back down.
+- **A property line reports the split of the hardest step** in its window rather than a running
+  average, and the settlement recap shows at most three property rows, so a capped row can fall
+  off a long list. The amounts are exact either way, and the invoice line always names how many
+  surfaces reached their cap.
 - **Rumble has never touched a real controller.** There is no gamepad on the build machine, so
   every assertion runs against a stubbed actuator through the real polling path: the routing,
   the rate limiting and the failure modes are proven, the magnitudes are not tuned. A pad or

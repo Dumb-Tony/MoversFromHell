@@ -496,7 +496,13 @@ let D1;
      M.pendingNotices.map((n) => n.text).join(' | '));
   const cap = capAtForce;
   ok('D1 a caption \'door forced\' was queued (the DOOR_STATE cue, after the line\'s)', !!cap && cap.text === 'door forced' && cap.type === EVENTS.DOOR_STATE, JSON.stringify(cap));
-  eq('D1e …resolveCue agrees for both rows', `${resolveCue('DOOR_STATE', forced[0] || {}).caption}/${resolveCue('DAMAGE_APPLIED', l || {}).caption}`, 'door forced/door forced');
+  /* M30 (Phase 11 build-side): the DOOR_STATE row still captions 'door forced' — that cue is
+   * about the DOOR — while the property line's caption is now a template that names the
+   * SURFACE, which is the whole of KNOWN_ISSUES Phase 21 "Property captions are generic". The
+   * two rows still agree about what happened; they no longer say it in the same four words. */
+  eq('D1e …resolveCue agrees for both rows: the door cue names the door, the property cue names the frame (M30)',
+     `${resolveCue('DOOR_STATE', forced[0] || {}).caption}/${resolveCue('DAMAGE_APPLIED', l || {}).caption}`,
+     'door forced/living-kitchen door frame forced');
   eq('D1f the bent flag is cleared by the forcing (the frame can be bent again once re-hung)', leaf.state.frameBent, false);
   eq('D1g state.doors counts a forced door as removed (§15.2\'s tag path)', game.state.doors.removed[DOOR_ID], 1);
   ok('D1h the ledger round-trips as plain data (§22.4)', (() => { try { const j = JSON.parse(JSON.stringify(game.state.ledger)); return j.propertyDamage.length === prop().length; } catch (e) { return false; } })());

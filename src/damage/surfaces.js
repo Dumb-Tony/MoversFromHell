@@ -116,3 +116,82 @@ export function labelFor(tag) {
   if (doorId) return DOOR_FRAME_LABELS[doorId] || `${doorId.replace(/_/g, ' ')} door`;
   return tag.replace(/_/g, ' ');
 }
+
+/* ── the caption's vocabulary (Phase 11 build-side M30; §26.5, §8.4) ────────────────────────
+ *
+ * §26.5 wants subtitles that "say what happened", and until M30 the property captions were
+ * three fixed strings — 'wall scuffed' / 'wall dented' / 'wall holed' — whatever was actually
+ * hit, because m18 A1b pinned every cue caption as a literal string (KNOWN_ISSUES Phase 21,
+ * M14: "Property captions are generic"). The HUD notice has always named the surface through
+ * labelFor(); the audio layer could not, so a player watching subtitles was told a wall was
+ * scuffed when a door frame was.
+ *
+ * The pin is now "a string OR a pure function of the payload" (audio.js resolveCue), and THIS
+ * is what such a function is allowed to read: a tag, and nothing else. Two words per surface —
+ * a KIND ('wall', 'door frame', 'ceiling', 'headboard', 'truck body') and a ROOM ('front',
+ * 'living room', 'living-kitchen', 'destination', 'truck') — assembled onto labelFor's own
+ * phrase so the caption, the notice and the ledger line cannot drift apart. Pure, total, and
+ * safe to call with a garbage tag: an unknown tag is 'a surface'.
+ */
+
+/** The room or place a tag belongs to, or '' when it names no place. */
+const FIXED_ROOMS = Object.freeze({
+  wall: 'front',
+  roomWallW: 'living room', roomWallE: 'living room', roomWallN: 'living room',
+  roomCeiling: 'living room',
+  destWallW: 'destination', destWallE: 'destination', destWallN: 'destination',
+  destWallS: 'destination', destDoorHeader: 'destination', destCeiling: 'destination',
+  destFloor: 'destination',
+  truckHeadboard: 'truck', truckWallL: 'truck', truckWallR: 'truck',
+  truckRoof: 'truck', truckCab: 'truck', truckDeck: 'truck',
+});
+
+/** The partition ids, as the room a player would name. */
+const PARTITION_ROOMS = Object.freeze({
+  wall_living_back: 'living room',
+  wall_kitchen_bed: 'kitchen',
+});
+
+/** Which room or place a surface is in — '' when the tag names no place (a ledge, the ground). */
+export function surfaceRoom(tag) {
+  if (typeof tag !== 'string' || tag.length === 0) return '';
+  if (Object.prototype.hasOwnProperty.call(FIXED_ROOMS, tag)) return FIXED_ROOMS[tag];
+  const doorId = doorIdOf(tag);
+  if (doorId) return doorId.replace(/_/g, '-');
+  let m = /^doorHeader_(.+)$/.exec(tag);
+  if (m) return m[1].replace(/_/g, '-');
+  m = /^partition_(.+)$/.exec(tag);
+  if (m) return PARTITION_ROOMS[m[1]] || '';
+  return '';
+}
+
+/** What KIND of thing was hit, as the one word a caption must contain (m37 P4). */
+export function surfaceKind(tag) {
+  if (typeof tag !== 'string' || tag.length === 0) return 'surface';
+  if (isDoorFrameTag(tag)) return 'door frame';
+  if (/^doorHeader/.test(tag) || tag === 'destDoorHeader') return 'door frame';
+  if (/[Cc]eiling$/.test(tag)) return 'ceiling';
+  if (/[Hh]eadboard$/.test(tag)) return 'headboard';
+  if (/^truck/.test(tag)) return 'truck body';
+  if (/wall/i.test(tag) || /^partition_/.test(tag)) return 'wall';
+  return 'surface';
+}
+
+/**
+ * The §26.5 subtitle's name for a surface: 'front wall', 'living-kitchen door frame',
+ * 'living room back wall', 'truck headboard'. labelFor's phrase with the room prefixed and
+ * the kind suffixed only when they are not already in it, so nothing reads 'truck truck body'.
+ * PURE and total — an audio caption function may call nothing else (m37 P4).
+ */
+export function surfaceCaption(tag) {
+  if (typeof tag !== 'string' || tag.length === 0) return 'a surface';
+  const room = surfaceRoom(tag);
+  // A door FRAME's label names the door it hangs in ('kitchen door'), which reads oddly with
+  // the room in front of it; the frame is what was hit, so the frame is what the caption says.
+  if (isDoorFrameTag(tag)) return room ? `${room} door frame` : 'door frame';
+  const kind = surfaceKind(tag);
+  let out = labelFor(tag).replace(/_/g, '-');
+  if (room && !out.includes(room)) out = `${room} ${out}`;
+  if (kind && !out.includes(kind)) out = `${out} ${kind}`;
+  return out;
+}

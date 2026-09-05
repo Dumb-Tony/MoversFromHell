@@ -18,10 +18,13 @@
  *                    That is precisely backwards from §8.3 and was fixed in Phase 6.
  *   PROPERTY damage  keyed on IMPULSE, because what a WALL suffers really does scale with
  *                    the mass that hit it. This is where mass belongs. Written since Phase 11
- *                    build-side M14: the object's own m·Δv, attributed to the static surface
- *                    the narrow phase says pushed hardest that step (_attributeProperty),
- *                    aggregated per entity AND surface, capped per surface (§8.3 "maximum
- *                    charge"), and never a cause of anything but a line (§12.2).
+ *                    build-side M14: the object's own m·Δv, charged only when the surface the
+ *                    narrow phase says pushed hardest that step is billable and, since M30,
+ *                    SHARED across every billable surface the step touched in proportion to
+ *                    what each took (_attributeProperty), aggregated per entity AND surface,
+ *                    capped per surface (§8.3 "maximum charge") — a cap on the money and not
+ *                    on the feedback (EVENTS.PROPERTY_CAPPED) — and never a cause of anything
+ *                    but a line (§12.2).
  *
  * NOTHING HERE READS A PACK QUALITY SCORE. A badly packed truck damages its cargo because
  * unrestrained bodies moved and hit things, and for no other reason. If a future phase ever
@@ -51,11 +54,25 @@ export function propertyBandFor(impulse) {
   return out;
 }
 
-/** §15.1's property cost for a window's impulse, before the per-surface cap. Exported so a
- *  suite can pin the closed form: (impulse − threshold) × costPerImpulse, never negative. */
-export function propertyCost(impulse) {
+/**
+ * §15.1's property cost for a window's impulse, before the per-surface cap. Exported so a
+ * suite can pin the closed form: (impulse − threshold) × costPerImpulse, never negative.
+ *
+ * `share` (M30) is the fraction of the ORIGINAL hit this window took when a step's m·Δv was
+ * split across a corner's two surfaces (_attributeProperty). The threshold is a property of
+ * the HIT, not of the wall — the impulse under which a knock is not worth billing — so a hit
+ * shared two ways shares its threshold in the same proportion. That is what makes the split
+ * cost exactly what the single line cost:
+ *
+ *     Σᵢ (fᵢ·I − fᵢ·thr)·rate  =  (I − thr)·rate,   Σᵢ fᵢ = 1
+ *
+ * and it also means each line is simply its fraction of the whole: cost ᵢ = fᵢ × cost. Left at
+ * 1 the formula is M14's to the character, which is why every m22 number is unchanged.
+ */
+export function propertyCost(impulse, share = 1) {
   const P = DAMAGE.property;
-  return Math.max(0, (impulse - P.impulseThreshold) * P.costPerImpulse);
+  const f = Number.isFinite(share) ? Math.max(0, Math.min(1, share)) : 1;
+  return Math.max(0, (impulse - P.impulseThreshold * f) * P.costPerImpulse);
 }
 
 /** §15.1's item-damage line: replacement value scaled by how far the condition fell. */
@@ -89,6 +106,11 @@ export class DamageSystem {
     /** Scratch: entity id -> speed lost THIS step, for the door-frame pass (M23), which runs
      *  after the entity loop and needs to know whether a pressing object is also hitting. */
     this._lostBy = new Map();
+    /** M30: surface id -> the sim ms a 'this one is already at its maximum' event last went
+     *  out, so a couch ground along a capped wall complains once per
+     *  DAMAGE.property.cappedRepeatMs rather than once per aggregation window (§8.4 "ONE
+     *  small cost notice"). Cleared by reset() with everything else. */
+    this._cappedAt = new Map();
     /** EXPANSION HOOK (§8.2 "protect with blankets/runners"): tags a future runner tool has
      *  covered. Consulted before billing; nothing writes it yet. */
     this.protectedSurfaces = new Set();
@@ -230,12 +252,26 @@ export class DamageSystem {
    * impulses are the solver's from the step just taken, in N·s.
    *
    * ATTRIBUTION RANKS EVERY CONTACT AND BILLS ONLY A BILLABLE WINNER. The surface that pushed
-   * hardest on the object this step (largest Σ|contactImpulse|) is what stopped it, and it
-   * takes the whole m·Δv. Floors, the ground, the deck, movers and other entities compete in
-   * that ranking and win it whenever they are what the object actually hit — a TV landing on
-   * the floor beside a wall it grazes is a floor landing, not a wall hit — but they are never
-   * charged (surfaces.js billable). A corner hit (wall + header in one step) still bills the
-   * one that took more; the other is free. Recorded in KNOWN_ISSUES.
+   * hardest on the object this step (largest Σ|contactImpulse|) is what stopped it. Floors, the
+   * ground, the deck, movers and other entities compete in that ranking and win it whenever
+   * they are what the object actually hit — a TV landing on the floor beside a wall it grazes
+   * is a floor landing, not a wall hit — but they are never charged (surfaces.js billable).
+   * THE WINNER STILL DECIDES WHETHER ANYTHING IS BILLED AT ALL, and that gate is unchanged.
+   *
+   * WHAT M30 CHANGED: THE SPLIT. Once the gate has passed, the m·Δv is no longer handed whole
+   * to the winner — it is shared out across every BILLABLE surface in contact this step, in
+   * proportion to each SURFACE's summed manifold impulse. Per surface, not per collider and not
+   * per manifold: Rapier reports several manifolds per pair and a wall can be several colliders
+   * (scene.js builds one per solid run of a partition), and either would look like several
+   * surfaces to a naive ranking. A couch forced through a doorway hits the frame and the wall
+   * in the same step and now gets a line, a notice and a scuff for each, where M14 charged
+   * whichever took more and left the other free (KNOWN_ISSUES Phase 21, M14).
+   *
+   * NOTHING GETS DEARER. The shares sum to the same m·Δv the single line carried, and each
+   * window remembers its share so §15.1's threshold is split with it (propertyCost) — so the
+   * split lines add up to the one line's amount to the cent (m37 P1). A share under
+   * DAMAGE.property.splitMinFraction is folded into the largest rather than posted: a 3 %
+   * graze on the way past is not worth a second line on a customer's invoice (§26.4).
    */
   _attributeProperty(e, lost, simTimeMs, touched) {
     const P = DAMAGE.property;
@@ -246,7 +282,10 @@ export class DamageSystem {
     const self = e.collider;
     if (!world || !self || typeof world.contactPairsWith !== 'function') return;
 
-    let best = null;   // { collider, sum, at, normal }
+    let best = null;   // { collider, sum, at, normal } — the RANKING, over every contact
+    /** tag -> { sum, top, at, normal }: the billable surfaces, summed per SURFACE. `top` is
+     *  the biggest single collider sum behind that tag, and its patch is where the mark goes. */
+    const bySurface = new Map();
     world.contactPairsWith(self, (other) => {
       let sum = 0, at = null, normal = null;
       world.contactPair(self, other, (manifold, flipped) => {
@@ -271,34 +310,78 @@ export class DamageSystem {
           }
         }
       });
-      if (sum > 0 && (!best || sum > best.sum)) best = { collider: other, sum, at, normal };
+      if (!(sum > 0)) return;
+      if (!best || sum > best.sum) best = { collider: other, sum, at, normal };
+      const tag = this.physics.tagOf(other);
+      if (!tag || !billable(tag) || this.protectedSurfaces.has(tag)) return;
+      const row = bySurface.get(tag);
+      if (!row) bySurface.set(tag, { sum, top: sum, at, normal });
+      else { row.sum += sum; if (sum > row.top) { row.top = sum; row.at = at; row.normal = normal; } }
     });
     if (!best) return;
-    const tag = this.physics.tagOf(best.collider);
-    if (!tag || !billable(tag) || this.protectedSurfaces.has(tag)) return;
+    // THE GATE, exactly as M14 wrote it: the collider that pushed hardest decides whether this
+    // step is a property hit at all. A floor landing beside a grazed wall charges nothing.
+    const winner = this.physics.tagOf(best.collider);
+    if (!winner || !billable(winner) || this.protectedSurfaces.has(winner)) return;
+
+    let total = 0;
+    for (const row of bySurface.values()) total += row.sum;
+    if (!(total > 0)) return;
+
+    /* The shares, largest first, with the small ones folded into the largest. Folded entries
+     * stay in the group at share 0: the run record says what was TOUCHED, not only what was
+     * billed (m37 P2). Fractions, never rounded amounts — the rounding happens once, on the
+     * ledger line, exactly where it did before. */
+    const parts = [];
+    for (const [id, row] of bySurface) parts.push({ id, row, share: row.sum / total });
+    parts.sort((a, b) => b.share - a.share || (a.id < b.id ? -1 : 1));
+    let folded = 0;
+    for (let i = parts.length - 1; i >= 1; i--) {
+      if (parts[i].share < P.splitMinFraction) { folded += parts[i].share; parts[i].share = 0; }
+    }
+    parts[0].share += folded;
+    const group = parts.length > 1 ? parts.map((p) => ({ id: p.id, share: Number(p.share.toFixed(4)) })) : null;
 
     const t = e.body.translation();
-    const at = best.at || { x: t.x, y: t.y, z: t.z };
-    /* The normal on the line is the SURFACE's: pointing away from the wall, toward the
-     * object that hit it — which is where the decal goes and independent of which collider
-     * Rapier listed first. */
-    let n = best.normal || { x: 0, y: 1, z: 0 };
-    const dot = n.x * (t.x - at.x) + n.y * (t.y - at.y) + n.z * (t.z - at.z);
-    if (dot < 0) n = { x: -n.x, y: -n.y, z: -n.z };
-
-    this._feedPropWindow(e, tag, impulse, at, n, simTimeMs, touched);
+    for (const p of parts) {
+      if (!(p.share > 0)) continue;
+      const at = p.row.at || { x: t.x, y: t.y, z: t.z };
+      /* The normal on the line is the SURFACE's: pointing away from the wall, toward the
+       * object that hit it — which is where the decal goes and independent of which collider
+       * Rapier listed first. */
+      let n = p.row.normal || { x: 0, y: 1, z: 0 };
+      const dot = n.x * (t.x - at.x) + n.y * (t.y - at.y) + n.z * (t.z - at.z);
+      if (dot < 0) n = { x: -n.x, y: -n.y, z: -n.z };
+      this._feedPropWindow(e, p.id, impulse * p.share, at, n, simTimeMs, touched, p.share, group);
+    }
   }
 
-  /** Open or merge the property window for (entity, surface) — the ONE aggregation the
-   *  walls (M14, _attributeProperty) and the door frames (M23, _strainFrames) share. Same
-   *  DAMAGE.aggregationWindowMs / aggregationRadius, same line at the end. Returns the window. */
-  _feedPropWindow(e, tag, impulse, at, n, simTimeMs, touched) {
+  /**
+   * Open or merge the property window for (entity, surface) — the ONE aggregation the walls
+   * (M14, _attributeProperty) and the door frames (M23, _strainFrames) share. Same
+   * DAMAGE.aggregationWindowMs / aggregationRadius, same line at the end. Returns the window.
+   *
+   * M30's two extra arguments are the SPLIT's bookkeeping and both default to the single-
+   * surface answer, so _strainFrames and every M14 path behave to the character as before:
+   *   `frac`   this feed's fraction of the step's whole m·Δv (1 when nothing was split).
+   *            Accumulated impulse-weighted into `fracSum`, so the window's own share is
+   *            fracSum / impulse — the average fraction it took, weighted by how hard each
+   *            step hit. That weighting is what guarantees the shares of the windows in one
+   *            group sum to at least 1 (Cauchy–Schwarz on Σf²I / ΣfI ≥ ΣfI / ΣI), i.e. that
+   *            splitting a hit can never cost MORE than not splitting it, whatever order the
+   *            steps arrive in. For a one-step corner hit it sums to exactly 1.
+   *   `group`  the step's whole split, [{id, share}] including folded surfaces at share 0,
+   *            recorded on the line so the run record says what was touched.
+   */
+  _feedPropWindow(e, tag, impulse, at, n, simTimeMs, touched, frac = 1, group = null) {
     const key = `${e.id}|${tag}`;
     let w = this._openProp.get(key);
     const near = w && Math.hypot(at.x - w.x, at.y - w.y, at.z - w.z) <= DAMAGE.aggregationRadius;
     if (w && near && w.ageMs < DAMAGE.aggregationWindowMs) {
       w.impulse += impulse;
-      w.peak = Math.max(w.peak, impulse);
+      w.fracSum += frac * impulse;
+      // The hardest step in the window is the one whose split the line reports.
+      if (impulse > w.peak) { w.peak = impulse; if (group) w.surfaces = group; }
       w.ageMs = 0;
     } else {
       if (w) this._closePropWindow(w, simTimeMs);
@@ -306,6 +389,9 @@ export class DamageSystem {
         key, entityId: e.id, defId: e.defId, surfaceId: tag,
         x: at.x, y: at.y, z: at.z, at: { x: at.x, y: at.y, z: at.z },
         normal: n, impulse, peak: impulse, ageMs: 0, startedAt: simTimeMs,
+        /** M30: Σ (fraction × impulse) over the steps that fed this window, and the split the
+         *  hardest of those steps saw. `surfaces` is null for an unsplit hit. */
+        fracSum: frac * impulse, surfaces: group,
         /** §8.4 "player attribution when reliable": who held it at first contact. Recorded
          *  for the run summary (M6); never scored (§15.3). */
         heldBy: (e.state.grips || []).map((g) => g.playerId).filter((id) => id != null),
@@ -504,10 +590,26 @@ export class DamageSystem {
     const lines = ledger ? ledger.propertyDamage : [];
     const already = lines.reduce((s, l) => s + (l.surfaceId === w.surfaceId ? l.cost : 0), 0);
     const room = Math.max(0, P.maxChargePerSurface - already);
-    let raw = row.charges ? (row.charges[w.frameState] || 0) : propertyCost(w.impulse);
+    let raw = row.charges ? (row.charges[w.frameState] || 0) : propertyCost(w.impulse, this._shareOf(w));
     if (typeof this.mitigation === 'function') raw *= this.mitigation(w);
     const cost = Number(Math.min(raw, room).toFixed(2));
-    if (!(cost > 0)) return;
+    if (!(cost > 0)) {
+      /* M30. A window that rounds to nothing because it was UNDER THE THRESHOLD writes nothing
+       * at all, as it always has (§10.4 — no bill without a cause). A window that rounds to
+       * nothing because the SURFACE IS FULL is a different fact: the hit happened, it just
+       * cannot cost any more. §8.3 caps the money, §8.4 asks for the four channels at every
+       * impact, so this one says so and leaves the ledger and its counters alone.
+       *
+       * BOTH HALVES ARE READ FROM `room`, not from `raw` alone. A charge that would have been
+       * a real line on its own (it survives the ledger's own rounding to the cent) and had no
+       * room to land in is capped; a charge that rounds away on a wall with 400.00 of room
+       * left is the under-threshold case and stays silent, which is what it was before M30.
+       * Getting that backwards told the player "already at its maximum" about a wall that had
+       * cost them nothing — reachable for any hit whose share of the m·Δv lands a hair over
+       * DAMAGE.property.impulseThreshold (m37 P6). */
+      if (Number(raw.toFixed(2)) > 0 && room < raw) this._postCapped(w, row, simTimeMs);
+      return;
+    }
     const line = {
       category: 'property',
       surfaceId: w.surfaceId,
@@ -527,9 +629,70 @@ export class DamageSystem {
     // A door frame's line names its kind and its door (M23), so the invoice, the recap and
     // the suites can find it without parsing the surface id.
     if (row.kind) { line.kind = row.kind; line.doorId = w.doorId; }
+    /* M30. `surfaces` is the corner this line was part of — every billable surface the hardest
+     * step touched, with its share, folded ones at 0. Present only when there WAS a corner, so
+     * every single-surface line on the ledger is the object M14 wrote, key for key. */
+    if (w.surfaces && w.surfaces.length > 1) line.surfaces = w.surfaces.map((s) => ({ id: s.id, share: s.share }));
+    /* …and this is the line on which the surface reached its §8.3 maximum. TRIMMED (the charge
+     * was cut to the room that was left) or EXACTLY FULL (the charge landed on the maximum to the
+     * cent) both mean the same thing to a reader, so both set the flag — otherwise the sheet's
+     * '(N at the cap)', which counts this flag, could disagree with the surface that is actually
+     * full. Still at most one line per surface: the room is gone after this one either way. */
+    if (cost + 0.005 < raw || room - cost <= 0.005) line.capped = true;
     if (ledger) lines.push(line);
     // The SAME event the item ledger uses; every listener branches on `category`.
     if (this.bus) this.bus.emit(EVENTS.DAMAGE_APPLIED, { ...line, position: line.at }, simTimeMs);
+  }
+
+  /** M30: a window's own share of the hits that fed it — 1 for everything that was never
+   *  split, so propertyCost() reduces to M14's closed form. Impulse-weighted (see
+   *  _feedPropWindow), clamped into [0, 1] because a share outside it would make a hit
+   *  cheaper or dearer than it was. */
+  _shareOf(w) {
+    if (!(w.impulse > 0) || !Number.isFinite(w.fracSum)) return 1;
+    return Math.max(0, Math.min(1, w.fracSum / w.impulse));
+  }
+
+  /**
+   * M30 — §8.4's four channels for a hit that costs nothing because the surface is full.
+   * NOT a ledger line and NOT a DAMAGE_APPLIED: runLog.js counts every property
+   * DAMAGE_APPLIED as a ledger entry (countEvent), and m17 R2e / m22 PD10 pin that equality,
+   * so a zero-cost line under that name would make the counters lie. It is its own event,
+   * carrying the same fields a line carries with cost 0, so the mark, the caption, the pulse
+   * and the notice all read it exactly as they read a line (main.js, scuffs.js, audio.js).
+   *
+   * ONE PER SURFACE PER DAMAGE.property.cappedRepeatMs. A player grinding a couch along a
+   * capped wall closes an aggregation window every ~0.7 s and §8.4 asks for ONE small notice,
+   * not a stream. `last <= simTimeMs` is the replay guard audio.js takeCue documents: a stamp
+   * from a previous run sits in the future of a clock that restarted at 0.
+   */
+  _postCapped(w, row, simTimeMs) {
+    const P = DAMAGE.property;
+    const last = this._cappedAt.get(w.surfaceId);
+    if (last != null && last <= simTimeMs && simTimeMs - last < P.cappedRepeatMs) return;
+    this._cappedAt.set(w.surfaceId, simTimeMs);
+    if (!this.bus) return;
+    const at = { x: Number(w.at.x.toFixed(2)), y: Number(w.at.y.toFixed(2)), z: Number(w.at.z.toFixed(2)) };
+    const payload = {
+      category: 'property',
+      capped: true,
+      surfaceId: w.surfaceId,
+      location: labelFor(w.surfaceId),
+      entityId: w.entityId,
+      defId: w.defId,
+      impulse: Number(w.impulse.toFixed(3)),
+      peakStepImpulse: Number(w.peak.toFixed(3)),
+      band: row.charges ? w.frameState : propertyBandFor(w.impulse).name,
+      cost: 0,
+      at,
+      // The mark and the shake read `position`; a line's DAMAGE_APPLIED carries both too.
+      position: at,
+      normal: { x: Number(w.normal.x.toFixed(3)), y: Number(w.normal.y.toFixed(3)), z: Number(w.normal.z.toFixed(3)) },
+      timeMs: w.startedAt,
+      heldBy: w.heldBy.slice(),
+    };
+    if (row.kind) { payload.kind = row.kind; payload.doorId = w.doorId; }
+    this.bus.emit(EVENTS.PROPERTY_CAPPED, payload, simTimeMs);
   }
 
   /** The window closes at the CURRENT step's time, so the DAMAGE_APPLIED stamp is the
@@ -594,6 +757,7 @@ export class DamageSystem {
     this._openProp.clear();
     this._touchedProp.clear();
     this._lostBy.clear();
+    this._cappedAt.clear();   // M30: a replay's walls are blank, so nothing is "already at" anything
     this._lastSpeed.clear();
     this.impactCount = 0;
     if (this.state && this.state.ledger) {

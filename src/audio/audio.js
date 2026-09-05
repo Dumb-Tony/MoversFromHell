@@ -43,6 +43,10 @@
 import { AUDIO } from '../config.js';
 import { EVENTS, PHASES } from '../core/eventBus.js';
 import { mulberry32 } from '../core/rng.js';
+/* M30: the caption's vocabulary for a surface — PURE label data (a tag in, two words out),
+ * the same table the ledger line's `location` comes from, so the subtitle and the notice
+ * cannot say different things about one hit. Nothing else is read from a caption. */
+import { surfaceCaption } from '../damage/surfaces.js';
 
 /* ── the mix: pure, testable, no WebAudio anywhere near it ─────────────────── */
 
@@ -176,12 +180,33 @@ export function mixFor(state, listeners = EMPTY, world = {}) {
  * partial; `noise` is `[seconds, filterHz, gain]` — a filtered burst of the seeded noise bed,
  * which is what makes a thud a thud. Every row and every variant carries a `caption`: the
  * §21.4 subtitle, asserted non-empty by m18 A1b.
+ *
+ * A CAPTION IS A STRING **OR** A PURE FUNCTION OF THE PAYLOAD (Phase 11 build-side M30).
+ * m18 A1b pinned it as a string from M9 on, and that pin is why the property cues said 'wall
+ * scuffed' when a door frame was scuffed (KNOWN_ISSUES Phase 21, M14). The pin is RESTATED,
+ * not dropped: what A1b asserts now is that every row and every variant yields a NON-EMPTY
+ * caption for a representative payload — a literal string still does, and most rows still are
+ * one. A function form must be PURE (payload in, string out; it may read surfaces.js's label
+ * tables and nothing else) so the table walk can call it with a fixture and so two players
+ * reading the same event read the same words. resolveCue() below evaluates it, guards a throw,
+ * and falls back to the variant key rather than an empty subtitle.
  */
 const material = (e) => {
   const tags = e && Array.isArray(e.materials) ? e.materials : EMPTY;
   for (const t of ['glass', 'metal', 'wood', 'cardboard', 'fabric']) if (tags.includes(t)) return t;
   return '_';
 };
+
+/** The surface a property event names, in the words §26.5 wants — 'living-kitchen door frame'.
+ *  Total: an event with no surface at all still reads as a wall, which is what M14 said. */
+const surfaceOf = (e) => {
+  const tag = e && e.surfaceId;
+  if (typeof tag === 'string' && tag.length > 0) return surfaceCaption(tag);
+  const loc = e && e.location;
+  return (typeof loc === 'string' && loc.length > 0) ? loc.replace(/_/g, '-') : 'a wall';
+};
+/** A property caption TEMPLATE: the surface, then what happened to it. Pure. */
+const marked = (what) => (e) => `${surfaceOf(e)} ${what}`;
 
 export const CUES = Object.freeze({
   /* §8.4 "material sound" — by the object's own surface tag, loudness ∝ relVelocity
@@ -205,16 +230,30 @@ export const CUES = Object.freeze({
       scratched: { caption: 'scratched',         parts: [[1800, 900, 0.06, 'square', 0.10]] },
       cracked:   { caption: 'something cracked', parts: [[1300, 300, 0.12, 'square', 0.22], [400, 120, 0.18, 'sawtooth', 0.16, 0.02]] },
       broken:    { caption: 'something broke',   parts: [[900, 90, 0.36, 'sawtooth', 0.34], [160, 40, 0.55, 'triangle', 0.26, 0.04]], noise: [0.12, 1400, 0.30] },
-      // M14: the PROPERTY bands (DAMAGE.property.bands) — a wall, not an item. The HUD notice
-      // names the surface; the caption stays a string (m18 A1b) so it says what kind of mark.
-      scuffed:   { caption: 'wall scuffed',      parts: [[700, 380, 0.08, 'triangle', 0.14]], noise: [0.05, 900, 0.22] },
-      dented:    { caption: 'wall dented',       parts: [[420, 160, 0.14, 'square', 0.22]], noise: [0.08, 600, 0.28] },
-      holed:     { caption: 'wall holed',        parts: [[260, 70, 0.30, 'sawtooth', 0.30], [120, 40, 0.40, 'triangle', 0.20, 0.03]], noise: [0.12, 500, 0.34] },
+      /* M14: the PROPERTY bands (DAMAGE.property.bands) — a wall, not an item. M30 makes these
+       * five captions TEMPLATES: the HUD notice named the surface from the first line M14 ever
+       * posted and the subtitle said 'wall scuffed' whatever was hit. Now both read the same
+       * table (surfaces.js) — 'living-kitchen door frame scuffed'. */
+      scuffed:   { caption: marked('scuffed'),   parts: [[700, 380, 0.08, 'triangle', 0.14]], noise: [0.05, 900, 0.22] },
+      dented:    { caption: marked('dented'),    parts: [[420, 160, 0.14, 'square', 0.22]], noise: [0.08, 600, 0.28] },
+      holed:     { caption: marked('holed'),     parts: [[260, 70, 0.30, 'sawtooth', 0.30], [120, 40, 0.40, 'triangle', 0.20, 0.03]], noise: [0.12, 500, 0.34] },
       // M23: a door FRAME's two states (damage.js _strainFrames) — the hinges creak, then go.
-      bent:      { caption: 'door frame bent',   parts: [[300, 220, 0.18, 'sawtooth', 0.18], [180, 90, 0.16, 'triangle', 0.14, 0.06]], noise: [0.06, 700, 0.20] },
-      forced:    { caption: 'door forced',       parts: [[240, 60, 0.32, 'sawtooth', 0.32], [900, 300, 0.10, 'square', 0.18, 0.02], [110, 45, 0.45, 'triangle', 0.24, 0.05]], noise: [0.14, 1100, 0.34] },
+      bent:      { caption: marked('bent'),      parts: [[300, 220, 0.18, 'sawtooth', 0.18], [180, 90, 0.16, 'triangle', 0.14, 0.06]], noise: [0.06, 700, 0.20] },
+      forced:    { caption: marked('forced'),    parts: [[240, 60, 0.32, 'sawtooth', 0.32], [900, 300, 0.10, 'square', 0.18, 0.02], [110, 45, 0.45, 'triangle', 0.24, 0.05]], noise: [0.14, 1100, 0.34] },
       _:         { caption: 'damage',            parts: [[1100, 400, 0.10, 'square', 0.16]] },
     },
+  },
+  /* M30. §8.4 asks for the four channels at EVERY impact; §8.3's "maximum charge" caps the
+   * money, not the feedback. A surface already at DAMAGE.property.maxChargePerSurface still
+   * gets hit, so it still makes a noise — a dull, cheap one, deliberately quieter than any
+   * band above, because the player has already paid for this wall and the news is that there
+   * is nothing left to pay. Rate-limited at the source (damage.js cappedRepeatMs) as well as
+   * here, so a scrape is one complaint and not a stream. */
+  PROPERTY_CAPPED: {
+    bus: 'world', minGapMs: 400, positional: true,
+    caption: (e) => `${surfaceOf(e)} — already at its maximum`,
+    parts: [[300, 240, 0.12, 'triangle', 0.12], [180, 150, 0.16, 'sine', 0.10, 0.05]],
+    noise: [0.05, 700, 0.14],
   },
   /* §6.1 the grip: soft grab, soft release. The tear (§6.2 "pulled out of reach" — the
    * spring's band exceeded) is a snap, and a slip is a slip. */
@@ -332,16 +371,34 @@ export function cueFor(type) {
   return Object.prototype.hasOwnProperty.call(CUES, type) ? CUES[type] : null;
 }
 
+/**
+ * One caption cell, resolved (M30). A cell is a STRING or a PURE FUNCTION of the payload; a
+ * function that throws or hands back anything but a non-empty string yields '' and the caller
+ * substitutes. Exported so the table walk (m18 A1b) resolves cells exactly as the layer does.
+ * @param {string|((payload: object) => string)} cell
+ * @returns {string} '' when there is nothing usable
+ */
+export function captionText(cell, payload) {
+  if (typeof cell === 'function') {
+    let s;
+    try { s = cell(payload); } catch (e) { return ''; }
+    return (typeof s === 'string' && s.trim().length > 0) ? s : '';
+  }
+  return (typeof cell === 'string' && cell.trim().length > 0) ? cell : '';
+}
+
 /** The row resolved for ONE event: {bus, minGapMs, positional, caption, parts, noise}. Pure. */
 export function resolveCue(type, payload) {
   const row = cueFor(type);
   if (!row) return null;
-  if (!row.variants) return { bus: row.bus, minGapMs: row.minGapMs, positional: !!row.positional, caption: row.caption, parts: row.parts || EMPTY, noise: row.noise || null };
+  if (!row.variants) return { bus: row.bus, minGapMs: row.minGapMs, positional: !!row.positional, caption: captionText(row.caption, payload) || type, parts: row.parts || EMPTY, noise: row.noise || null };
   let key = '_';
   try { key = row.variant ? String(row.variant(payload)) : '_'; } catch (e) { key = '_'; }
   const v = (Object.prototype.hasOwnProperty.call(row.variants, key) ? row.variants[key] : null) || row.variants._;
   if (!v) return null;
-  return { bus: row.bus, minGapMs: row.minGapMs, positional: !!row.positional, caption: v.caption, parts: v.parts || EMPTY, noise: v.noise || null, variant: key };
+  // A template that came back empty falls back to the variant KEY ('scuffed'), never to an
+  // empty subtitle: §26.5 asks the caption to say what happened, and the key already does.
+  return { bus: row.bus, minGapMs: row.minGapMs, positional: !!row.positional, caption: captionText(v.caption, payload) || key, parts: v.parts || EMPTY, noise: v.noise || null, variant: key };
 }
 
 /** How loud one firing of a cue is, against its recipe. Pure, so the curve is assertable

@@ -61,7 +61,9 @@ import { createHaptics } from './audio/haptics.js';   // §8.4's fourth channel 
 import { InteractionSystem } from './player/interact.js';
 import { StrapLines } from './render/strapLines.js';
 import { layoutFor, applyAspect, renderSeats, SplitDivider } from './render/coopView.js';
-import { detectRenderTier, shadowMapTypeFor } from './render/lighting.js';
+// setQualityTier: the Quality row applies LIVE (Phase 11 build-side M29) — it disposes the rig
+// and rebuilds it from the tier's row in LIGHTING.tiers, in the scene that is already running.
+import { detectRenderTier, shadowMapTypeFor, setQualityTier, shadowMapCount } from './render/lighting.js';
 import { styleFromLocation, applyStyle } from './render/styles.js';
 /* Phase 15 — the Overcooked overhaul. The four modules below are the render side of it;
  * main.js owns only the tier decision, the post/blob construction and the one present(). */
@@ -474,6 +476,35 @@ async function boot() {
     for (const m of movers) m.rig.setDistance(d);
   }
   applyCameraDistance();
+
+  /* §15.4 / §21.4's Quality row, APPLIED NOW rather than at the next boot (Phase 11 build-side
+   * M29 — the second of KNOWN_ISSUES' two Phase 17 deferrals). `liveTier` is what the scene is
+   * lit for at this moment; `renderTier` above stays what this BOOT decided, because the
+   * texture and material set was minted from it before the scene existed (setRenderTier) and a
+   * live switch does not re-mint it. lighting.setQualityTier disposes the old rig and builds
+   * the other one against the same scene and the same room list; the shadow filter follows on
+   * the renderer. The world's light handles are re-pointed at the new rig so M.world.sun and
+   * M.world.roomLights stay the truth (tools/_perf.js and m13 read them). 'auto' asks
+   * detectRenderTier again, which is also what honours ?tier= — so a URL-forced tier survives a
+   * player switching to auto and back. Nothing here touches game.state, the physics world, the
+   * geometry or the materials (m36 Q1). */
+  let liveTier = renderTier;
+  function applyQualityTier(choice) {
+    const want = (choice === 'gpu' || choice === 'software') ? choice : detectRenderTier(renderer);
+    const rig = setQualityTier(want, { renderer, THREE, scene: world.scene });
+    if (!rig) return liveTier;
+    liveTier = want;
+    world.sun = rig.sun; world.fill = rig.fill; world.hemi = rig.hemi;
+    world.ambient = rig.ambient; world.roomLights = rig.roomLights; world.tier = want;
+    /* Phase 15's post chain and contact blobs are GPU-tier features that were BUILT at boot
+     * (below) or not at all. What a live switch can do honestly is stop using them: post has a
+     * setEnabled, and the blobs' per-frame update is gated on the live tier. A software boot
+     * that switches up therefore gets the lights and the shadows now and the rest on reload —
+     * said on the card, and recorded in KNOWN_ISSUES rather than faked here. */
+    if (post) post.setEnabled(want === 'gpu');
+    if (blobs && want !== 'gpu') blobs.update([], blobProbe, []);
+    return liveTier;
+  }
 
   // New colliders are invisible to raycasts until the next step (MEASURED — world.js), and
   // the very first grab probe happens before any step has run.
@@ -1051,6 +1082,7 @@ async function boot() {
         if (Number.isFinite(v)) {
           shell.uiScale = Math.min(r.max, Math.max(r.min, v));
           document.documentElement.style.setProperty('--ts', String(shell.uiScale));
+          syncHelpMetrics();                         // M29: the help line may now wrap; --help-lift
           if (walkthrough) walkthrough.relayout();   // M22: the help line's height follows --ts
         }
       }
@@ -1063,7 +1095,11 @@ async function boot() {
         }
       }
       if (Object.prototype.hasOwnProperty.call(shellPatch, 'tier') && SETTINGS.tiers.includes(shellPatch.tier)) {
-        shell.tier = shellPatch.tier;   // consumed by the NEXT boot (see the top of boot())
+        shell.tier = shellPatch.tier;
+        // M29: and NOW, not only at the next boot — the rig is rebuilt in the running scene
+        // (applyQualityTier). The save still carries the choice, so the next boot mints the
+        // matching texture set as well (m36 Q1/Q3).
+        applyQualityTier(shell.tier);
       }
       /* §21.4 Hearing (M9): the three volume categories go straight to the bus gains, the
        * captions switch to every seat's caption line. Clamped to the same ranges save.js does. */
@@ -1143,6 +1179,17 @@ async function boot() {
     endCapture: () => input.endCapture(),
   };
   const settingsPanel = new SettingsPanel(ui, settingsStore);
+  /** The help line's last reading, for the suites and the overlay (M29) — assigned by
+   *  syncHelpMetrics() 70 lines below. DECLARED HERE, above applyAccessibility(), because
+   *  applyAccessibility() calls syncHelpMetrics() at boot and a `let` beside its own function
+   *  would be in temporal dead zone at that moment. Today the call returns at syncHelpMetrics's
+   *  `if (!el)` guard (#help is not built until later), so the assignment is never reached and
+   *  nothing throws — but the whole boot would then depend on that guard, and on the help div
+   *  staying below this line. It does not depend on either now. */
+  let helpMetrics = { rows: 1, lift: 0, lineHeight: 0, squeeze: 1, overBudget: false };
+  /** …and whether the ladder has ever run out (M29 fixer). One shot: the lapse is a property of
+   *  the window and the text size, so a resize drag would otherwise log it dozens of times. */
+  let helpBudgetWarned = false;
   /* §21.4's Cognition and Vision rows (Phase 11 build-side M19): each shell switch pushed to
    * the thing that consumes it (m16 U2 "assert consumption"). Reduced HUD → every seat's HUD
    * (hud.js setReduced — both halves in co-op, m27 A1). High contrast → the `.hc` class on
@@ -1156,6 +1203,7 @@ async function boot() {
     document.body.classList.toggle('hc', !!shell.highContrast);
     for (const el of [title.el, pauseScreen.el, invoiceScreen.el, settingsPanel.el]) el.classList.toggle('hc', !!shell.highContrast);
     interact.hints = !!shell.hints;
+    syncHelpMetrics();                         // M29: .hc changes the help line's padding
     if (walkthrough) walkthrough.relayout();   // M22: .hc restyles the help line the card sits on
   }
   applyAccessibility();
@@ -1200,9 +1248,86 @@ async function boot() {
         `${g('jump', 0)} jump · <b>${grab(0)}</b> · <b>${g('interact', 0)} use</b> · ` +
         `<b>${g('context', 0)} undo</b> · ${g('swapMover', 0)} swap mover · ` +
         `${g('recover', 0)} recover · <b>${join} two players</b> · ${g('pause', 0)} pause · F3`;
-    if (html !== helpHtml) { helpHtml = html; help.innerHTML = html; if (walkthrough) walkthrough.relayout(); }   // relayout: M22
+    if (html !== helpHtml) {
+      helpHtml = html; help.innerHTML = html;
+      syncHelpMetrics();                         // M29: a longer line may wrap; --help-lift
+      if (walkthrough) walkthrough.relayout();   // relayout: M22
+    }
+  }
+
+  /* §21.4's scalable UI, THE BOXES (Phase 11 build-side M29). The help line is the one panel
+   * whose height is not a function of its own CSS: it is derived from the live binding table,
+   * so how many lines it takes depends on the text, the text size, high contrast and the window
+   * width all at once. Everything that sits over it — the route bar, the caption, the notices,
+   * the build stamp — therefore gets ONE measured number instead of four guesses: --help-lift,
+   * how much taller than a single line this line currently is. It is 0 whenever the line fits on
+   * one, which is why 1.0× is bit-for-bit the layout Phase 15 measured (m36 S2), and one line
+   * height when it wraps at 1.4× and up. Measured HERE and nowhere else, on the same four
+   * occasions walkthrough.relayout() is called — a help rewrite, a --ts change, a high-contrast
+   * change and a resize — never per frame (m29 W1z4's rule).
+   *
+   * SETTINGS.textSize.helpMaxLines is a BUDGET, and this is what spends it. Two rows are allowed
+   * because two rows still leave the route bar and the caption above the working area; a third
+   * would not (§21.1). So when the line still wants a third row at the size and window width it
+   * has been given — a window narrower than the harness's 1262 px, or a text size past the 1.6×
+   * the settings range allows — the loop steps DOWN SETTINGS.textSize.helpSqueeze and re-measures,
+   * stopping at the first factor that fits. Smaller help text is the lesser harm; covering the
+   * doorway is the one thing the scale must never do. The ladder starts at 1 and 1 is what every
+   * text size a player can pick measures here, so the shipping layout never sees the rest of it
+   * (m11 M29-5 pins that; m36 S1f drives it past the budget on purpose). */
+  function syncHelpMetrics() {
+    const el = document.getElementById('help');
+    if (!el) return null;                      // called from applyAccessibility() before the line exists
+    const budget = Math.max(1, SETTINGS.textSize.helpMaxLines);
+    const ladder = SETTINGS.textSize.helpSqueeze;
+    const root = document.documentElement;
+    let rows = 1, lh = 0, squeeze = ladder[0];
+    for (let i = 0; i < ladder.length; i++) {
+      squeeze = ladder[i];
+      root.style.setProperty('--help-squeeze', String(squeeze));
+      const cs = getComputedStyle(el);       // …which is also the reflow the next line reads
+      lh = parseFloat(cs.lineHeight);
+      if (!Number.isFinite(lh) || lh <= 0) {
+        /* Unmeasurable line height — bail, but NOT mid-ladder: leaving --help-squeeze on step i
+         * would shrink the help text by a factor no measurement justified. Put the identity factor
+         * back first. helpMetrics is deliberately left AS IT WAS rather than zeroed: with no
+         * measurement to replace it, the last good reading describes the screen better than a
+         * blank one, and every caller re-runs this on the next layout event. */
+        squeeze = ladder[0];
+        root.style.setProperty('--help-squeeze', String(squeeze));
+        return null;
+      }
+      const inner = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      rows = Math.max(1, Math.round(inner / lh));
+      if (rows <= budget) break;
+    }
+    /* THE FLOOR. The loop above stops at the first factor that fits — or simply RUNS OUT, and
+     * then rows is still over the budget, --help-lift is two line heights or more, and the route
+     * bar and the caption rise into the working area: the §21.1 harm this whole measurement
+     * exists to prevent, happening silently. A ladder cannot be made deep enough for every window
+     * (the floor factor at 1.6× still wants ~1005 px of text, so a window under ~560 px is past
+     * it), so the lapse is REPORTED instead of hidden: a flag the suites pin (m36 S1g) and one
+     * console line saying by how much. The honest fix is a shorter control line, not a smaller
+     * one — it is in KNOWN_ISSUES as an open item. */
+    const overBudget = rows > budget;
+    const lift = (rows - 1) * lh;
+    helpMetrics = { rows, lift, lineHeight: lh, squeeze, overBudget };
+    root.style.setProperty('--help-lift', `${lift.toFixed(2)}px`);
+    if (overBudget && !helpBudgetWarned) {
+      helpBudgetWarned = true;
+      console.warn(`#help needs ${rows} rows at the smallest squeeze the ladder has (${squeeze}); ` +
+                   `SETTINGS.textSize.helpMaxLines is ${budget}, so the panels above it are lifted ` +
+                   `${lift.toFixed(1)}px — into the working area (§21.1). Narrower window than the ` +
+                   `control line fits, or a text size past the settings range.`);
+    }
+    return helpMetrics;
   }
   refreshHelp();
+  syncHelpMetrics();
+  // The line's wrap depends on the window's width, and nothing else in main.js watches a resize
+  // (syncSize runs per frame and only touches the canvas). The walkthrough card listens for its
+  // own; this is the same event for the same reason.
+  window.addEventListener('resize', () => syncHelpMetrics());
 
   /* ---- the first-minute cards (Phase 11 build-side M22; §26.7 Comprehension, §21.3) -------
    * walkthrough.js: three cards bottom-left above the help line, each retired by the real
@@ -1248,6 +1373,19 @@ async function boot() {
       ? `${name} ${e.band === 'forced' ? 'forced off its hinges' : 'frame bent'} — ${e.cost.toFixed(2)}`
       : `${name} — ${e.band} · ${e.cost.toFixed(2)}`;
     pendingNotices.push({ text, kind: 'damage' });
+  });
+  /* M30 — §8.4's notice and mark for a hit that costs nothing because the surface is already
+   * at its §8.3 maximum. There is no ledger line to notice (damage.js _postCapped explains
+   * why it is a name of its own and not a zero-cost DAMAGE_APPLIED), so the two channels the
+   * line would have driven are driven from here instead: the same wording as a damage notice
+   * with the price replaced by the reason, and the SAME scuff ring — the payload carries
+   * category 'property', `at` and `normal`, which is all Scuffs.mark reads, so a player who
+   * keeps hitting a paid-for wall keeps marking it (until the ring's own §26.6 bound). The
+   * rate discipline is at the source: one event per surface per DAMAGE.property.cappedRepeatMs. */
+  bus.on(EVENTS.PROPERTY_CAPPED, (e) => {
+    const name = String(e.location || e.surfaceId || 'a surface');
+    pendingNotices.push({ text: `${name} ${e.band || 'marked'} — already at its maximum`, kind: 'damage' });
+    scuffs.mark(e);
   });
   bus.on(EVENTS.STRAP_CHANGED, (e) => {
     // Only the states worth interrupting for. A strap going tensioned is not news.
@@ -2130,7 +2268,8 @@ async function boot() {
     drainNotices();
 
     const seatList = Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));
-    if (blobs) blobs.update(blobSources(), blobProbe, seatList.map((m) => m.camera));
+    // M29: the blobs are a gpu-tier feature, and the tier can now change while the game runs.
+    if (blobs && liveTier === 'gpu') blobs.update(blobSources(), blobProbe, seatList.map((m) => m.camera));
     if (styled.postRender && seatCount === 1 && !post) {
       // A style mock owns the frame (the film grade is single-viewport by design).
       styled.postRender(renderer, world.scene, moverOfSeat(0).camera);
@@ -2179,13 +2318,19 @@ async function boot() {
      * tool that used to call renderer.render() directly goes through here now, because a
      * direct render draws a shadowless, ungraded frame with no error. */
     renderTier, post, blobs,
+    /* M29: the tier the scene is lit for RIGHT NOW (renderTier above is the boot's, which the
+     * texture set was minted from), the live switch itself, and the help line's measured wrap —
+     * the one number the bottom-edge panels are placed from. */
+    get qualityTier() { return liveTier; },
+    applyQualityTier, shadowMapCount, syncHelpMetrics,
+    get helpMetrics() { return { ...helpMetrics }; },
     /* M14: the property-damage decal ring and the static colliders with their tags. */
     scuffs, statics,
     present: (cam) => {
       const w = canvas.clientWidth || 0, h = canvas.clientHeight || 0;
       const list = cam ? [{ camera: cam }] : Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));
       const rs = layoutFor(cam ? 1 : seatCount, w, h);
-      if (blobs) blobs.update(blobSources(), blobProbe, list.map((m) => m.camera));
+      if (blobs && liveTier === 'gpu') blobs.update(blobSources(), blobProbe, list.map((m) => m.camera));
       return present(renderer, world.scene, list, rs, post, updateRimCamera);
     },
     get seatCount() { return seatCount; },

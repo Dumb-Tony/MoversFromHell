@@ -122,6 +122,10 @@ const R = physics.R;
 /** Spy: every property DAMAGE_APPLIED the bus carried, as stamped. */
 const propEvents = [];
 bus.on(EVENTS.DAMAGE_APPLIED, (e) => { if (e.category === 'property') propEvents.push(e); });
+/** M30: and every 'this surface is already at its maximum' event, which is NOT a ledger line
+ *  and NOT a DAMAGE_APPLIED — see PD6d, restated below. */
+const cappedEvents = [];
+bus.on(EVENTS.PROPERTY_CAPPED, (e) => { cappedEvents.push(e); });
 
 /** The numbers §26.6 compares: read at boot, before anything moves. */
 const bootChildren = world.scene.children.length;
@@ -449,18 +453,37 @@ lines.push('--- PD6. a surface stops at DAMAGE.property.maxChargePerSurface (GDD
   near('PD6a the last posted line\'s cost === 400 − Σ previous, to the cent', last ? last.cost : -1, Number((P.maxChargePerSurface - prev).toFixed(2)), 0.005);
   ok('PD6b every line\'s cost > 0 (a window that rounds to nothing writes nothing)', posted.length >= 2 && wallLines.every((l) => l.cost > 0), `${posted.length} lines`);
   ok('PD6c …and the throws were real: the first line is "dented" (40 <= 9 kg × ~5.6 m/s < 100)', posted.length > 0 && posted[0].impulse >= 40 && posted[0].band === 'dented', posted[0] ? `${posted[0].impulse} ${posted[0].band}` : '-');
-  // One more hit on the capped wall: no line, no event, no notice.
+  /* One more hit on the capped wall.
+   *
+   * PD6d RESTATED (Phase 11 build-side M30). It asserted "no line, no event, no notice", and
+   * KNOWN_ISSUES Phase 21 recorded the middle two as the open item: §8.3 caps the MONEY and
+   * §8.4 asks for a sound, a mark and one small notice at EVERY impact, so a player who keeps
+   * hitting a paid-for wall stopped being told anything at all. The LEDGER half is unchanged
+   * and still asserted to the cent — no line, no property DAMAGE_APPLIED, so the M6 counters
+   * (PD10) and the invoice keep agreeing. The FEEDBACK half is the fix: one
+   * EVENTS.PROPERTY_CAPPED naming the surface at cost 0, and one notice. */
   drainNotices();
   const n1 = prop().length, e1 = propEvents.length, w1 = wallNotices().length;
+  const c1 = cappedEvents.length, sum1 = wallSum();
   parkAt(box, 1.5, 0.27, -1.50);
   box.state.condition = 100;
   step(5);
   throwAt(box, 0, 0, -6.0);
   step(60);
   damage.flush(T);
-  ok('PD6d one further hit on the capped wall posts no line, no event, no notice',
-     prop().length === n1 && propEvents.length === e1 && wallNotices().length === w1,
-     `lines ${prop().length - n1}, events ${propEvents.length - e1}, notices ${wallNotices().length - w1}`);
+  ok('PD6d one further hit on the capped wall posts NO ledger line, NO property DAMAGE_APPLIED, and leaves Σ wall cost unchanged to the cent',
+     prop().length === n1 && propEvents.length === e1 && Math.abs(wallSum() - sum1) < 0.005,
+     `lines ${prop().length - n1}, events ${propEvents.length - e1}, Σ ${wallSum().toFixed(2)} vs ${sum1.toFixed(2)}`);
+  const capped = cappedEvents.slice(c1);
+  ok('PD6d1 …but exactly one PROPERTY_CAPPED fired, naming "wall" at cost 0 (M30: the cap is on the money, not on the feedback — §8.4)',
+     capped.length === 1 && capped[0].surfaceId === 'wall' && capped[0].cost === 0 && capped[0].category === 'property',
+     JSON.stringify(capped.map((c) => [c.surfaceId, c.cost])));
+  ok('PD6d2 …and the player was told: a "damage" notice matching /already at its maximum/',
+     M.pendingNotices.some((n) => n.kind === 'damage' && /already at its maximum/.test(n.text)),
+     M.pendingNotices.map((n) => n.text).join(' | '));
+  ok('PD6d3 …the trimmed line — the one that reached 400.00 — is flagged capped, and it is the only one',
+     prop().filter((l) => l.surfaceId === 'wall' && l.capped).length === 1,
+     JSON.stringify(prop().filter((l) => l.surfaceId === 'wall').map((l) => [l.cost, !!l.capped])));
   ok('PD6e …the capped surface does not stop a DIFFERENT surface: the door-frame line from PD4 was never involved',
      prop().every((l) => l.surfaceId === 'wall' || l.cost > 0));
 }

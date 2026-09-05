@@ -91,9 +91,16 @@ const ROWS = Object.freeze({
     { key: 'uiScale', label: 'Text size', kind: 'range', fmt: (v) => Math.round(v * 100) + '%' },
     { key: 'cameraDistance', label: 'Camera distance', kind: 'range', fmt: (v) => v.toFixed(1) + ' m',
       note: 'Solo only — a split screen uses its own shorter boom.' },
+    /* §15.4 / §21.4 (Phase 11 build-side M29). This row said 'Applies on reload' for eleven
+     * milestones, because the tier decides how many shadow maps are BUILT before the scene
+     * exists. It rebuilds them in place now (lighting.setQualityTier): the lights, their shadow
+     * maps, the renderer's shadow filter and the post chain follow the switch immediately. The
+     * note still says what does NOT — the texture and material set is minted from the tier
+     * before the scene is built (bump, spec and env maps), and re-minting it is a reload. A
+     * half-true switch would be worse than the honest sentence (§2.1). */
     { key: 'tier', label: 'Quality', kind: 'select', options: SETTINGS.tiers,
       names: { auto: 'auto-detect', gpu: 'full (GPU)', software: 'reduced (no GPU)' },
-      note: 'Applies on reload — the tier decides how many shadow maps get built.' },
+      note: 'Lights, shadows and the post chain change straight away. Surface detail — bump, gloss and reflections — is built when the game loads, so those follow the next time you open it.' },
     /* §26.5 "camera shake … exist[s]" / §21.4 Motion (M16): the shell key cameraShake, routed
      * to every rig's shakeEnabled. Never on the look axes — it is a nudge on the eye. */
     { key: 'cameraShake', label: 'Camera shake — a nudge on hard brakes, bumps and nearby impacts', kind: 'check',

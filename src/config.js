@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 28,
-  label: 'phase-28',
+  phase: 29,
+  label: 'phase-29',
   date: '2026-09-05',
 });
 
@@ -703,6 +703,23 @@ export const DAMAGE = Object.freeze({
      * decals: §26.6 "no unbounded growth in decals" — a ring of `max` quads, pre-allocated
      *   at boot and reused oldest-first (scuffs.js); `proud` keeps them off the wall face. */
     minStepImpulse: 1.5,
+    /* Phase 11 build-side M30 — the two numbers the SPLIT and the CAPPED NOTICE are tuned by
+     * (damage.js _attributeProperty / _postPropLine).
+     *
+     * splitMinFraction: a corner hit touches a wall AND a header in one step, and M14 gave the
+     *   whole m·Δv to whichever manifold pushed hardest. It is now shared out in proportion to
+     *   each SURFACE's summed manifold impulse — the total is unchanged, so nothing gets
+     *   dearer, and the §15.1 threshold is shared in the same proportion so the split lines sum
+     *   to the cent of the one line M14 would have posted (m37 P1). Below this fraction a
+     *   share is folded into the largest: a 3 % graze is a wall hit with a scratch beside it,
+     *   not a second 0.4-cent line on the customer's invoice (§26.4 "one ledger entry").
+     * cappedRepeatMs: §8.4 wants a notice at EVERY impact and §8.3 caps only the CHARGE, so a
+     *   surface at maxChargePerSurface keeps talking (EVENTS.PROPERTY_CAPPED) — but a player
+     *   grinding a couch along a capped wall must not get one notice per aggregation window.
+     *   1500 is four aggregation windows (aggregationWindowMs 700 → a close every ~0.7 s at
+     *   worst), so a sustained scrape reads as one repeated complaint, not a stream. */
+    splitMinFraction: 0.12,
+    cappedRepeatMs: 1500,
     bands: [
       { name: 'scuffed', min: 12 },
       { name: 'dented',  min: 40 },
@@ -1460,6 +1477,10 @@ export const HAPTICS = Object.freeze({
   IMPACT:         Object.freeze({ strong: 0.45, weak: 0.30, ms: 90,  to: 'holder' }),
   /* §8.3's bands cost money; this is the one pulse a player should notice through a sleeve. */
   DAMAGE_APPLIED: Object.freeze({ strong: 0.85, weak: 0.55, ms: 180, to: 'holder' }),
+  /* M30: a hit on a surface already at its §8.3 maximum. It still HAPPENED (§8.4's four
+   * channels are about the impact, not about the bill), so the hand feels it — but it costs
+   * nothing, so it is the quietest damage row on the table rather than the loudest. */
+  PROPERTY_CAPPED: Object.freeze({ strong: 0.22, weak: 0.30, ms: 70,  to: 'holder' }),
   /* §6.1 the grip: a tick on, a tick off. Weak motor only — a grab is not a hit. */
   GRIP_STARTED:   Object.freeze({ strong: 0,    weak: 0.22, ms: 45,  to: 'player' }),
   GRIP_ENDED:     Object.freeze({ strong: 0.10, weak: 0.26, ms: 50,  to: 'player' }),
@@ -1556,9 +1577,68 @@ export const SETTINGS = Object.freeze({
      *  difficulty the player has to turn back down. GRIP.assist carries the bounds and why. */
     gripAssist: GRIP.assist.default,
   },
-  /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
-   *  the tier decides how many shadow maps get BUILT, before the scene exists. */
+  /** 'auto' detects (lighting.js detectRenderTier); the other two force. APPLIES LIVE since
+   *  Phase 11 build-side M29 — lighting.setQualityTier disposes the rig and rebuilds it from
+   *  the tier's row in LIGHTING.tiers, in the scene that is already running — and is saved for
+   *  the next boot as well. What a live switch does NOT rebuild is the texture and material
+   *  set, which is minted before the scene exists (setRenderTier, main.js): the shadow maps,
+   *  the lights, the shadow filter and the post chain follow the switch; bump, spec and env
+   *  maps follow the next reload. The settings row says so. */
   tiers: ['auto', 'gpu', 'software'],
+  /** §21.4 Vision "scalable UI" — THE BOXES (Phase 11 build-side M29). M4 made `--ts` multiply
+   *  every font-size; the boxes that hold that type stayed raw px, so at 1.6× the help line ran
+   *  1377.9 px wide in a 1262 px window (measured — clipped at both ends, no scrollbar to say
+   *  so) and the title card's livery name wanted 735 px of a 647 px plate. These are the numbers
+   *  the m36 suite measures that against. */
+  textSize: {
+    /** How many lines #help may wrap to at ANY text size. One line up to ~1.3× (872.5 px of
+     *  line), two from ~1.4×; a third would push the route bar and the caption into the working
+     *  area (§21.1), which is what --help-lift's budget is measured against. */
+    helpMaxLines: 2,
+    /** …AND WHAT ENFORCES IT. helpMaxLines was a budget nothing read until this ladder existed:
+     *  main.js syncHelpMetrics multiplies #help's font-size by `--help-squeeze`, steps down this
+     *  list in order and stops at the first factor that fits the line inside helpMaxLines rows.
+     *  1 is the shipping value at every text size the range allows in a 1262 px window (measured:
+     *  one row to 1.3×, two at 1.6×), so nothing moves until the budget is genuinely exceeded —
+     *  a narrower window, a longer binding line, or the two-seat text. Shrinking the help line is
+     *  the lesser harm: the alternative is a third row lifting the route bar and the caption into
+     *  the working area (§21.1), which is the one thing the scale must never do.
+     *  THE LAST FACTOR IS A FLOOR, NOT A GUARANTEE. No ladder fits every window — 0.72 at 1.6×
+     *  still wants ~1005 px of control line, so a window under ~560 px is past it. When the list
+     *  runs out with the line still over budget, syncHelpMetrics sets helpMetrics.overBudget and
+     *  logs by how much (m36 S1g) rather than lifting the panels in silence. Lengthening this
+     *  list buys narrower windows at the cost of readable help text; the real fix is a shorter
+     *  control line. */
+    helpSqueeze: [1, 0.9, 0.8, 0.72],
+    /** THE ONLY selectors allowed a raw px `width` / `min-width` / `max-width` in styles.css,
+     *  and why. Everything else under #ui, a .card or #help multiplies by var(--ts) or is
+     *  viewport-relative; m36 S3 walks the CSSOM (never a fetch — KNOWN_ISSUES Phase 17) and
+     *  fails on any raw px box that is not listed here, the way m16 U1e does for font sizes.
+     *  A zero length is not a box and is not listed. */
+    pxAllowed: {
+      '#help': ['max-width'],                     // the viewport minus the corner panels' inset
+      '.objective': ['max-width'],                // §21.1's centre-third guard: must NOT scale
+      '.reticle .dot': ['width'],                 // the reticle is a sight, not type (§21.1)
+      '.reticle .hand': ['width'],
+      '.reticle .hand.holding': ['width'],
+      '.reticle .hand.slipping': ['width'],
+      '.route-bar': ['width'],                    // a progress length, not type
+      '#title-screen .card': ['width'],           // pinned beside the brief sheet (m31 B2)
+      '#title-screen .brief': ['width'],          // …and the sheet to the card
+    },
+    /** …and THE ONLY font declarations allowed to CAP `--ts` instead of multiplying by it, with
+     *  the cap each may use. m16 U1e counts the declarations that carry var(--ts); a
+     *  `min(var(--ts), N)` passes that count while quietly scaling less than every other row on
+     *  the card, so U1l walks OUT from each var(--ts) through its enclosing functions and fails
+     *  on a min()/clamp() whose selector is not named here with that number. */
+    scaleCapAllowed: {
+      // Three inline words with margins and no space between them: no break opportunity, so the
+      // name cannot wrap and simply ran out of the card — 735 px of name in a 647 px plate at
+      // 1.6× (measured, the card's only overflow at that size). 1.35× is where it fills the
+      // plate: 78.3 px of font, 620 px of name, 27 px to spare.
+      '#title-screen .name': 1.35,
+    },
+  },
 });
 
 /** §21.4 "full remapping" — Phase 11 build-side M18. The remapper is UI over seams that

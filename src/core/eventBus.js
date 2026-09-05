@@ -35,6 +35,15 @@ export const EVENTS = Object.freeze({
   /* Phase 11 M11. §8.2's door leaf on or off its hinges — observable, like a tool's state,
    * because §15.2's review tag front_door_removed and the run record both read it. */
   DOOR_STATE:       'DOOR_STATE',       // doorId, entityId, state: hung|removed|rehung|forced — 'hung' is announced silently on a run's first step (M23), 'forced' carries by/objectId/impulse
+  /* Phase 11 build-side M30. §8.4 asks for a sound, a mark and a notice at EVERY impact;
+   * §8.3's "maximum charge" caps the MONEY, not the feedback. A hit on a surface already at
+   * DAMAGE.property.maxChargePerSurface posts no ledger line and no DAMAGE_APPLIED — the
+   * ledger and its counters stay untouched, which is what m17 R2e and m22 PD10 pin — and says
+   * so through this instead: cost 0, the surface named, at most one per
+   * DAMAGE.property.cappedRepeatMs. A NAME OF ITS OWN rather than a flag on DAMAGE_APPLIED
+   * precisely because runLog.js countEvent treats every property DAMAGE_APPLIED as a ledger
+   * line, and this one is not one. */
+  PROPERTY_CAPPED:  'PROPERTY_CAPPED',  // surfaceId, location, entityId, band, cost: 0, at, normal
   ZONE_CHANGED:     'ZONE_CHANGED',     // entityId, zoneId, entered|exited, settled
   CARGO_STATE:      'CARGO_STATE',      // entityId, truckId, secured, support, risk
   ROAD_FORCE:       'ROAD_FORCE',       // roadType, label, severity (never `type` — the envelope owns it)

@@ -358,7 +358,7 @@ lines.push('--- B2. the START button and the controls list are where they were; 
      `${br16.left.toFixed(0)}..${br16.right.toFixed(0)} × ${br16.top.toFixed(0)}..${br16.bottom.toFixed(0)}`);
   ok('B2 …and its overflow is reachable (overflow auto), never cut off', getComputedStyle(b).overflowY === 'auto');
   lines.push(`      at 1.6: brief scroll ${b.scrollHeight} / client ${b.clientHeight} (scrolls inside 94vh past ${window.innerHeight} px, as the card does: ${card.scrollHeight}/${card.clientHeight} — the card overflowed at 1.6 before M24 too: 758/570 measured 2026-09-05)`);
-  ok('B2 NOTE the card\'s 1.6× overflow is pre-existing (758/570 measured before M24, ±4)', Math.abs(card.scrollHeight - 758) <= 4 && Math.abs(card.clientHeight - 570) <= 4, `${card.scrollHeight}/${card.clientHeight}`);
+  ok('B2 NOTE the card\'s 1.6× overflow is pre-existing (786/585 since M29 gave back the 15 px of horizontal scrollbar; 758/570 before it, ±4)', Math.abs(card.scrollHeight - 786) <= 4 && Math.abs(card.clientHeight - 585) <= 4, `${card.scrollHeight}/${card.clientHeight}`);
   if (tsWas) document.documentElement.style.setProperty('--ts', tsWas); else document.documentElement.style.removeProperty('--ts');
   void card.offsetHeight;
   const playBack = R2(document.querySelector('#title-screen .play'));
