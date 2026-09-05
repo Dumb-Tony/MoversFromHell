@@ -729,10 +729,19 @@ lines.push('--- M18. the Controls rows consume: every Rebind moves the live tabl
   eq('M18-U2i …so keys() (U2\'s walk) is unchanged', M.settingsPanel.keys().filter((k) => /:/.test(k)).length, 0);
   ok('M18-U2j every rebindable row names an action in that seat\'s on-foot table',
      binds.every((b) => { const [s, c, a] = b.split(':'); return !!(input.bindingTable()[Number(s)] || {})[c][a]; }), binds.join(','));
-  // A pool of codes no shipped binding uses, one per row; each capture lands and stays unique.
-  const pool = ['F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+  /* A pool of codes no shipped binding uses, one per row; each capture lands and stays unique.
+   *
+   * M33 took KeyM OUT and put F13-F15 in. `manifest` (M on seat 0, Period on seat 1) is a new
+   * shipped binding from that milestone on, so a capture onto KeyM is a conflict the store
+   * refuses — the row would read as inert and M18-U2l would fail for a reason that is the
+   * table being right rather than the card being wrong. Two rows also arrived with it (33
+   * rebindable rows, up from 31), so the pool had to grow: F13-F15 are real KeyboardEvent
+   * codes, unbound, unreserved, and — like the F-keys and the letters already here, and unlike
+   * Comma or Period — their keyLabel() IS the code with its Key/Digit prefix stripped, which
+   * is what M18-U2m's chip comparison assumes. */
+  const pool = ['F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15',
                 'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9',
-                'KeyB', 'KeyF', 'KeyG', 'KeyI', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyT', 'KeyV', 'KeyX', 'KeyY', 'KeyZ'];
+                'KeyB', 'KeyF', 'KeyG', 'KeyI', 'KeyL', 'KeyN', 'KeyO', 'KeyT', 'KeyV', 'KeyX', 'KeyY', 'KeyZ'];
   ok('M18-U2k the pool covers every row', pool.length >= binds.length, `${pool.length} codes for ${binds.length} rows`);
   M.settingsPanel.show();
   const inert = [];

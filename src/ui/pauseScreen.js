@@ -63,6 +63,7 @@ export class PauseScreen {
         <div class="buttons">
           <button class="primary" type="button" data-act="resume">Resume</button>
           <button type="button" data-act="restart">Restart the contract</button>
+          <button type="button" data-act="manifest" hidden title="Close this card and open the manifest — the job keeps running (§2.2)">The manifest</button>
           <button type="button" data-act="settings" hidden>Settings</button>
         </div>
         <label class="keep" hidden><input type="checkbox" class="keep-loadout"> keep the tools on the truck — the same box as the invoice's, remembered between sessions</label>
@@ -88,6 +89,14 @@ export class PauseScreen {
     this.onResume = null;
     this.onRestart = null;
     this.onSettings = null;
+    /* §21.2's manifest card (Phase 11 build-side M33). The SAME slot discipline as Settings
+     * above: the button is in the markup so the layout is settled, and it stays hidden until
+     * something registers a handler — a button that does nothing is worse than no button
+     * (§2.1). main.js registers one at boot, and it RESUMES before it opens, because the
+     * manifest hides under this card by construction (manifestScreen suppressed) and a button
+     * that opened a card nobody could see would be exactly the defect §2.1 names. The job
+     * keeps running while the manifest is up, which is §2.2 and not an accident. */
+    this.onManifest = null;
     /* M31 (§21.2 "optionally preserves loadout"; KNOWN_ISSUES Phase 26, M24 gap 4). The
      * settlement sheet has had this box since M24 and this card's Restart always restored the
      * stock loadout without saying so — two restarts, two answers. Both boxes are now views of
@@ -100,6 +109,7 @@ export class PauseScreen {
 
     this._why = this.el.querySelector('.why');
     this._settings = this.el.querySelector('[data-act="settings"]');
+    this._manifest = this.el.querySelector('[data-act="manifest"]');
     this._keepRow = this.el.querySelector('label.keep');
     this._keepBox = this.el.querySelector('input.keep-loadout');
     /* The row's layout is set HERE, not in styles.css, because styles.css belongs to another
@@ -138,6 +148,7 @@ export class PauseScreen {
       // The backdrop is "click to resume" — the one gesture that can also re-take the pointer.
       if (act === 'resume' || e.target === this.el) { if (this.onResume) this.onResume(); }
       else if (act === 'restart') { if (this.onRestart) this.onRestart({ keepLoadout: this.keepLoadoutTicked() }); }
+      else if (act === 'manifest') { if (this.onManifest) this.onManifest(); }
       else if (act === 'settings') { if (this.onSettings) this.onSettings(); }
     });
     // The box writes the shell key the moment it is ticked, so the sheet's box (built fresh at
@@ -174,6 +185,7 @@ export class PauseScreen {
     this._why.hidden = !this.reason;
     this._why.textContent = this.reason ? `paused — ${this.reason}` : '';
     this._settings.hidden = !this.onSettings;
+    this._manifest.hidden = !this.onManifest;   // M33: the slot rule — no button without a handler
     /* M31: the tick is the shell's, so it is READ here rather than remembered — a settlement
      * sheet ticked a minute ago shows through, and so does a Defaults that cleared it. */
     const wired = typeof this.keepLoadout === 'function';

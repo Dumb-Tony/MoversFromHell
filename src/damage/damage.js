@@ -19,7 +19,10 @@
  *   PROPERTY damage  keyed on IMPULSE, because what a WALL suffers really does scale with
  *                    the mass that hit it. This is where mass belongs. Written since Phase 11
  *                    build-side M14: the object's own m·Δv, charged only when the surface the
- *                    narrow phase says pushed hardest that step is billable and, since M30,
+ *                    narrow phase says it HIT that step is billable — since M34 that is the
+ *                    surface the object was travelling INTO, not merely the one pushing back
+ *                    hardest, because a solver's resting impulse on a floor is bigger than a
+ *                    deep first-step penetration ever reports — and, since M30,
  *                    SHARED across every billable surface the step touched in proportion to
  *                    what each took (_attributeProperty), aggregated per entity AND surface,
  *                    capped per surface (§8.3 "maximum charge") — a cap on the money and not
@@ -111,6 +114,16 @@ export class DamageSystem {
     this._open = new Map();
     /** Previous-step speeds, so an impact can be measured as a CHANGE in velocity. */
     this._lastSpeed = new Map();
+    /** M34: and the previous step's velocity VECTOR, entity id -> {x,y,z}. The speed alone
+     *  says an object was stopped; only the direction says WHAT stopped it. Rapier has
+     *  already resolved the contact by the time this system runs, so the approach velocity
+     *  exists nowhere else — it is cached here for exactly one step, the way M14 caches
+     *  `_lastSpeed`. Plain data, cleared by reset(). */
+    this._lastVel = new Map();
+    /** M34 scratch: entity id -> the collider handle this step's m·Δv was attributed to
+     *  (_attributeProperty's ranking), so the door-frame pass one loop later asks the same
+     *  question and cannot get a different answer. Cleared at the top of every step. */
+    this._hitAt = new Map();
     this.impactCount = 0;
     /* THE SECOND LEDGER (M14). Open PROPERTY windows keyed `${entityId}|${surfaceId}` — the
      * same window/decay pair as the item ledger, but one per surface an object is marking,
@@ -168,11 +181,16 @@ export class DamageSystem {
     touched.clear();
     const lostBy = this._lostBy;
     lostBy.clear();
+    this._hitAt.clear();   // M34: this step's attribution answers, for the door-frame pass
     for (const e of this.registry.entities.values()) {
       const v = e.body.linvel();
       const speed = Math.hypot(v.x, v.y, v.z);
       const prev = this._lastSpeed.get(e.id) || 0;
       this._lastSpeed.set(e.id, speed);
+      /* M34: the same reading kept as a VECTOR. COPIED, never aliased — linvel() hands back a
+       * view the next step overwrites, and this has to outlive the step to be worth keeping. */
+      const vPrev = this._lastVel.get(e.id) || null;
+      this._lastVel.set(e.id, { x: v.x, y: v.y, z: v.z });
 
       // Speed LOST this step. A held object being carried loses nothing; a dropped one does.
       const lost = prev - speed;
@@ -183,7 +201,7 @@ export class DamageSystem {
        * 1 m/s is under its own 3.2 m/s threshold and marks nothing on itself, and still puts
        * 90 N·s into the wall. The gate is the object's OWN lost speed, m·Δv, never the
        * manifold force — resting contact loses ~0 speed a step, however hard a fridge leans. */
-      this._attributeProperty(e, lost, simTimeMs, touched);
+      this._attributeProperty(e, lost, simTimeMs, touched, vPrev, v);
 
       const loss = conditionLossFor(e, lost);
       if (loss <= 0) { this._decayWindow(e, stepMs, simTimeMs); continue; }
@@ -283,12 +301,49 @@ export class DamageSystem {
    * flipped) once per manifold, `flipped` meaning our collider is the pair's second; the
    * impulses are the solver's from the step just taken, in N·s.
    *
-   * ATTRIBUTION RANKS EVERY CONTACT AND BILLS ONLY A BILLABLE WINNER. The surface that pushed
-   * hardest on the object this step (largest Σ|contactImpulse|) is what stopped it. Floors, the
-   * ground, the deck, movers and other entities compete in that ranking and win it whenever
-   * they are what the object actually hit — a TV landing on the floor beside a wall it grazes
-   * is a floor landing, not a wall hit — but they are never charged (surfaces.js billable).
-   * THE WINNER STILL DECIDES WHETHER ANYTHING IS BILLED AT ALL, and that gate is unchanged.
+   * ATTRIBUTION RANKS EVERY CONTACT AND BILLS ONLY A BILLABLE WINNER. Floors, the ground, the
+   * deck, movers and other entities compete in that ranking and win it whenever they are what
+   * the object actually hit — a TV landing on the floor beside a wall it grazes is a floor
+   * landing, not a wall hit — but they are never charged (surfaces.js billable). THE WINNER
+   * STILL DECIDES WHETHER ANYTHING IS BILLED AT ALL, and that gate is unchanged.
+   *
+   * WHAT M34 CHANGED: HOW THE WINNER IS PICKED. M14 ranked by Σ|contactImpulse| — "what pushed
+   * hardest is what stopped it" — which is a PROXY for the cause, and this build has caught
+   * that proxy lying once already (see _strainFrames and m41 I2g: read one call too late, the
+   * same step's manifolds say `ground 20.34, wall 9.55` where they said `wall 625.79,
+   * ground 6.71` before the entity loop fragmented the object). The cause itself is not a
+   * proxy, and it is knowable: an object is stopped by the thing it was travelling INTO.
+   *
+   * So the winner is now that surface. Per contact, from the
+   * velocity the object had BEFORE the step (step() caches it; Rapier has already zeroed the
+   * approach by the time this runs):
+   *
+   *   approach = −(vPrev · n)      how fast it was closing on THIS surface, n pointing out of
+   *                                the surface toward the object
+   *   align    = (Δv · n) / |Δv|   how much of the velocity change points back out of it
+   *
+   * A contact with `approach > DAMAGE.property.approachMps` and `align > 0` is a HIT, and the
+   * hit with the largest `align` wins: the floor cannot win a horizontal stop, because the
+   * fridge was not moving down into it and being stopped did not push it up. WITH NO SUCH
+   * CONTACT — a lean, a rest, a slide along a face, a settle — nothing was approached and the
+   * ranking is M14's largest manifold, unchanged to the character; that fallback is what keeps
+   * every resting and sliding fixture reading exactly what it read before (m41 I3, I5).
+   *
+   * MEASURED, AND IT MOVED NOTHING. On every fixture in the suites the two rules AGREE, which
+   * is the point rather than a disappointment: m22's whole recorded table reproduces to the
+   * cent through the new ranking (m41 I5 — wall 31.266 N·s / 30.82, the living_kitchen header
+   * 33.617 / 34.59, the truck headboard 40.771 / 46.03), m25's four packs bill the identical
+   * lines, and m37's split shares are untouched. What the ranking buys is not a number today;
+   * it is that the number cannot be handed to a floor tomorrow. The reading that DOES change
+   * is the door frames' (_strainFrames), which had no second reading at all.
+   *
+   * WHAT M34 DID NOT CHANGE: THE AMOUNT. The credit here has been the object's OWN m·Δv since
+   * M14 and stays it, so no line can grow: taking a max() against the manifold would only ever
+   * raise a wall's bill above the momentum the object actually carried (a 9 kg box at 4 m/s
+   * reads a ~40 N·s manifold against 31.3 N·s of m·Δv, the rebound of KNOWN_ISSUES Phase 21),
+   * and the object's own momentum change is the ceiling §10.4 puts on the bill. The max() is
+   * where the credited number really can under-read: _strainFrames, where the amount IS the
+   * manifold.
    *
    * WHAT M30 CHANGED: THE SPLIT. Once the gate has passed, the m·Δv is no longer handed whole
    * to the winner — it is shared out across every BILLABLE surface in contact this step, in
@@ -305,7 +360,7 @@ export class DamageSystem {
    * DAMAGE.property.splitMinFraction is folded into the largest rather than posted: a 3 %
    * graze on the way past is not worth a second line on a customer's invoice (§26.4).
    */
-  _attributeProperty(e, lost, simTimeMs, touched) {
+  _attributeProperty(e, lost, simTimeMs, touched, vPrev = null, vNow = null) {
     const P = DAMAGE.property;
     const mass = e.body.mass();
     const impulse = mass * lost;
@@ -314,7 +369,19 @@ export class DamageSystem {
     const self = e.collider;
     if (!world || !self || typeof world.contactPairsWith !== 'function') return;
 
-    let best = null;   // { collider, sum, at, normal } — the RANKING, over every contact
+    /* M34's two directions. `dv` is this step's change of velocity as a VECTOR — for a stop it
+     * points straight out of whatever did the stopping — and `vPrev` is where the object was
+     * going before the solver touched it. With no cached previous velocity (an entity's first
+     * step) both are null and the ranking below is M14's. */
+    const t = e.body.translation();
+    let dv = null, dvLen = 0;
+    if (vPrev && vNow) {
+      dv = { x: vNow.x - vPrev.x, y: vNow.y - vPrev.y, z: vNow.z - vPrev.z };
+      dvLen = Math.hypot(dv.x, dv.y, dv.z);
+    }
+
+    let best = null;   // { collider, sum, at, normal } — M14's ranking, over every contact
+    let hit = null;    // …and M34's: the approached contact the momentum change belongs to
     /** tag -> { sum, top, at, normal }: the billable surfaces, summed per SURFACE. `top` is
      *  the biggest single collider sum behind that tag, and its patch is where the mark goes. */
     const bySurface = new Map();
@@ -343,17 +410,48 @@ export class DamageSystem {
         }
       });
       if (!(sum > 0)) return;
-      if (!best || sum > best.sum) best = { collider: other, sum, at, normal };
+      /* M34: orient the normal ONCE, here — out of the contact patch toward the object — so
+       * the ranking, the split and the decal cannot disagree about which way a surface faces.
+       * (The posting loop below re-runs the same test; it is now an invariant, not a fix.) */
+      if (normal) {
+        const ref = at || t;
+        if (normal.x * (t.x - ref.x) + normal.y * (t.y - ref.y) + normal.z * (t.z - ref.z) < 0)
+          normal = { x: -normal.x, y: -normal.y, z: -normal.z };
+      }
+      const c = { collider: other, sum, at, normal, approach: 0, align: 0 };
+      if (!best || sum > best.sum) best = c;
+      /* THE APPROACH TEST (M34). A resting or leaning contact reads ~0 approach however hard
+       * it presses back, and a slide along a face reads ~0 too — the motion is ACROSS that
+       * normal, not into it. Only a contact the object was closing on faster than
+       * approachMps, and which pushed it back out again, can be the thing it hit. */
+      if (normal && dv && dvLen > 1e-9) {
+        c.approach = -(vPrev.x * normal.x + vPrev.y * normal.y + vPrev.z * normal.z);
+        c.align = (dv.x * normal.x + dv.y * normal.y + dv.z * normal.z) / dvLen;
+        if (c.approach > P.approachMps && c.align > 0 &&
+            (!hit || c.align > hit.align + 1e-9 ||
+             (c.align >= hit.align - 1e-9 &&
+              (c.approach > hit.approach + 1e-9 ||
+               (c.approach >= hit.approach - 1e-9 && sum > hit.sum))))) hit = c;
+      }
       const tag = this.physics.tagOf(other);
       if (!tag || !billable(tag) || this.protectedSurfaces.has(tag)) return;
       const row = bySurface.get(tag);
       if (!row) bySurface.set(tag, { sum, top: sum, at, normal });
       else { row.sum += sum; if (sum > row.top) { row.top = sum; row.at = at; row.normal = normal; } }
     });
+    /* M34: WHICH collider this step's m·Δv belongs to — the approached one when there is one,
+     * M14's hardest-pushing one when there is not. Recorded before the gate, because the door
+     * frames ask the same question from a hung leaf's side one pass later (_hitContactIs) and
+     * a leaf is an entity collider that never passes the billable gate below. Ties are broken
+     * by approach, then by manifold, so the answer is a function of the world's state alone —
+     * m14's soak equality depends on it. */
+    const chosen = hit || best;
+    this._hitAt.set(e.id, chosen ? chosen.collider.handle : null);
     if (!best) return;
-    // THE GATE, exactly as M14 wrote it: the collider that pushed hardest decides whether this
-    // step is a property hit at all. A floor landing beside a grazed wall charges nothing.
-    const winner = this.physics.tagOf(best.collider);
+    // THE GATE, as M14 wrote it and M34 re-aimed it: the collider the object HIT decides
+    // whether this step is a property hit at all. A floor landing beside a grazed wall charges
+    // nothing — and a wall hit while standing on that floor no longer charges nothing either.
+    const winner = this.physics.tagOf(chosen.collider);
     if (!winner || !billable(winner) || this.protectedSurfaces.has(winner)) return;
 
     let total = 0;
@@ -374,8 +472,7 @@ export class DamageSystem {
     parts[0].share += folded;
     const group = parts.length > 1 ? parts.map((p) => ({ id: p.id, share: Number(p.share.toFixed(4)) })) : null;
 
-    const t = e.body.translation();
-    for (const p of parts) {
+    for (const p of parts) {   // `t` is the body translation read at the top of this method (M34)
       if (!(p.share > 0)) continue;
       const at = p.row.at || { x: t.x, y: t.y, z: t.z };
       /* The normal on the line is the SURFACE's: pointing away from the wall, toward the
@@ -464,12 +561,39 @@ export class DamageSystem {
    *             712 N into the couch while the leaf's manifold read 231-243 N one run and
    *             305-392 N another — the floor's static friction takes a solver-ordered
    *             share of a push that is not sliding anywhere. The hands are the cause.
-   *   HIT       the object lost speed this step and the leaf is what it hit hardest (M14's
-   *             own ranking, _attributeProperty): the whole m·Δv, as a wall would get.
-   *             Measured: a 110 kg fridge at 6 m/s stopped dead (632 N·s of m·Δv) with a
-   *             first-step manifold of 14 N·s — a deep first-step penetration resolved by
-   *             position correction the manifold never reports.
+   *   HIT       the object lost speed this step and the leaf is what it hit (_attributeProperty's
+   *             ranking, asked through _hitContactIs): the whole m·Δv, as a wall would get.
+   *             Measured: a 110 kg fridge at 6 m/s carries 598.0 N·s into the leaf.
    * A lean is none of these and reads nothing (§10.4).
+   *
+   * WHY THE LEAF'S MANIFOLD IS THE FLOOR OF THE THREE AND NEVER THE ONLY ONE — M34, and it is
+   * worth being exact, because the recorded explanation was wrong. KNOWN_ISSUES Phase 26 has
+   * the fridge above stopping dead while "the first-step manifold reports 14 N·s", and read it
+   * as a deep penetration resolved by position correction. It is not. Queried between the
+   * solver and this system, that manifold reads 627.90 N·s — the honest number. It reads 14
+   * only when queried AFTER the entity loop above, because a 5.58 m/s hit BREAKS a fridge,
+   * breakInto spawns its fragments, and adding colliders re-runs the narrow phase, so every
+   * impulse read afterwards describes where the pieces are now. THIS PASS RUNS AFTER THAT
+   * LOOP. The 4 m/s throw forced the door only because 3.78 m/s leaves the fridge 'cracked'
+   * rather than broken: nothing fragmented, the manifold survived, 427.81 N·s. m41 I2g prints
+   * both readings of one step, every run.
+   *
+   * And the second reading that should have covered it was unreachable: M23 asked M14's
+   * ranking about `other` — the OBJECT'S OWN collider, which can never be in its own contact
+   * list — so `_bestContactIs` returned false for every hit that ever happened, and the strain
+   * was always whatever the corrupted manifold said. Both halves are fixed here: the target is
+   * the leaf, and the ranking is the one _attributeProperty made in the entity loop, BEFORE
+   * any fragmentation, which is the only moment in the step when the cause is still visible.
+   * Per surface, the LARGEST of the three readings and NEVER their sum — one blow must not be
+   * billed twice because two instruments saw it.
+   *
+   * And note what that does NOT say. A door frame is deliberately NOT bounded by the object's
+   * own momentum change: the reading that forces a leaf under a sustained press is the HANDS'
+   * force, and a couch pressed into a leaf changes speed by nothing at all — measured, m·Δv
+   * 0.00 N·s over the whole press against 186 N·s of manifold (m41 I4a; m30 D1's recorded
+   * trace, 188.1 N·s against 5.83). The momentum ceiling belongs to _attributeProperty, over
+   * billable surfaces, and is asserted there (m41 I1d, I2f). Anyone "restoring" it here by
+   * deleting the hands branch deletes M23's shove with it (m41 I4).
    *
    * The strain accumulates in the same window the walls use, keyed entity|door_frame_<id>
    * (surfaces.js); at DOOR.bentImpulseNs the frame posts chargeBent once per hung spell
@@ -523,7 +647,14 @@ export class DamageSystem {
           const v = e.body.linvel();
           if (Math.hypot(v.x, v.y, v.z) <= F.pressSpeedMax) strain = Math.max(strain, this.gripForceOf(e) * dt);
         }
-        if (hit && this._bestContactIs(e, other)) strain = Math.max(strain, mdv);
+        /* `self`, not `other`: the question is "is THE LEAF what this object hit?", and the
+         * ranking is over the OBJECT's contacts. M23 passed `other` here — the object's own
+         * collider, which can never appear in its own contact list — so the m·Δv reading was
+         * unreachable and the strain was always the manifold's. That is the missing half of
+         * KNOWN_ISSUES Phase 26 "a fast, heavy hit can under-read": the 0.05 m throw forced
+         * the door on a manifold that happened to report properly, and the 0.16 m throw had
+         * no second reading to fall back on. Found and fixed with the ranking (M34, m41 I1). */
+        if (hit && this._hitContactIs(e, self)) strain = Math.max(strain, mdv);
         if (strain / dt < F.forceN) return;
         hits.push({ e, sum: strain, at, normal });
       });
@@ -545,20 +676,20 @@ export class DamageSystem {
     }
   }
 
-  /** M14's ranking, asked from the leaf's side: is `target` the collider that pushed
-   *  hardest on `e` this step? If so the whole m·Δv is the leaf's, as a wall would take it. */
-  _bestContactIs(e, target) {
-    const world = this.physics.world;
-    let best = null, bestSum = 0;
-    world.contactPairsWith(e.collider, (other) => {
-      let s = 0;
-      world.contactPair(e.collider, other, (manifold) => {
-        const nc = manifold.numContacts();
-        for (let i = 0; i < nc; i++) s += Math.abs(manifold.contactImpulse(i));
-      });
-      if (s > bestSum) { bestSum = s; best = other; }
-    });
-    return !!best && best.handle === target.handle;
+  /**
+   * M34 (this was M14's `_bestContactIs`, which walked the narrow phase a second time to rank
+   * by manifold impulse): is `target` the collider this step's momentum change belongs to? If
+   * so the whole m·Δv is the leaf's, as a wall would take it.
+   *
+   * Answered from the ranking `_attributeProperty` ALREADY did for this entity this step —
+   * ONE walk, ONE rule, and the wall ledger and the door frames can never disagree about what
+   * an object hit. The cache is populated for every entity whose m·Δv reached
+   * DAMAGE.property.minStepImpulse, which is the same gate `_strainFrames` applies before it
+   * asks; anything else answers false, exactly as the old second walk did for a resting body.
+   */
+  _hitContactIs(e, target) {
+    const h = this._hitAt.get(e.id);
+    return h != null && !!target && h === target.handle;
   }
 
   /** The hinges go (M23). The M11 unhang path, then the frame's line and the door's event.
@@ -802,6 +933,8 @@ export class DamageSystem {
     this._lostBy.clear();
     this._cappedAt.clear();   // M30: a replay's walls are blank, so nothing is "already at" anything
     this._lastSpeed.clear();
+    this._lastVel.clear();    // M34: and a replay's objects arrive from nowhere, not from run 1
+    this._hitAt.clear();
     this.impactCount = 0;
     if (this.state && this.state.ledger) {
       this.state.ledger.itemDamage.length = 0;

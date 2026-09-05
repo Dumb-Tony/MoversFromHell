@@ -59,7 +59,11 @@ const ACTION_LABELS = Object.freeze({
   gripLeft: 'Left hand grab', gripRight: 'Right hand grab',
   jump: 'Jump / mantle', brace: 'Sprint / brace', crouch: 'Crouch / lower',
   interact: 'Use / pick up', context: 'Undo / rotate / toss', drop: 'Drop',
-  recover: 'Recover', swapMover: 'Swap mover', pause: 'Pause', debug: 'Stats overlay',
+  recover: 'Recover', swapMover: 'Swap mover',
+  /* M33: §21.2's manifest card. A row like any other — it is not in INPUT.remap.lockedActions,
+   * so both seats get a Rebind button and the chips read from the live table. */
+  manifest: 'The manifest',
+  pause: 'Pause', debug: 'Stats overlay',
 });
 /** The one context the card lists: driving is scripted (route.js) and its table is never entered. */
 const LISTED_CONTEXT = CONTEXTS.FOOT;

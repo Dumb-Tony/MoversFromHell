@@ -355,10 +355,14 @@ lines.push('--- B. rebind on the live Input (§21.4 full remapping) ---');
   ok('B7a …the blob\'s diff for seat 0 is empty after save', !blob.bindings[0] || Object.keys(blob.bindings[0]).length === 0, JSON.stringify(blob.bindings));
   eq('B7b …bindingDiff() is empty (seat 1 was never changed)', bindingDiffCount(input.bindingDiff()), 0);
   input.rebind(1, 'foot', 'jump', 'KeyN');
-  input.rebind(0, 'foot', 'jump', 'KeyM');
+  /* M33 changed the spare code here from KeyM to KeyO: KeyM is seat 0's `manifest` key from
+   * this milestone on (input.js DEFAULT_BINDINGS), so rebinding jump onto it is now a real
+   * conflict and B7d would have been asserting that a REFUSED rebind stuck. KeyO is free on
+   * both seats in both contexts (bindingConflicts checked). */
+  input.rebind(0, 'foot', 'jump', 'KeyO');
   input.resetBindings(1);
   deep('B7c resetBindings(1) resets seat 1 only', table()[1], JSON.parse(JSON.stringify(SEAT1_BINDINGS)));
-  eq('B7d …and seat 0 keeps its change', table()[0].foot.jump.keys[0], 'KeyM');
+  eq('B7d …and seat 0 keeps its change', table()[0].foot.jump.keys[0], 'KeyO');
   input.resetBindings();
   eq('B7e resetBindings() with no seat resets every seat', JSON.stringify(table()), bootDefaults);
   ok('B7f the shipped defaults were never written', DEFAULT_BINDINGS.foot.interact.keys[0] === 'KeyE' && DEFAULT_BINDINGS.foot.gripLeft.pad[0] === PAD.LT && SEAT1_BINDINGS.foot.jump.keys[0] === 'ShiftRight');
@@ -373,7 +377,7 @@ lines.push('--- B. rebind on the live Input (§21.4 full remapping) ---');
   eq('B7j …and seat 1\'s E went back to Quote (dropped as a conflict, not kept as a clash)', table()[1].foot.interact.keys[0], 'Quote');
   ok('B7k …the reset reports what it took', reset.dropped.length === 1 && reset.dropped[0].seat === 1 && reset.dropped[0].reason === 'conflict', JSON.stringify(reset.dropped));
   eq('B7l …the live table is conflict-free', bindingConflicts(input.seatBindings).length, 0);
-  eq('B7m …and the next rebind is accepted (no phantom conflict)', input.rebind(0, 'foot', 'jump', 'KeyM').ok, true);
+  eq('B7m …and the next rebind is accepted (no phantom conflict)', input.rebind(0, 'foot', 'jump', 'KeyO').ok, true);
   input.resetBindings();
   localStorage.removeItem(SAVE_KEY);
 }

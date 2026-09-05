@@ -207,7 +207,12 @@ an ordinary 18 kg object: carry it, load it, lose it, dent it (a stock door surv
 scratched, 14.40, not broken) — and the customer's review says so if the front-wall door came off.
 Or do not bother with the screwdriver (Phase 26, M23): shove something heavy into a hung door and
 its hinges tear out — the couch, both hands, is through in a second — and the FRAME goes on the
-bill as property damage, 140.00 against the screwdriver's 45 s (21.00 of two movers' labour). A
+bill as property damage, 140.00 against the screwdriver's 45 s (21.00 of two movers' labour).
+Throwing works too, and now scales the way it looks: a 110 kg fridge at 6 m/s puts 598 N·s into the
+frame and takes the door off on the step it lands, against the 400 N·s the hinges are rated for.
+Until Phase 31 that same throw read as a 40.00 knock and left the door hanging, because the frame's
+only reading was a contact manifold the physics engine had already recomputed after the fridge
+shattered. A
 knock that does not force it bends the frame once (40.00, a mark on the leaf); a box or a mover
 standing where the door hangs blocks hanging it back ("doorway blocked"). Replay hangs every door
 back.
@@ -239,7 +244,13 @@ as it always was.
 the object's own lost momentum writes one property-damage entry at 1.6 per N·s (capped at 400
 per surface), with a notice naming the surface ("front wall — scuffed · 30.82"), a caption, a
 bounded scuff mark, the §15.1 line on the invoice and a review tag. Floors, the ground, the deck
-and the ramp are never billed; a landing that grazes a wall is a landing. A door FRAME is the one surface with its own §8.3 row (Phase 26, M23): fixed charges (bent 40,
+and the ramp are never billed; a landing that grazes a wall is a landing. Which surface gets the
+bill is decided by where the object was GOING, not by which contact pushed back hardest (Phase 31):
+the surface it was travelling into, and out of which being stopped pushed it. A fridge thrown
+sideways into a wall bills the wall for its own 595.6 N·s, and the floor it was standing on — whose
+resting contact the solver reports just as loudly — is billed nothing. Something merely leaning,
+resting or sliding along a face has approached nothing and is charged nothing, however hard it
+presses. A door FRAME is the one surface with its own §8.3 row (Phase 26, M23): fixed charges (bent 40,
 forced 140) instead of the per-N·s rate, read from the leaf's side — a hung door is a Fixed body,
 so the thing shoving it loses no speed and its m·Δv reads nothing while it presses.
 
@@ -286,6 +297,16 @@ the destination the cab prices every undelivered item on whichever key settles �
 22 not delivered (1320.00), 1 still on the truck' — and that is the number the invoice bills,
 from one definition both read. And the grab ray now starts from the un-nudged camera while the
 picture shakes.
+
+**The manifest** (Phase 31, M33). **M** — D-pad up on a controller, or the pause card's **The
+manifest** button — opens the contract itself: every item, what room it is going to, whether it is
+at the pickup, in your hands, on the truck, at the new house or delivered, its condition, and
+whether its parts are off. Filter by room, by kind or by state. It pauses nothing, so the clock
+keeps running while you read it, and Escape or M again closes it. The key is rebindable per player.
+The HUD keeps its compact count on purpose: the full checklist lives behind a key so it never
+covers the doorway you are judging.
+
+![Phase 31](docs/phase31-manifest.png)
 
 ## Test it
 
@@ -350,7 +371,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**4274 assertions across forty suites, all passing** — plus a GPU-only suite that the
+**4529 assertions across forty-two suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -420,8 +441,12 @@ finished what batch 11 started — every recap row that had hands on it names th
 refreshes after a settlement, the reveal has its own switch, and both restarts offer to keep the
 tools — and closed the world's edges: a removed or forced door now picks a clear strip to lie on
 rather than landing on whoever was standing there, the front door stays on the porch, and the
-first-minute card gives the bottom band room in a narrow window. Batch 16 (the manifest panel
-§21.2 still lacks; the impulse the solver hides) is briefed in the plan.
+first-minute card gives the bottom band room in a narrow window. Batch 16
+built the manifest §21.2 asked for and never had — a filterable card over a running job — and
+fixed the impulse the solver hides, which turned out not to be a solver problem at all: the reading
+that looked like a physics engine losing a hit was a contact manifold sampled after the object
+shattered. That was the last briefed batch; the build side of Phase 11 is done and the gate now
+wants people.
 
 ![The pause card](docs/phase16-pause.png)
 

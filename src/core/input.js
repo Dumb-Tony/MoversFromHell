@@ -69,6 +69,13 @@ export const DEFAULT_BINDINGS = Object.freeze({
     // action — in co-op there is nobody to swap to, and pressing it would steal a mover out
     // from under the other player (§6.4).
     swapMover:   { keys: ['Tab'],        pad: [PAD.Y] },
+    /* §21.2's manifest card (Phase 11 build-side M33, src/ui/manifestScreen.js). M for
+     * manifest; D-pad UP is the free half of the pair whose DOWN is `recover`, and §4.3
+     * leaves it unassigned. Both were checked free on BOTH seats and in BOTH contexts
+     * through bindingConflicts() before they were written here (m12 A1, m26 A6). It is a
+     * SHELL action like `pause` — read once per render frame through consumeShellEdge, so
+     * it works while the sim is paused and on a controller (§4.4). */
+    manifest:    { keys: ['KeyM'],       pad: [PAD.DPAD_UP] },
     pause:       { keys: ['Escape'],     pad: [PAD.MENU] },
     debug:       { keys: ['F3'] },
   },
@@ -85,6 +92,14 @@ export const DEFAULT_BINDINGS = Object.freeze({
     // also seated the second player was Phase 16's known issue. m12 K4 keeps them apart.
     cargoGlance:  { keys: ['KeyQ'],       pad: [PAD.LB] },
     resetVehicle: { keys: ['KeyR'] },                      // only when stuck
+    /* The drive is a third of the contract and §21.2 wants the manifest readable DURING one,
+     * so the card WOULD open from the cab on the same control (M33) — a seam, not a rescue:
+     * nothing in src/ calls setInputContext, so the DRIVE table is never entered in this build.
+     * The Controls card lists the
+     * FOOT context only (settings.js LISTED_CONTEXT), exactly as it does for `interact`, so a
+     * rebind moves the on-foot key and this one keeps its default — the shipped behaviour for
+     * every action bound in both contexts. */
+    manifest:     { keys: ['KeyM'],       pad: [PAD.DPAD_UP] },
     pause:        { keys: ['Escape'],     pad: [PAD.MENU] },
     debug:        { keys: ['F3'] },
   },
@@ -118,6 +133,10 @@ export const SEAT1_BINDINGS = Object.freeze({
     context:     { keys: ['Semicolon'],    pad: [PAD.RB] },
     drop:        {                         pad: [PAD.B] },
     recover:     { keys: ['Backslash'],    pad: [PAD.DPAD_DOWN] },
+    /* M33's manifest card, seat 1: Period — the free key in the punctuation block this seat
+     * already owns (Slash is crouch, Semicolon is context, Quote is interact) — and the same
+     * D-pad UP, which is per-seat on the pad and so cannot clash with seat 0's. */
+    manifest:    { keys: ['Period'],       pad: [PAD.DPAD_UP] },
     pause:       {                         pad: [PAD.MENU] },
   },
   [CONTEXTS.DRIVE]: {
@@ -131,6 +150,7 @@ export const SEAT1_BINDINGS = Object.freeze({
     exitVehicle:  { keys: ['Backslash'],  pad: [PAD.B] },
     cargoGlance:  { keys: ['Slash'],      pad: [PAD.LB] },   // see seat 0: View is the join button
     resetVehicle: { keys: ['KeyP'] },
+    manifest:     { keys: ['Period'],     pad: [PAD.DPAD_UP] },   // M33, as on foot
     pause:        {                       pad: [PAD.MENU] },
   },
 });

@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 30,
-  label: 'phase-30',
+  phase: 31,
+  label: 'phase-31',
   date: '2026-09-05',
 });
 
@@ -454,6 +454,29 @@ export const WALKTHROUGH = Object.freeze({
   bandGapPx: 6,
 });
 
+/** §21.2 "the manifest filters by room/category and shows pickup, loaded, delivered and
+ *  condition states" — Phase 11 build-side M33, src/ui/manifestScreen.js. The HUD keeps its
+ *  compact count by §21.1's rule ("not a checklist"), so the checklist is a CARD the player
+ *  opens on a key. It pauses nothing (§2.2 work continues), hides under the title, the pause
+ *  card, the settlement sheet and the settings card the way the first-minute cards do, and is
+ *  shell state throughout — never game.state (§22.4; m0 E8). */
+export const MANIFEST_VIEW = Object.freeze({
+  /** §26.6 "no unbounded growth": the most rows the card will ever BUILD, whatever a contract
+   *  holds. MANIFEST.maxObjects (25) is the design bound on a contract; this is the DOM one,
+   *  with headroom for a bigger manifest than §13.1 currently allows. A list longer than this
+   *  is truncated and says so rather than growing without limit. */
+  maxRows: 64,
+  /** Condition is 0..100 (§7.2); the card prints it to this many decimals, so a lamp that
+   *  lost 3.4 points reads '97%' and not '96.6%'. The band WORD beside it is the §26.5
+   *  colour-independent half — the number never carries the meaning on its own. */
+  conditionDecimals: 0,
+  /** The list's own scrolling box, as a fraction of the window's height. Written to the card
+   *  as --mf-list-max so the number lives here and not in styles.css: at --ts 1.6 the rows
+   *  are 1.6× taller and the list has to scroll INSIDE the card rather than push the card's
+   *  footer off the screen (m40 N6). */
+  listMaxVh: 0.46,
+});
+
 /** §6.1, §6.2 grip. Validated: Phase 2 (one box), Phase 3 (heavy), Phase 4 (co-op). */
 export const GRIP = Object.freeze({
   reach: 2.1,                // m, ray/cone length from the camera (§6.1)
@@ -725,6 +748,47 @@ export const DAMAGE = Object.freeze({
      * decals: §26.6 "no unbounded growth in decals" — a ring of `max` quads, pre-allocated
      *   at boot and reused oldest-first (scuffs.js); `proud` keeps them off the wall face. */
     minStepImpulse: 1.5,
+    /* Phase 11 build-side M34 — the number that tells a HIT from a LEAN (damage.js
+     * _attributeProperty / _strainFrames). m/s: how fast an object must have been travelling
+     * INTO a surface, along that contact's own normal, on the step BEFORE the solver touched
+     * it, for that surface to be the one this step's m·Δv belongs to.
+     *
+     * WHY THERE IS A DIRECTION TEST AT ALL. A manifold impulse is a PROXY for what stopped an
+     * object, and this build has caught it lying once already. KNOWN_ISSUES Phase 26 recorded
+     * the case: a 110 kg fridge thrown at 6 m/s from 0.16 m stops dead — 632 N·s of momentum
+     * gone — and the door frame read 14 N·s and was not forced, while the same fridge from
+     * 0.05 m at 4 m/s tore the door off at 427.9 N·s. The harder throw did less.
+     *
+     * RE-MEASURED FOR M34, and the recorded EXPLANATION was wrong. It is not a deep first-step
+     * penetration resolved by position correction: queried between the solver and the damage
+     * system, the leaf's manifold on that step reads 627.90 N·s — the honest number, bigger
+     * than the object's own 598.0 N·s of m·Δv. It reads 14 N·s only when queried AFTER
+     * damage.step()'s entity loop, because 5.58 m/s BREAKS a fridge, breakInto spawns its
+     * fragments (M12), and adding colliders re-runs the narrow phase — so every impulse read
+     * after that loop describes where the pieces are now. The door-frame pass runs after that
+     * loop. The 4 m/s throw survived only because 3.78 m/s leaves the fridge 'cracked' rather
+     * than broken: nothing fragments, the manifold is intact, 427.81 N·s, door off.
+     * tools/m41-impulse-tests.js I2g prints both readings of one step every run: before —
+     * wall 625.79, ground 6.71; after — ground 20.34, wall 9.55.
+     *
+     * So the manifold is now the FLOOR of the readings and never the only one, and the second
+     * reading — the object's own m·Δv — is given to the surface the object was travelling INTO
+     * rather than to the surface pushing back hardest. A floor cannot be approached by a
+     * horizontal throw, so it can never take the credit for one.
+     *
+     * WHY 0.75 AND NOT LESS. It has to sit above everything that is NOT a hit and below
+     * everything that is. Measured, all in m/s of approach along the contact normal: a box
+     * left 20 mm inside a hung leaf reads 0.000 while the solver holds 108 N against it (m41
+     * I3; M23 recorded 129-184 N on the same fixture — either way a force, and §10.4 forbids
+     * billing it); a box slid into a wall at 0.30 reads 0.300; a couch SHOVED into a leaf by
+     * two hands reads 0.379 on the step it arrives — a press, whose cause is the hands and
+     * whose reading is unchanged (doorFrame.pressSpeedMax below). The throws read 3.78, 5.57
+     * and 5.58 — these are the APPROACHES measured on the step of first contact, not the 4.0
+     * and 6.0 m/s the fixtures launch at, so the headroom above this gate is 5x, not 8x.
+     * Below this the ranking falls back to M14's largest manifold, unchanged to the character,
+     * which is what keeps every resting, settling and sliding number in m22 exactly where it
+     * was. */
+    approachMps: 0.75,
     /* Phase 11 build-side M30 — the two numbers the SPLIT and the CAPPED NOTICE are tuned by
      * (damage.js _attributeProperty / _postPropLine).
      *

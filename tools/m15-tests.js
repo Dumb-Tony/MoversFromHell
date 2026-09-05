@@ -457,6 +457,95 @@ lines.push('--- M19. the pause card\'s history block (§21.4 Cognition) ---');
 }
 emit('running...');
 
+/* ── M33. the manifest card shares the shell without taking the pause path ──────────
+ * Phase 11 build-side M33 (§21.2 the manifest, §2.2 "work continues", §4.4 parity). The card
+ * opens on a bound SHELL action exactly as `pause` does — P5's path — but it must never reach
+ * the pause: its Escape is swallowed in the capture phase (the settings card's rule), the
+ * pointer-lock release it asks for itself is not read as the swallowed Escape (F's path), and
+ * the clock keeps running under it. The card's own contents are m40's; this is only the part
+ * that shares wiring with the pause. */
+lines.push('--- M33. the manifest card opens on its action and never becomes a pause (§21.2, §2.2) ---');
+{
+  const mf = M.manifestScreen;
+  const mfEl = () => document.getElementById('manifest-screen');
+  /* THE PRESSES IN THIS BLOCK GO TO <body>, NOT TO window, and the difference decides the
+   * result. A real keydown targets the focused element (document.body when nothing is focused)
+   * and propagates window → … → body and back, so a CAPTURE-phase listener on window — the
+   * manifest card's Escape, the settings card's — runs before a BUBBLE-phase listener on window,
+   * which is Input's. An event dispatched ON window is AT TARGET for both, and at-target
+   * listeners run in REGISTRATION order with the capture flag ignored; Input is built first at
+   * boot, so it would win and the same Escape would close the card AND pause (measured). The
+   * suite's own `press` above stays as it is: every other block WANTS Input to see the key. */
+  const bpress = (code) => {
+    for (const type of ['keydown', 'keyup']) {
+      document.body.dispatchEvent(new KeyboardEvent(type, { code, key: code, bubbles: true, cancelable: true }));
+    }
+  };
+  ok('M33-1 running, unpaused, with both cards in the DOM and hidden',
+     !game.state.paused && !!mfEl() && mfEl().hidden === true && card().hidden === true,
+     `paused=${game.state.paused}`);
+  bpress('KeyM'); frame();
+  eq('M33-2 the manifest key opens it', mfEl().hidden, false);
+  eq('M33-2a …and pauses nothing (§2.2)', game.state.paused, false);
+  const t0 = game.clock.simTimeMs;
+  frame(30);
+  ok('M33-2b …the clock ran on under it', game.clock.simTimeMs - t0 > 0, `${game.clock.simTimeMs - t0} ms`);
+  eq('M33-2c …and the pause card stayed down', card().hidden, true);
+  bpress('Escape'); frame();
+  eq('M33-3 Escape closes the card', mfEl().hidden, true);
+  eq('M33-3a …WITHOUT pausing — the keystroke never reached the pause action (P5\'s path)', game.state.paused, false);
+  bpress('Escape'); frame();
+  eq('M33-3b …while the very next Escape, with the card closed, pauses as it always did', game.state.paused, true);
+  game.setPaused(false); frame();
+
+  bpress('KeyM'); frame();
+  eq('M33-4 open again', mfEl().hidden, false);
+  bpress('KeyM'); frame();
+  eq('M33-4a …and the same key closes it', mfEl().hidden, true);
+  eq('M33-4b …still unpaused', game.state.paused, false);
+
+  // The pad half (§4.4): D-pad up, read through the same shell edge as pad Menu (P5).
+  input._debugPad(0, PAD.DPAD_UP, 1); frame();
+  eq('M33-5 pad D-pad up opens it', mfEl().hidden, false);
+  frame(10);
+  eq('M33-5a …ten frames with the button held do not toggle it back (edge consumed once)', mfEl().hidden, false);
+  input._debugPad(0, PAD.DPAD_UP, 0); frame();
+  input._debugPad(0, PAD.DPAD_UP, 1); frame();
+  eq('M33-5b …and a fresh press closes it', mfEl().hidden, true);
+  input._debugPad(0, PAD.DPAD_UP, 0); frame();
+
+  /* F's path, inverted. A lost pointer lock while running is read as the Escape Chrome
+   * swallowed and pauses — unless the manifest card asked for the release itself, which is the
+   * only way its filter chips are clickable at all. */
+  bpress('KeyM'); frame();
+  eq('M33-6 the card is open', mfEl().hidden, false);
+  input.onPointerLockLost();
+  frame();
+  eq('M33-6a …and a lock release under it does NOT pause', game.state.paused, false);
+  bpress('Escape'); frame();
+  eq('M33-6b closed', mfEl().hidden, true);
+  input.onPointerLockLost();
+  frame();
+  eq('M33-6c …while the same release with the card closed pauses, as F asserts', game.state.paused, true);
+
+  // The pause card's slot for it (the M4 Settings-slot rule): present, and wired at boot.
+  const mb = card().querySelector('[data-act="manifest"]');
+  ok('M33-7 the pause card carries a manifest button', !!mb);
+  eq('M33-7a …shown, because main.js registered a handler at boot', mb.hidden, false);
+  eq('M33-7b the card is up (we are paused)', card().hidden, false);
+  mb.click(); frame();
+  eq('M33-7c clicking it resumes — the manifest hides under the pause card, so it must', game.state.paused, false);
+  eq('M33-7d …and opens the manifest', mfEl().hidden, false);
+  bpress('Escape'); frame();
+  eq('M33-7e Escape closes it again, still unpaused', `${mfEl().hidden}/${game.state.paused}`, 'true/false');
+  ok('M33-8 the filters are the CARD\'s, not game.state\'s (§22.4; m0 E8)',
+     ['room', 'category', 'state'].every((k) => k in mf.filters) &&
+     game.state.manifestPanel === undefined && game.state.manifestFilters === undefined,
+     JSON.stringify(mf.filters));
+  ok('M33-9 no error banner from any of it', banner() === '', banner());
+}
+emit('running...');
+
 /* ── J. it still runs ───────────────────────────────────────────────────────────── */
 lines.push('--- J. the build survives all of the above ---');
 {

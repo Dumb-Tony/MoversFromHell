@@ -13,10 +13,11 @@
 
 import { GameClock } from '../src/core/clock.js';
 import { EventBus, EVENTS, PHASES } from '../src/core/eventBus.js';
-import { Input, DEFAULT_BINDINGS, SEAT1_BINDINGS, SEAT_BINDINGS, CONTEXTS, PAD, MOUSE } from '../src/core/input.js';   // SEAT_BINDINGS: M18
+import { Input, DEFAULT_BINDINGS, SEAT1_BINDINGS, SEAT_BINDINGS, CONTEXTS, PAD, MOUSE,
+         bindingConflicts } from '../src/core/input.js';   // SEAT_BINDINGS: M18; bindingConflicts: M33
 import { mulberry32, Rng, hashStr } from '../src/core/rng.js';
 import { Game, createInitialState } from '../src/game.js';
-import { SIM, RENDER, PLAYER, GRIP, DAMAGE, STRAP, TRUCK, ECONOMY } from '../src/config.js';
+import { SIM, RENDER, PLAYER, GRIP, DAMAGE, STRAP, TRUCK, ECONOMY, INPUT } from '../src/config.js';   // INPUT: M33's lockedActions pin
 import { camOcclude, ThirdPersonCamera } from '../src/render/camera.js';
 import { createRenderer } from '../src/render/renderer.js';
 import { REFERENCE_DIMS, APERTURES, fitsThroughGap, minProjectedWidth } from '../src/render/scene.js';
@@ -202,6 +203,30 @@ lines.push('--- B. action map (GDD §4.2-4.4, §21.4) ---');
      (DEFAULT_BINDINGS[CONTEXTS.FOOT].recover.pad || []).includes(PAD.DPAD_DOWN));
   ok('B23a …and on seat 1',
      (SEAT1_BINDINGS[CONTEXTS.FOOT].recover.pad || []).includes(PAD.DPAD_DOWN));
+
+  /* THE FROZEN TABLES GAINED ONE ACTION, DELIBERATELY (Phase 11 build-side M33; §21.2's
+   * manifest card, src/ui/manifestScreen.js). Every assertion above reads these tables and
+   * m26 counts rows against them, so a new entry is a data change that has to be PINNED here
+   * rather than noticed later: `manifest` on M / D-pad up for seat 0 and Period / D-pad up for
+   * seat 1, in BOTH contexts (§21.2 wants the list readable during the drive too), rebindable
+   * (it is not one of the shell's own), and — the thing that had to be checked before the key
+   * was chosen — free on both seats, so bindingConflicts() is still empty with it in. */
+  eq('B25 seat 0 opens the manifest with M (§21.2, M33)', DEFAULT_BINDINGS[CONTEXTS.FOOT].manifest.keys[0], 'KeyM');
+  eq('B25a …and with the pad\'s D-pad up, the free half of recover\'s pair', DEFAULT_BINDINGS[CONTEXTS.FOOT].manifest.pad[0], PAD.DPAD_UP);
+  eq('B25b seat 1 opens it with Period', SEAT1_BINDINGS[CONTEXTS.FOOT].manifest.keys[0], 'Period');
+  eq('B25c …and the same D-pad up (pad tokens are per seat)', SEAT1_BINDINGS[CONTEXTS.FOOT].manifest.pad[0], PAD.DPAD_UP);
+  eq('B25d it is bound while DRIVING too — a leg is a third of the contract (seat 0)',
+     DEFAULT_BINDINGS[CONTEXTS.DRIVE].manifest.keys[0], 'KeyM');
+  eq('B25e …and seat 1', SEAT1_BINDINGS[CONTEXTS.DRIVE].manifest.keys[0], 'Period');
+  eq('B25f the new binding leaves the tables conflict-free on BOTH seats', bindingConflicts().length, 0);
+  ok('B25g …and the action is rebindable — not one of the shell\'s locked ones (§21.4)',
+     !INPUT.remap.lockedActions.includes('manifest'), INPUT.remap.lockedActions.join(','));
+  const mf = new Input(window, null);
+  mf._debugPress('KeyM');
+  mf.poll();
+  ok('B25h it is read as a SHELL edge, so it works while the clock is paused (pause\'s buffer)',
+     mf.consumeShellEdge('manifest'));
+  ok('B25i …and is consumed by that one read', !mf.consumeShellEdge('manifest'));
 
   /* SHELL EDGES. The per-STEP edge (wasPressed) is cleared by endStep, which a paused clock
    * never calls and a running one calls before any render-frame reader gets there — so pause

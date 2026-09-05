@@ -77,6 +77,7 @@ import { TRUCK, AUDIO } from './config.js';   // M16: the shake's road severitie
 import { DEBUG } from './config.js';   // M19: DEBUG.historyLen bounds the pause card's notice history
 import { WALKTHROUGH } from './config.js';   // M22: the first-minute cards' clearance above the help line
 import { Walkthrough, walkthroughEnabledFrom } from './ui/walkthrough.js';   // M22: the first-minute cards
+import { ManifestScreen, hasDeparted } from './ui/manifestScreen.js';   // M33: §21.2's manifest card
 
 const canvas = document.getElementById('stage');
 const ui = document.getElementById('ui');
@@ -1212,6 +1213,42 @@ async function boot() {
     endCapture: () => input.endCapture(),
   };
   const settingsPanel = new SettingsPanel(ui, settingsStore);
+
+  /* ---- §21.2's manifest (Phase 11 build-side M33) -----------------------------------------
+   * "The manifest filters by room/category and shows pickup, loaded, delivered and condition
+   * states" — the fifth sentence of §21.2, and the one M24 did not close. §21.1 keeps the HUD
+   * a count ('manifest 4 / 23'), so the checklist is a CARD opened on the `manifest` action
+   * (M / D-pad up, input.js — a rebindable Controls row like every other) or from the pause
+   * card. It PAUSES NOTHING (§2.2): the clock runs, the labour bills, the cargo keeps
+   * settling behind it. Constructed here because `suppressed` reads all four screens it
+   * yields to, and the last of them is the settings card above.
+   *
+   * The panel READS state and never writes it: rows, the registry, whether the truck has left
+   * (hasDeparted — pure, over state) and how many house leaves are off their hinges (M11). */
+  const manifestScreen = new ManifestScreen(ui, {
+    bus,
+    rows: () => game.state.manifest,
+    registry,
+    departed: () => hasDeparted(game.state),
+    doorsOff: () => doors.records().filter((d) => d.leaf && !doors.isHung(d.id)).length,
+    suppressed: () => title.visible || pauseScreen.visible || invoiceScreen.visible || settingsPanel.open,
+  });
+  /* The cursor has to reach the filter chips, so opening the card releases the pointer lock —
+   * and `onPointerLockLost` below is told to read THAT release as what it is rather than as
+   * the swallowed Escape it reads every other release as. Closing asks for the lock back the
+   * way the pause card's Resume does; Chrome may refuse (Escape is not an activating key), and
+   * the card's own foot says to click the game. */
+  manifestScreen.onOpen = () => { if (input.pointerLocked) input.releasePointerLock(); };
+  manifestScreen.onClose = () => {
+    if (!game.state.paused && !title.visible && input.activeDevice[0] === 'kbm') input.requestPointerLock();
+  };
+  // The M3 shell-observer pattern: runs at the end of every game.frame(), paused or not.
+  game.subscribe(() => manifestScreen.frame());
+  /* The pause card's slot (pauseScreen.js onManifest). The manifest hides UNDER the pause card
+   * by construction, so the button resumes first — otherwise it would open a card nobody could
+   * see. §2.2 is the whole point of the card, so resuming to read it is the honest gesture. */
+  pauseScreen.onManifest = () => { game.setPaused(false); manifestScreen.show(); };
+
   /** The help line's last reading, for the suites and the overlay (M29) — assigned by
    *  syncHelpMetrics() 70 lines below. DECLARED HERE, above applyAccessibility(), because
    *  applyAccessibility() calls syncHelpMetrics() at boot and a `let` beside its own function
@@ -1234,7 +1271,8 @@ async function boot() {
   function applyAccessibility() {
     for (const h of huds) { h.setReduced(shell.reducedHud); h.setHighContrast(shell.highContrast); }
     document.body.classList.toggle('hc', !!shell.highContrast);
-    for (const el of [title.el, pauseScreen.el, invoiceScreen.el, settingsPanel.el]) el.classList.toggle('hc', !!shell.highContrast);
+    // M33: the manifest card is one more card, and takes the same `.hc` (m40 N6).
+    for (const el of [title.el, pauseScreen.el, invoiceScreen.el, settingsPanel.el, manifestScreen.el]) el.classList.toggle('hc', !!shell.highContrast);
     interact.hints = !!shell.hints;
     syncHelpMetrics();                         // M29: .hc changes the help line's padding
     if (walkthrough) walkthrough.relayout();   // M22: .hc restyles the help line the card sits on
@@ -1380,7 +1418,8 @@ async function boot() {
     bus,
     glyphs: () => input.glyphsFor(0, shownDevice[0]),
     seat0Player: () => moverOfSeat(0).id,
-    suppressed: () => title.visible || pauseScreen.visible || invoiceScreen.visible || settingsPanel.open || !shell.hints,
+    // M33: …and to the manifest card, which is a full-screen sheet — one voice at a time.
+    suppressed: () => title.visible || pauseScreen.visible || invoiceScreen.visible || settingsPanel.open || manifestScreen.open || !shell.hints,
     coop: () => seatCount > 1,
     seen: () => !!shell.walkthroughSeen,
     delivered: () => game.state.manifest.some((r) => r.delivered),
@@ -2012,6 +2051,10 @@ async function boot() {
    * never under the title, which owns the shell until the job starts. */
   input.onPointerLockLost = () => {
     if (title.visible || game.state.paused || game.state.phase === PHASES.SETTLEMENT) return;
+    /* M33: the manifest card RELEASED the lock itself, so the cursor could reach its filter
+     * chips — that release is not a swallowed Escape and must not pause. The card pauses
+     * nothing by design (§2.2, and m40 N4 asserts the clock kept advancing under it). */
+    if (manifestScreen.open) return;
     game.setPaused(true);
   };
   canvas.addEventListener('click', () => {
@@ -2087,6 +2130,13 @@ async function boot() {
        * leaves the card up with no cursor to click it — release the lock when the toggle
        * lands on PAUSED (the Esc path already lost it to Chrome; review minor, M3). */
       if (input.consumeShellEdge('pause', s)) { if (game.togglePause()) input.releasePointerLock(); }
+      /* §21.2's manifest card (M33), on a bound action for the same reason `pause` is one: a
+       * pad-only player must be able to open it (§4.4), and the shell edge is the buffer that
+       * survives a paused clock. The card yields to every pause-shaped screen, so a press
+       * under the pause card or the settlement sheet opens something nobody would see — the
+       * pause card's own button is the route from there. */
+      if (input.consumeShellEdge('manifest', s) &&
+          !pauseScreen.visible && !invoiceScreen.visible && !settingsPanel.open) manifestScreen.toggle();
       if (input.consumeShellButton(s, COOP.joinPad)) toggleSeats();
     }
   });
@@ -2409,6 +2459,8 @@ async function boot() {
     drainNotices, noticeHistory, hcForced,
     /* M22: the first-minute cards — shell state a suite reads and drives (m29). */
     walkthrough,
+    /* M33: §21.2's manifest card — shell state a suite reads and drives (m40). */
+    manifestScreen,
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,

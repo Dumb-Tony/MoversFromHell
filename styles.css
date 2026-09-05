@@ -1304,3 +1304,167 @@ body.coop #build-stamp { opacity: .45; }
 .hc #settlement .mline .mkind, .hc #settlement .recap-item .t, .hc #settlement .recap-item .x,
 .hc #settlement .recap-note, .hc #settlement label.keep { opacity: 1; }
 .hc #settlement .mline.out .mamt { color: var(--coral); }
+
+/* ---- the manifest card (Phase 11 build-side M33) ---------------------------------------
+   §21.2 "the manifest filters by room/category and shows pickup, loaded, delivered and
+   condition states"; §21.1 keeps the HUD a count, so the checklist is THIS — a card the
+   player opens on a key (src/ui/manifestScreen.js). Same shape as the settings card, because
+   a player who asked for the list wants to read it: a centred sheet over a dimmed backdrop,
+   pointer-events on (opted back in from #ui's none). z-index 20, UNDER the pause card (30),
+   the title (40) and the settings card (50) — the card hides under all three anyway
+   (manifestScreen refresh), so this only settles what paints over what if one ever slipped.
+   Every font size scales by --ts (m16 U1); the LIST scrolls inside the card at --mf-list-max,
+   written from MANIFEST_VIEW.listMaxVh so the number lives in config.js. */
+#manifest-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(9,10,16,.58);
+}
+#manifest-screen[hidden] { display: none; }
+#manifest-screen .mf-card {
+  width: min(calc(680px * var(--ts)), 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 16px 20px 14px;
+  background: rgba(23,21,34,.96);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  color: var(--paper);
+  text-align: left;
+}
+#manifest-screen .mf-head { display: flex; align-items: baseline; gap: 10px; }
+#manifest-screen h2 {
+  margin: 0;
+  font: 700 calc(15px * var(--ts))/1 Quicksand, system-ui, sans-serif;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--lime);
+}
+#manifest-screen .mf-count {
+  font: calc(11px * var(--ts))/1.4 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: .6;
+}
+#manifest-screen .mf-close {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--paper);
+  font: 700 calc(12px * var(--ts))/1.5 ui-monospace, Consolas, monospace;
+  opacity: .7;
+  cursor: pointer;
+}
+#manifest-screen .mf-close:hover { opacity: 1; }
+#manifest-screen .mf-close:focus-visible { opacity: 1; outline: 2px solid var(--paper); outline-offset: 2px; }
+
+/* FILTERS AS DATA ROWS, NOT A SEARCH BOX (§21.2): three axes, every option a chip that says
+   what it is in words. The selected chip is lime AND carries aria-pressed, so the state is
+   never colour alone (§26.5). The rows wrap, so a narrow window stacks them instead of
+   clipping (m40 N6 asserts scrollWidth <= clientWidth). */
+#manifest-screen .mf-filters { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+#manifest-screen .mf-frow { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
+#manifest-screen .mf-fl {
+  flex: 0 0 auto;
+  min-width: calc(46px * var(--ts));
+  font: 700 calc(10px * var(--ts))/1.6 Quicksand, system-ui, sans-serif;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--violet);
+}
+#manifest-screen .mf-fopts { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+#manifest-screen .mf-chip {
+  padding: 2px 9px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--paper);
+  font: calc(11px * var(--ts))/1.5 Quicksand, system-ui, sans-serif;
+  opacity: .7;
+  cursor: pointer;
+}
+#manifest-screen .mf-chip:hover { opacity: 1; }
+#manifest-screen .mf-chip:focus-visible { opacity: 1; outline: 2px solid var(--paper); outline-offset: 2px; }
+#manifest-screen .mf-chip.on { background: var(--lime); border-color: transparent; color: #14180a; opacity: 1; font-weight: 700; }
+
+/* THE LIST. Its own scrolling box: the card's footer must stay on screen at --ts 1.6, so the
+   rows scroll rather than the card growing past the window (m40 N6). Row styling follows the
+   invoice sheet's lines — a name, its room, its state, its condition, then the tokens. */
+#manifest-screen .mf-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 2px 0 0;
+  /* The card writes --mf-list-max from MANIFEST_VIEW.listMaxVh at construction. No literal
+     fallback: a second number here would go stale the day the config one is retuned. */
+  max-height: var(--mf-list-max);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#manifest-screen .mf-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .95fr);
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  font: calc(12px * var(--ts))/1.45 Quicksand, system-ui, sans-serif;
+}
+#manifest-screen .mf-name { font-weight: 700; overflow-wrap: anywhere; }
+#manifest-screen .mf-room { opacity: .72; overflow-wrap: anywhere; }
+#manifest-screen .mf-state { overflow-wrap: anywhere; }
+#manifest-screen .mf-cond {
+  font: calc(11px * var(--ts))/1.6 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: .8;
+  overflow-wrap: anywhere;
+}
+/* The tokens take the whole second line of the row, so a row with four of them wraps within
+   its own box and never widens the card. */
+#manifest-screen .mf-tokens { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+#manifest-screen .mf-tokens:empty { display: none; }
+#manifest-screen .mf-t {
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 700 calc(9px * var(--ts))/1.7 Quicksand, system-ui, sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  opacity: .8;
+}
+/* The tint is the REDUNDANT half — every token already says what it is in words (§26.5). */
+#manifest-screen .mf-t.t-two { color: var(--violet); }
+#manifest-screen .mf-t.t-parts, #manifest-screen .mf-t.t-lost { color: var(--amber); }
+#manifest-screen .mf-t.t-wrongroom, #manifest-screen .mf-t.t-damaged { color: var(--coral); }
+/* The state word carries the same redundancy on the row itself. */
+#manifest-screen .mf-row[data-state="delivered"] .mf-state { color: var(--lime); }
+#manifest-screen .mf-row[data-state="away"] .mf-state { color: var(--amber); }
+
+#manifest-screen .mf-empty { margin: 12px 0 0; font: calc(12px * var(--ts))/1.5 Quicksand, system-ui, sans-serif; opacity: .6; }
+#manifest-screen .mf-foot {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font: calc(12px * var(--ts))/1.5 ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--lime);
+  overflow-wrap: anywhere;
+}
+#manifest-screen .mf-hint { margin: 6px 0 0; font: calc(10px * var(--ts))/1.5 Quicksand, system-ui, sans-serif; opacity: .5; }
+
+/* High contrast (M19's rule): opaque, 2 px with 1 px less padding, nothing dimmed. */
+.hc #manifest-screen { background: rgba(9,10,16,.9); }
+.hc #manifest-screen .mf-card { background: var(--panel); border-width: 2px; padding: 15px 19px 13px; }
+.hc #manifest-screen .mf-count, .hc #manifest-screen .mf-close, .hc #manifest-screen .mf-chip,
+.hc #manifest-screen .mf-room, .hc #manifest-screen .mf-cond, .hc #manifest-screen .mf-t,
+.hc #manifest-screen .mf-empty, .hc #manifest-screen .mf-hint { opacity: 1; }
+.hc #manifest-screen .mf-close, .hc #manifest-screen .mf-chip, .hc #manifest-screen .mf-t {
+  border-width: 2px; margin-top: -1px; margin-bottom: -1px;
+}
+.hc #manifest-screen .mf-row { border-bottom-color: var(--line); }

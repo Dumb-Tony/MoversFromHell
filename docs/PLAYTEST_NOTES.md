@@ -888,3 +888,31 @@ Grind a wall until it is paid for. Seven 6 m/s throws take the front wall to 400
 
 Nothing above changes a price, a damage number or a clearance. If the doorway feels different, that is not this change.
 
+
+## Phase 31 — Phase 11 build side, batch 16: the manifest, and the impulse the solver hides — 2026-09-05
+
+### M33
+
+**The manifest card (M33) — what to watch for.** Press **M** (or the pad's **D-pad up**) at any point in a contract; the pause card also has a **The manifest** button, which resumes the job and opens the card, because the job is meant to keep running while you read it.
+
+Questions worth answering from a real session:
+
+1. **Does it answer 'where is the last one?'** Carry twenty boxes, then open the card and set the state filter to 'left at the old house'. Did the remaining row tell you enough to go and get it, or did you still have to hunt? The card names the room the item is going TO, not the room it is in — that is deliberate (§15.2 is about destinations) but it may be the wrong half for a player who has lost something.
+2. **Is the room filter the one you reach for, or the state filter?** The chips are in room / kind / state order. If nobody touches 'kind' in a whole contract, the axis is costing a row of screen for nothing.
+3. **Does the pointer handoff read as broken?** Opening the card releases the mouse; closing it asks for the lock back, and Chrome may refuse (Escape is not an activating key), which leaves you needing one click on the game to look around again. Watch whether that click is discovered or whether the player thinks the camera has frozen.
+4. **Is 'at the new house' understood?** It is the sixth state — an item unloaded and set down but not yet settled in a room. Does a player read it as 'nearly done' or as 'something is wrong'?
+5. **Does the card make the job feel more like admin?** §2.2 says work continues while it is open, and it does. If players stop dead to read it every ninety seconds, the objective line is not carrying enough on its own and the fix belongs there, not here.
+6. **Is the key findable at all?** The help line does not name it (see KNOWN_ISSUES). If nobody presses M without being told, the pause-card button and the Controls row are not enough discovery.
+
+### M34
+
+**Throwing heavy things at doors now works the way it looks.** Phase 26 shipped a version where a 110 kg fridge hurled at a closed door from across the kitchen bounced off it and cost 40.00, while the same fridge nudged into it from 5 cm tore the door off for 140.00 — the harder throw doing visibly less, which is the single most confusing thing a physics game can do. Measured on the fixed build: from 0.16 m at 6 m/s the leaf comes off on the step the fridge lands, the frame is billed the standard 140.00, and the fridge itself breaks (its own 1250.00 on the item ledger — the throw is not free). From 0.05 m at 4 m/s it behaves exactly as it did before.
+
+**Walls are billed for what hit them, not for what happened to be underneath.** Throw the fridge at the front wall instead and the invoice reads 'front wall holed — 400.00' (the §8.3 per-surface maximum; the raw hit is 595.608 N·s). The ground it was standing on took a larger share of the solver's attention on that step and is billed nothing, as it always must be.
+
+**Nothing new is charged for standing still.** Worth re-checking in a session, because it is the half that is easy to break: leave a box pressed 20 mm inside a door leaf and walk away — measured, the solver holds 108 N against that leaf indefinitely and the frame accumulates 0.00 N·s over 90 steps, no line, no notice. A box resting against a wall for 300 steps costs nothing. A box shoved into a wall at 0.30 m/s costs nothing (2.34 N·s against the 12 N·s threshold).
+
+**The shove is unchanged, and that is deliberate.** Two hands on the couch into the hung kitchen door still forces it in about a second of pressing — measured 0.55 s to first contact and 1.02 s to the hinges in the recorded fixture — and the strain still comes from the hands, not from the couch's momentum (its own m·Δv after the first touch sums to 0.00 N·s). Testers who learned the shove's timing in Phase 26 will find it identical.
+
+**What to watch for.** The thing to report is a bill you cannot explain: a property line naming a surface you did not hit, or a door that comes off when you only leaned on it. For a **wall, header or truck** line the build guarantees the amount can never exceed the momentum the object actually lost, so a wall line far larger than the hit looked is worth a screenshot of the run record. A **door-frame** line is not bounded that way and is not meant to be: a slow, sustained shove forces a door on the strength of the hands while the object itself barely changes speed, so 140.00 after a long press against a door is the design working, not a bug.
+
