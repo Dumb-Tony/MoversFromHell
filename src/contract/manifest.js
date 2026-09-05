@@ -232,13 +232,16 @@ export function manifestSummary(rows) {
  */
 export function deliveryStatus(rows, registry) {
   const outstanding = [];
+  const counts = { away: 0, inTruck: 0, atSite: 0 };
   for (const row of rows) {
     if (row.delivered) continue;
     const e = row.entityId ? registry.get(row.entityId) : null;
-    if (!e) { outstanding.push({ id: row.id, defId: row.defId, why: 'missing' }); continue; }
+    if (!e) { outstanding.push({ id: row.id, defId: row.defId, why: 'missing', where: 'away' }); counts.away++; continue; }
     const t = e.body.translation();
     const inBuilding = insideDestination({ x: t.x, y: t.y, z: t.z });
     const parts = (row.partsLeft || []).map((l) => `${l.missing} of ${l.of} ${l.part}`).join(', ');
+    const w = rowWhere(row, registry);
+    if (w.where === 'away') counts.away++; else if (w.where === 'truck') counts.inTruck++; else counts.atSite++;
     outstanding.push({
       id: row.id,
       defId: row.defId,
@@ -246,10 +249,71 @@ export function deliveryStatus(rows, registry) {
          : !e.state.settled ? 'still moving'
          : row.piecesMissing > 0 ? `parts missing (${parts})`
          : 'settling',
+      /** M13: which side of the drive this row's remaining work is on — see rowWhere(). */
+      where: w.where,
+      piecesAway: w.piecesAway,
     });
   }
   const sum = manifestSummary(rows);
-  return { ...sum, outstanding };
+  return { ...sum, ...counts, outstanding };
+}
+
+/**
+ * Which side of the drive an undelivered row's remaining work is on (M13; §3.4 "required
+ * cargo loaded OR crew elects another trip"). Three answers, exclusive:
+ *
+ *   'truck'  the item is loaded (cargo.js writes state.loaded on the entity) — it is coming
+ *            along whichever way the truck goes next;
+ *   'site'   the item is in a destination zone, the kerbside apron included: it is at the new
+ *            house and wants carrying in, not driving back for;
+ *   'away'   anywhere else — the old house, its lawn, the road between. The truck never moves
+ *            and both sites share one world (truck.js, destination.js), so "away" is "not at
+ *            the destination and not on the truck", which is exactly what needs another trip.
+ *
+ * AND ITS PIECES (M12 holds a row open on piecesMissing): a couch at the new house whose legs
+ * are still at the old one needs the trip as much as a couch that never left. `piecesAway`
+ * counts the detached-part pieces that are neither loaded nor at the destination; any such
+ * piece makes the row 'away' whatever the hulk is doing. Fragments of a broken item are not
+ * counted — they never gate delivery (manifest.js stepManifest), so they never need a trip.
+ *
+ * @returns {{where: 'truck'|'site'|'away', piecesAway: number}}
+ */
+export function rowWhere(row, registry) {
+  const e = row.entityId ? registry.get(row.entityId) : null;
+  if (!e) return { where: 'away', piecesAway: 0 };
+  let piecesAway = 0;
+  for (const ids of Object.values(e.state.parts || {})) {
+    for (const id of ids) {
+      const p = registry.get(id);
+      if (!p) { piecesAway++; continue; }
+      if (p.state.loaded) continue;
+      const pt = p.body.translation();
+      if (destZoneAt({ x: pt.x, y: pt.y, z: pt.z })) continue;
+      piecesAway++;
+    }
+  }
+  if (piecesAway > 0) return { where: 'away', piecesAway };
+  if (e.state.loaded) return { where: 'truck', piecesAway: 0 };
+  const t = e.body.translation();
+  if (destZoneAt({ x: t.x, y: t.y, z: t.z })) return { where: 'site', piecesAway: 0 };
+  return { where: 'away', piecesAway: 0 };
+}
+
+/**
+ * The counts the cab prompt and the objective line need every frame (M13), without
+ * deliveryStatus()'s per-row records: how many undelivered rows are away (another trip),
+ * loaded (on the truck) or at the site (carry them in). Pure; 23 rows and their pieces.
+ *
+ * @returns {{away: number, inTruck: number, atSite: number, delivered: number, total: number}}
+ */
+export function tripStatus(rows, registry) {
+  const out = { away: 0, inTruck: 0, atSite: 0, delivered: 0, total: rows.length };
+  for (const row of rows) {
+    if (row.delivered) { out.delivered++; continue; }
+    const w = rowWhere(row, registry).where;
+    if (w === 'away') out.away++; else if (w === 'truck') out.inTruck++; else out.atSite++;
+  }
+  return out;
 }
 
 /**

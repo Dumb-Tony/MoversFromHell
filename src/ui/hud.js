@@ -194,11 +194,13 @@ export class Hud {
    * §21.2's contract UX. Deliberately a summary and not a checklist: §21.1 forbids a panel
    * over the working area, and 23 rows is a panel.
    */
-  setContract({ phase, delivered, total, loaded, elapsedMin, estimateMin, roomCorrect }) {
+  setContract({ phase, delivered, total, loaded, elapsedMin, estimateMin, roomCorrect, trip }) {
     const over = elapsedMin > estimateMin;
     const time = `${elapsedMin.toFixed(1)} / ${estimateMin.toFixed(0)} min`;
+    // M13: a second trip is a fact the panel states; the first trip is not worth a word.
+    const phaseLine = trip > 1 ? `${phase} · trip ${trip}` : phase;
     const html =
-      `<div class="phase">${esc(phase)}</div>` +
+      `<div class="phase">${esc(phaseLine)}</div>` +
       `<div class="row"><span>manifest</span><b>${delivered} / ${total}</b></div>` +
       `<div class="row"><span>in the truck</span><b>${loaded}</b></div>` +
       (delivered > 0 ? `<div class="row"><span>right room</span><b>${roomCorrect} / ${delivered}</b></div>` : '') +

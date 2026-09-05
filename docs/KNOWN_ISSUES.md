@@ -305,6 +305,10 @@ item — but it cannot tell you WHAT was hit. §8.4 wants "object/location, cate
 location recorded is the damaged object's own position rather than the surface it struck.
 Property damage (§15.1's separate line item, keyed on impulse) is therefore configured and
 unbuilt: there is no way yet to charge for a scraped wall.
+Since Phase 21 (M14) the ITEM ledger still works this way, and the PROPERTY ledger reads the narrow
+phase for the one step an object loses speed: the surface whose manifold pushed hardest that step
+takes the object's whole m·Δv (`damage.js _attributeProperty`, `physics.tagOf`). A scraped wall
+costs (impulse − 12) × 1.6, up to 400 per surface.
 
 **One drive, one direction, no reverse.** §11.3's hard brake always throws cargo forward, so
 the headboard takes everything and the open rear door never matters. A pack that would spill
@@ -356,12 +360,17 @@ rather than a panel drawn by the screenshot script. Kept here because the arrang
 describes — screenshot-rendered content standing in for a missing UI — was also used for the
 Phase 7 strap lines, and the Phase 7 note is still open.
 
-**Property damage is priced and unbuilt.** `DAMAGE.property` exists, keyed on impulse
+**~~Property damage is priced and unbuilt.~~ CLOSED in Phase 21 (M14).** `DAMAGE.property` exists, keyed on impulse
 because what a wall suffers really does scale with the mass that hit it, and §15.1 lists it
 as its own line. Nothing writes to `ledger.propertyDamage`, because Phase 8's damage system
 measures an object's own lost speed and cannot say WHAT it hit. So a scraped wall is free,
 which is the single largest hole in the economy: §8.2's whole "preparation versus brute
 force" trade assumes wrecking the hallway has a price.
+`ledger.propertyDamage` is written by `damage.js` (one line per entity-and-surface window, capped per
+surface), billed by `invoice.js` ("N impacts on K surfaces", one citation per entry, `reconcile()`
+refuses a mismatch), reviewed (`marked_the_walls`), counted (`propertyEvents`), noticed ("front wall
+— scuffed · 30.82") and marked (a 24-quad scuff ring). A 9 kg box at 4 m/s into the front wall costs
+30.82; a wall stops at 400.00 (m22 PD2, PD6).
 
 **Tips, and the customer archetype behind them, do not exist.** §12.1 lists "customer
 archetype" and §15.2 says reviews assemble from "event tags, outcome, and CUSTOMER
@@ -372,14 +381,21 @@ customer is the same customer.
 completion, damage ratio, special constraints, and customer tolerance." The grade computes
 three of those five and is not persisted anywhere. §16.1's progression loop needs it.
 
-**The prototype route is 4.2 km of constant.** Fuel is `distance × rate` where the distance
-is a config value, not a measured drive — which follows from the truck not moving (Phase 7).
-It is honest as a fixed cost and it is not yet a "route mistake" the way §15.1's
-traffic/vehicle line intends.
+**~~The prototype route is 4.2 km of constant.~~ Fuel is per leg, and legs are derived (Phase 21, M13).**
+`vehicle/fuel` bills 2 × tripCount − 1 legs of `ECONOMY.routeDistanceKm`: 1 leg −13.44, 3 legs −40.32.
+The leg count is DERIVED from the trip count because settlement can only happen at the
+destination; if the crew is ever allowed to settle at the pickup house (§3.4 "crew elects"),
+`legsDriven()` in invoice.js must become a recorded count incremented per arrival — the comment
+beside it says so. The distance is still a config value, not a measured drive.
 
-**One-trip is assumed, not enforced.** `tripCount` is on the state and nothing increments it,
-because nothing yet models going back for a second load. The bonus is therefore always
-available, which makes it free rather than earned.
+**~~One-trip is assumed, not enforced.~~ One trip is a choice now, and the second trip is priced
+(Phase 21, M13).** The cab at the destination offers "drive back for N more" (E) beside "settle up
+— leave N behind (N × 60.00)" (Q) whenever manifest rows are away — not on the truck, not in any
+destination zone, or with a loose piece that is neither. A return is a phase event on the same
+route (three hazards again, 28 s, on the labour clock); the one-trip bonus is earned only when
+tripCount is 1 at a complete settlement (m21 T6/T8). Left open: an item dropped on the road
+between the truck and the destination house counts as "away"; the kerbside apron is "site".
+`ECONOMY.leftBehindFee` is a product number (60 — see config.js and PLAYTEST_NOTES).
 
 **Nothing is saved.** §23.4 asks for save data and §13.4 permits "a saved best invoice, cash,
 and reputation stub". The invoice is computed and discarded, so replaying a contract cannot
@@ -657,9 +673,10 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 - **The ROAD_FORCE bus trap M6 measured is fixed at integration**: `src/drive/route.js` now emits `roadType`, and `EventBus.emit` spreads the payload FIRST so the envelope's `type` / `simTimeMs` can never be shadowed again (m17 R4e reports 3 of 3 road events stamped ROAD_FORCE).
 - **The run report is local only.** §27.4's 'explicit opt-in upload' is not implemented and will not be: the project rule is zero external requests. A tester copies the JSON (button, or the selected textarea when the clipboard is refused — it is refused on plain http and in embedded panes) and sends it by hand. Kept runs (last 6, no event lists) and questionnaire answers live in this browser's localStorage under `mfh.save` and are gone with 'clear responses' or a cleared site.
 - **Frame cost of the recorder cannot be measured by the smoketest harness.** Under `--virtual-time-budget` `performance.now()` is frozen, so `game.stats.systemMs` reads 0.000 ms with the recorder on or off and m17 P1 passes vacuously there (it prints a NOTE line when both readings are 0). The honest number was taken in a real Chrome: 0.031 ms difference at worst over 600-frame passes (means 0.20/0.12 ms off, 0.18/0.15 ms on, 0.1 ms timer granularity).
-- **`counters.trips` is always 1.** `state.tripCount` is never written and `CargoSystem.tripCount` stays 1; the run report records that honestly rather than inventing a second trip.
-- **`phases.briefing` and `phases.settlement` are always 0** in the report, for the reasons already recorded for `telemetry.phaseMs`.
-- **Questionnaire answers are per device and per run**; there is no way to attribute a report to a person or a session id beyond the build label, seed and ISO date it carries. Deliberate (§27.4 'never record voice chat', no identity).
+- **~~`counters.trips` is always 1.~~ `counters.trips` is real (Phase 21, M13).** `state.tripCount` is
+  written by the phase system when a return leg arrives back at the house; the run summary carries
+  it (m21 T6: 2). `worstCargoShift` is a MAX over every leg driven while `cargo.shifted` /
+  `cargo.measured` are the LAST leg's — an empty return leg measures whatever was still aboard.
 
 ### M8
 
@@ -723,4 +740,23 @@ Resolved by M11: KNOWN_ISSUES's 'single most important open question' (the 0.82 
 - m14's soak now completes 22/23 each run: its fixture takes the wardrobe's doors off and never brings the two door pieces (2 x 5.25 kg) to the destination, so that row stays open and the invoice carries a 72.80 parts-left line. S0-S8 assert none of that; the equality counters hold (registry 27, bodies 75).
 - m13 A1/A2 do not cover the derived piece prefabs (they iterate OBJECT_DEFS); m20 P9 does, over definitions.derivedDefs().
 - A piece's lastStable is its spawn slot until it settles; a piece knocked off the world in its first frames is recovered to beside where the parent WAS.
+
+
+## Phase 21 open items
+
+### M13
+
+- **Away is "not on the truck and not in a destination zone"** — an item dropped on the road between the truck and the destination house counts as away; the kerbside apron is site. `legsDriven()` is DERIVED (2 × trips − 1) because settlement only happens at the destination; a settle-at-pickup path must record legs instead. `ECONOMY.leftBehindFee` (60) is a product number: 23 items left = 1380 > the 900 base, by design (§15.2).
+- **The Q prompt prices rows that are away while the invoice bills every undelivered row** — press Q with a box still on the truck and the settlement line is one item larger than the prompt said (review gap, M13).
+
+### M14
+
+- **A capped surface posts no further lines** (a window that rounds to 0.00 writes nothing): once a wall reaches DAMAGE.property.maxChargePerSurface (400) it also stops producing notices and scuffs — the seventh 6 m/s hit on the capped front wall left no line, no event and no mark (m22 PD6d). If the product wants the mark without the charge, emit the event with cost 0 and skip the ledger push.
+- **A corner hit bills one surface.** Attribution takes the surface whose manifold impulse was largest in the step and gives it the whole m·Δv; a wall and a header struck in the same step charge only the one that took more, and a step where a floor took more than a wall charges nothing (deliberate: §10.4 — a TV landing beside a wall it grazes is a floor landing).
+- **The impulse is the object's OWN |Δspeed| × mass, not the manifold impulse**: a 9 kg box at 4.0 m/s registers 31.3 N·s because 4.7 N·s of it came back as rebound. Consistent, documented, and what every fixture number is measured against.
+- **The truck deck absorbs slow slides** (a fact, not a bug): a 0.78-friction box on the 0.32 deck (Average 0.55, 5.4 m/s²) thrown at 3 m/s from 0.79 m stops at z 12.289 as it touches the headboard with 0.00 N·s of headboard impulse — a §11.3 hard brake bills the headboard only when the pack actually reaches it moving.
+- **Property captions are generic** ('wall scuffed' / 'wall dented' / 'wall holed'): m18 A1b pins string captions, so the audio cannot name the surface; the HUD notice does ('living_kitchen door frame — scuffed · 34.59').
+- **The scuff ring is scene geometry on both tiers** (one Group, 24 hidden quads, one material, one geometry, +1 scene child at boot: 330). m13 B1's movable exemption covers the quads; B1b (interior doorways) has no movable check and would flag a mark drawn inside a doorway's 0.06–2.01 m clear box — nothing in m13 marks one.
+- **heldBy is recorded, never scored** (§15.3): who held the object at the window's first contact is on the line and in the run record; nothing reads it.
+- **Door leaves are still item damage** (M11's note stands): a hung leaf is an entity, so a couch forced into it marks the leaf, not the frame; the M11 hinge brute-force branch through `doorLeaf_` is the seam.
 

@@ -43,8 +43,9 @@ import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
 import { DEST_ZONES, DEST_SHELL, insideDestination } from './world/destination.js';
 import { DamageSystem } from './damage/damage.js';
+import { Scuffs } from './render/scuffs.js';
 import { buildInvoice, reconcile, reviewFor, contributionStats } from './contract/invoice.js';
-import { manifestSummary } from './contract/manifest.js';
+import { manifestSummary, tripStatus } from './contract/manifest.js';   // tripStatus: M13
 import { RouteDriver } from './drive/route.js';
 import { PHASE6_TOOL_SPAWNS, validateAllToolDefs } from './tools/definitions.js';
 import { GripSystem, HANDS, restoreClearedObjects, moversOn, localToWorld } from './player/grip.js';
@@ -108,7 +109,9 @@ async function boot() {
   const R = await initPhysics();
   const physics = new PhysicsWorld(R);
   physics.addGround();
-  physics.addStaticFromColliders(world.colliders);
+  /* Kept (M14): {body, collider, tag} per static, and physics.staticTags / tagOf() beside it,
+   * so the damage system can say WHAT an object hit — §8.4's "location". */
+  const statics = physics.addStaticFromColliders(world.colliders);
   // The ramp is NOT in world.colliders: an axis-aligned box cannot represent a slope, and
   // a box-shaped stand-in would be a lie the camera would then occlude against. It is
   // built here from the same RAMP spec the mesh uses.
@@ -440,6 +443,9 @@ async function boot() {
       const z = DEST_ZONES.find((zone) => zone.id === zoneId);
       return z ? z.label.replace(/\s*\(destination\)\s*$/i, '').toLowerCase() : zoneId;
     },
+    /* The cab's choice at the destination (M13; §3.4 "crew elects another trip"): the same
+     * counts contractFacts() gives the objective line, so the prompt and the line agree. */
+    tripStatus: () => tripStatus(game.state.manifest, registry),
   });
 
   // ---- systems, in §22.3 order ----------------------------------------------------------
@@ -642,8 +648,24 @@ async function boot() {
         c.cargo.measured = sh.count;
       }
       cargoShift.snapshot = null;
-      game.setPhase(PHASES.DELIVERY);
-      pendingNotices.push({ text: 'arrived — unload through the back', kind: 'good' });
+      /* THE RETURN LEG ARRIVES (M13; §3.4 "a phase may return to an earlier phase for an
+       * extra trip. The state machine must not lose damage, time, fees, or manifest
+       * status"). Nothing is reset but the route: the ledger, the clock, the delivered rows
+       * and the phase clocks all stay, tripCount goes up by one, and the cargo system hands
+       * out the new number to whatever settles in from now on (§10.2 "which trip moved each
+       * item"). route.reset() AFTER the 'arrived' read above, so trip 2's cab press is the
+       * ordinary parked branch — and this branch cannot fire twice. */
+      if (route.heading === 'back') {
+        state.tripCount += 1;
+        cargo.tripCount = state.tripCount;
+        route.reset();
+        game.setPhase(PHASES.PICKUP);
+        const away = tripStatus(state.manifest, registry).away;
+        pendingNotices.push({ text: `back at the house — trip ${state.tripCount}: ${away} to go`, kind: 'good' });
+      } else {
+        game.setPhase(PHASES.DELIVERY);
+        pendingNotices.push({ text: 'arrived — unload through the back', kind: 'good' });
+      }
     }
   });
 
@@ -694,6 +716,10 @@ async function boot() {
   const post = (renderTier === 'gpu' && RENDER.post.enabled && postModeFromLocation() !== 'off' && !styled.postRender)
     ? createPost(renderer, THREE, RENDER.post) : null;
   const blobs = renderTier === 'gpu' ? new ContactBlobs(THREE, world.scene, RENDER.look.blob) : null;
+  /* §8.4's "visual mark" for property damage (M14): a bounded ring of decals, event-driven
+   * off DAMAGE_APPLIED / SIM_RESET, zero per-frame work — so BOTH tiers build it (unlike
+   * blobs) and the headless harness can assert §26.6's bound (scuffs.js). */
+  const scuffs = new Scuffs(THREE, world.scene, bus);
   /* Ground height under (x, z): a ray straight down with the source's own collider excluded,
    * so a blob never rides the object it belongs to. Same call shape as the mantle probes. */
   const blobProbe = (x, y, z, exclude) => {
@@ -957,7 +983,11 @@ async function boot() {
    * NOTICE." The cost notice is the only one of those four this build can do, so it does it.
    * Subscribed here rather than polled, so a notice can never be missed between frames. */
   bus.on(EVENTS.DAMAGE_APPLIED, (e) => {
-    const name = String(e.defId || '').replace(/_\d+$/, '').replace(/_/g, ' ');
+    /* One notice per ledger line, on either ledger (M14): a property line names the
+     * SURFACE — 'front wall — scuffed · 38.40' — where an item line names the object. */
+    const name = e.category === 'property'
+      ? String(e.location || e.surfaceId || 'a surface')
+      : String(e.defId || '').replace(/_\d+$/, '').replace(/_/g, ' ');
     pendingNotices.push({
       text: `${name} — ${e.band} · ${e.cost.toFixed(2)}`,
       kind: 'damage',
@@ -993,6 +1023,11 @@ async function boot() {
       piecesMissing: summary.piecesMissing || 0,
       elapsedMin: game.state.elapsedWorkMs / 60000,
       estimateMin: game.state.estimateMs / 60000,
+      /** M13: which trip this is, and how many rows still need another one (manifest.js
+       *  tripStatus — not on the truck, not at the destination, or a loose piece that is
+       *  neither). The cab prompt reads the same function, so they cannot disagree. */
+      trip: game.state.tripCount,
+      away: tripStatus(game.state.manifest, registry).away,
     };
   }
 
@@ -1143,6 +1178,7 @@ async function boot() {
     // AFTER game.reset(): the damage system reads game.state through a getter, so this
     // clears the NEW run's ledger and windows rather than the state just thrown away.
     damage.reset();
+    cargo.tripCount = game.state.tripCount;   // M13: trip 1 again (route.reset() above is the heading)
     attachDoorState();        // M11: the new run has removed no door yet
 
     // Re-attach what the fresh state does not know about.
@@ -1354,20 +1390,32 @@ async function boot() {
    *  disagree with the contract panel above it. Device-neutral on purpose — it names the
    *  PLACE, and the prompt under the reticle names the key when you get there. */
   function objectiveFor(facts, routeStatus) {
+    const trip = facts.trip || 1;
+    const away = facts.away || 0;
     switch (facts.phase) {
       case PHASES.PICKUP: {
-        if (facts.loaded === 0) return 'carry a box to the truck out front';
         const left = facts.total - facts.delivered - facts.loaded;
+        // M13: back at the house for more — the player knows where the truck is by now.
+        if (trip > 1) return left > 0 ? `trip ${trip} — load ${left} more, or drive from the cab` : `trip ${trip} — all aboard, drive from the cab`;
+        if (facts.loaded === 0) return 'carry a box to the truck out front';
         return left > 0 ? `load ${left} more, or drive from the cab` : 'all aboard — drive from the cab';
       }
-      case PHASES.TRANSIT:
-        return routeStatus && routeStatus.state === 'driving'
-          ? `on the road — ${routeStatus.event || Math.round(routeStatus.progress * 100) + '% there'}`
-          : 'on the road';
+      case PHASES.TRANSIT: {
+        const driving = routeStatus && routeStatus.state === 'driving';
+        const back = routeStatus && routeStatus.heading === 'back';   // M13
+        if (!driving) return back ? 'heading back' : 'on the road';
+        const where = routeStatus.event || Math.round(routeStatus.progress * 100) + '% there';
+        return back ? `heading back — ${where}` : `on the road — ${where}`;
+      }
       case PHASES.DELIVERY: {
         const left = facts.total - facts.delivered;
         // M12: an item whose legs are elsewhere is not delivered; the line says why (§26.7).
         const parts = facts.piecesMissing > 0 ? ` — ${facts.piecesMissing} loose part${facts.piecesMissing === 1 ? '' : 's'} still to bring in` : '';
+        /* M13: with the truck empty and nothing left at the site to carry in, what is left
+         * is at the old house — the line names §3.4's choice, and the cab prices it. */
+        // Truck empty and anything still away: rows already at the site settle on their own (review
+        // minor, Phase 21) — the drive back is the only thing left to DO.
+        if (facts.loaded === 0 && away > 0) return `drive back for ${away} more, or settle up at the cab${parts}`;
         return left > 0 ? `unload — ${left} left, each to its room${parts}` : 'all delivered — settle up at the cab';
       }
       case PHASES.SETTLEMENT: return 'settling up';
@@ -1583,6 +1631,8 @@ async function boot() {
      * tool that used to call renderer.render() directly goes through here now, because a
      * direct render draws a shadowless, ungraded frame with no error. */
     renderTier, post, blobs,
+    /* M14: the property-damage decal ring and the static colliders with their tags. */
+    scuffs, statics,
     present: (cam) => {
       const w = canvas.clientWidth || 0, h = canvas.clientHeight || 0;
       const list = cam ? [{ camera: cam }] : Array.from({ length: seatCount }, (_, s) => moverOfSeat(s));

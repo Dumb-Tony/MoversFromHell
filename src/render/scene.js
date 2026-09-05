@@ -478,7 +478,10 @@ export function buildScene(renderTier = 'gpu') {
     hd.position.set(a.x, DOOR_H + headerH / 2, WALL_Z);
     hd.castShadow = true;
     scene.add(hd);
-    addCollider(a.x, WALL_Z, a.gap, WALL_T, DOOR_H, WALL_H, 'doorHeader');
+    // Tagged per aperture (M14) so a knock on the 34" door's header is billed as
+    // 'door34 door frame' and not as an anonymous header — the interior headers below
+    // have carried `doorHeader_${id}` since Phase 5; nothing reads the bare name.
+    addCollider(a.x, WALL_Z, a.gap, WALL_T, DOOR_H, WALL_H, `doorHeader_${a.id}`);
 
     // Jambs in the lime reference colour: the clearance is the thing being measured.
     // Green jamb = the couch fits through it, coral = it does not. Colour-independent

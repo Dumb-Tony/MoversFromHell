@@ -39,8 +39,11 @@ export function createTelemetryCounters() {
     drops: 0,
     /** Mover AND object recoveries — one RECOVERY stream (main.js movers, registry.recover). */
     recoveries: 0,
-    /** DAMAGE_APPLIED — one per closed §8.3 aggregation window, i.e. one per ledger line. */
+    /** DAMAGE_APPLIED — one per closed §8.3 aggregation window, i.e. one per ITEM ledger line. */
     damageEvents: 0,
+    /** DAMAGE_APPLIED with category 'property' (M14) — one per property ledger line, counted
+     *  apart so damageEvents === ledger.itemDamage.length holds on the first wall hit. */
+    propertyEvents: 0,
     /** IMPACT — every damaging contact step, before aggregation. */
     impacts: 0,
     /** §10.3 strap use, by the state the strap entered. `placed` is the attach itself. */
@@ -74,7 +77,10 @@ export function countEvent(c, evt) {
     case EVENTS.GRIP_STARTED:   c.grips++; break;
     case EVENTS.GRIP_ENDED:     if (evt.reason !== 'released') c.drops++; break;
     case EVENTS.RECOVERY:       c.recoveries++; break;
-    case EVENTS.DAMAGE_APPLIED: c.damageEvents++; break;
+    case EVENTS.DAMAGE_APPLIED:
+      if (evt.category === 'property') c.propertyEvents = (c.propertyEvents || 0) + 1;
+      else c.damageEvents++;
+      break;
     case EVENTS.IMPACT:         c.impacts++; break;
     case EVENTS.STRAP_CHANGED: {
       // An attach arrives as state 'slack' with the anchor named (straps.js attach); every
@@ -206,6 +212,7 @@ export function buildRunSummary(state, invoice, review, summary, stats, recorder
       drops: c.drops,
       recoveries: c.recoveries,
       damageEvents: c.damageEvents,
+      propertyEvents: c.propertyEvents || 0,
       impacts: c.impacts,
       straps: { ...c.straps },
       cargo: { ...c.cargo },
@@ -214,7 +221,11 @@ export function buildRunSummary(state, invoice, review, summary, stats, recorder
       partChanges: c.partChanges,
       piecesCreated: c.piecesCreated || 0,
       piecesLeftBehind: c.piecesLeftBehind || 0,
-      /** Constant 1 in this build (state.tripCount is never written — recorded honestly). */
+      /** state.tripCount, written by the 'phase' system when a return leg arrives back at
+       *  the house (M13; §3.4 "crew elects another trip"). Note for the cargo-motion
+       *  signals beside it: worstCargoShift is the MAX over every leg driven, while
+       *  cargo.shifted / cargo.measured are the LAST leg's — an empty return leg measures
+       *  whatever was still aboard. */
       trips: (stats && stats.trips) || state.tripCount || 1,
       worstCargoShift: Math.round((c.worstCargoShift || 0) * TELEMETRY.precision.metres) / TELEMETRY.precision.metres,
     },

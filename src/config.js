@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 20,
-  label: 'phase-20',
+  phase: 21,
+  label: 'phase-21',
   date: '2026-09-04',
 });
 
@@ -584,6 +584,28 @@ export const DAMAGE = Object.freeze({
     impulseThreshold: 12,
     costPerImpulse: 1.6,
     maxChargePerSurface: 400,   // §8.3 "maximum charge"
+    /* Phase 11 build-side M14 — the line is written now (damage.js _closePropWindow).
+     * minStepImpulse: N·s of the object's OWN lost speed (m·Δv) below which a step is
+     *   solver jitter, not a hit — a 9 kg box sliding on carpet loses ~1.0 N·s a step to
+     *   friction, a 110 kg fridge leaning on a wall ~0. Attribution (the narrow-phase read)
+     *   only runs above it.
+     * bands: by WINDOW impulse, for the notice, the audio variant and the decal size; the
+     *   cost stays linear above impulseThreshold. 9 kg box at 4 m/s = 36 → scuffed; the TV
+     *   at 2 m/s = 44 → dented; the couch at 1.1 m/s = 99, the fridge at 1 m/s = 110 → holed.
+     * decals: §26.6 "no unbounded growth in decals" — a ring of `max` quads, pre-allocated
+     *   at boot and reused oldest-first (scuffs.js); `proud` keeps them off the wall face. */
+    minStepImpulse: 1.5,
+    bands: [
+      { name: 'scuffed', min: 12 },
+      { name: 'dented',  min: 40 },
+      { name: 'holed',   min: 100 },
+    ],
+    decals: {
+      max: 24,
+      size: { scuffed: 0.12, dented: 0.20, holed: 0.30 },
+      proud: 0.003,
+      opacity: 0.35,
+    },
   },
   /** §7.3 + §8.3: "aggregate repeated scrape contacts into one coherent damage event".
    *  Without this a couch dragged along a wall bills the player forty times. */
@@ -885,8 +907,30 @@ export const ECONOMY = Object.freeze({
    *  of it, pro rata. Not zero — §2.3 wants trying-and-mostly-succeeding to beat not trying. */
   roomAccuracyPartial: 0.5,
 
-  /** §13.3's "short contained street". The prototype route is one leg of it. */
+  /** §13.3's "short contained street". The prototype route is one leg of it. The invoice
+   *  bills 2 × tripCount − 1 legs of it (M13): every return trip is out-and-back again. */
   routeDistanceKm: 4.2,
+
+  /** §12.2's "partial completion, extra cost" priced (M13): per REQUIRED manifest row not
+   *  delivered when the crew settles up — the customer's item is still in the old house
+   *  (or on the truck, or on the kerb: not delivered is not delivered). A PRODUCT number,
+   *  so the arithmetic it was chosen against is here to be argued with:
+   *
+   *    going back for more costs, before a single item is carried,
+   *      fuel    2 legs × 4.2 km × 3.2/km            = 26.88
+   *      labour  2 × 28 s = 0.93 min × 14 × 2 movers = 26.13
+   *                                                   ≈ 53.01
+   *    plus whatever the loading itself takes (a minute for a box is 28 of labour).
+   *
+   *  At 60 the fee for ONE forgotten box is close to the bare return legs and cheaper than
+   *  the legs plus the loading — a defensible call either way, which is what makes it a
+   *  decision (§12.1 "one trip" is an OPTIONAL goal, not a rule); THREE items left (180)
+   *  are dearer than any return, so a careless pack is worth going back for. Twenty-three
+   *  (1380) exceeds the base 900 — §15.2's "negative profit still completes the job", by
+   *  design. Charged on top of PARTS_LEFT: that line is the customer's property (a leg's
+   *  replacement value), this one is the contract's completion (§15.1 base "rewards
+   *  completion and scope"). */
+  leftBehindFee: 60,
 });
 
 /** §18.3 recovery. Validated: Phase 5. */

@@ -41,9 +41,27 @@ export const LINE_KINDS = Object.freeze({
   /** M12 (§15.1 names what was lost; §9.1 "loose pieces get lost"): detached parts that
    *  never reached the destination, priced per piece from its replacementValue share. */
   PARTS_LEFT: 'parts left behind',
+  /** M13 (§12.2 "partial completion, extra cost"; §15.1 base "rewards completion and
+   *  scope"): every required row NOT delivered when the crew settled, at
+   *  ECONOMY.leftBehindFee each. The evidence is the row itself, undelivered. */
+  LEFT_BEHIND: 'items left behind',
   VIOLATIONS: 'violations',
   RECOVERY: 'recovery/service fees',
 });
+
+/**
+ * How many legs of ECONOMY.routeDistanceKm the truck drove, from the trip count (M13).
+ * Settlement only happens at the destination (the cab's settle branch needs route ARRIVED
+ * in DELIVERY), so trip n ended with n outward legs and n − 1 returns: 2n − 1. If a later
+ * milestone lets the crew settle at the pickup house (§3.4 "crew elects"), this must become
+ * a RECORDED count on state — legsDriven, incremented per arrival — rather than a derivation.
+ */
+export function legsDriven(state) { return 2 * Math.max(1, state.tripCount || 1) - 1; }
+
+/** The undelivered required rows — the LEFT_BEHIND line's evidence, and reconcile()'s. */
+export function itemsLeftBehind(state) {
+  return (state.manifest || []).filter((r) => r.required !== false && !r.delivered);
+}
 
 /* 'couch_3seat_01' -> 'couch 3seat', the words every prompt uses for the object. */
 const wordsOf = (id) => (id || '').replace(/_\d+$/, '').replace(/_/g, ' ');
@@ -154,8 +172,11 @@ export function buildInvoice(state, summary, opts = {}) {
         `${overtimeMin.toFixed(1)} min over, x${ECONOMY.overtimeMultiplier}`, ['clock']);
   }
 
-  add(LINE_KINDS.FUEL, -(distanceKm * ECONOMY.fuelPerKm),
-      `${distanceKm.toFixed(1)} km @ ${ECONOMY.fuelPerKm}/km`, ['route']);
+  /* §2.2 "an extra trip costs fuel and time; work continues" (M13). The time is already on
+   * the labour clock (Game.step bills TRANSIT like any phase); the fuel is per LEG. */
+  const legs = legsDriven(state);
+  add(LINE_KINDS.FUEL, -(legs * distanceKm * ECONOMY.fuelPerKm),
+      `${legs} leg${legs === 1 ? '' : 's'} x ${distanceKm.toFixed(1)} km @ ${ECONOMY.fuelPerKm}/km`, ['route']);
 
   /* §8.4: "object/location, category, condition change, repair or replacement cost". These
    * come straight off the ledger the damage system wrote AS IMPACTS HAPPENED. Nothing is
@@ -169,10 +190,15 @@ export function buildInvoice(state, summary, opts = {}) {
         itemLines.map((l) => l.entityId));
   }
 
+  /* §15.1's OTHER damage line (M14): the property ledger damage.js writes per entity-and-
+   * surface window — a location, a category, an impulse and a cost, one entry per impact
+   * (§26.4). Its evidence is one citation per entry, the surface it names. */
   const propLines = state.ledger.propertyDamage || [];
   const propTotal = propLines.reduce((s, l) => s + (l.cost || 0), 0);
   if (propTotal > 0) {
-    add(LINE_KINDS.PROPERTY_DAMAGE, -propTotal, `${propLines.length} surfaces`,
+    const surfaces = new Set(propLines.map((l) => l.surfaceId || 'surface')).size;
+    add(LINE_KINDS.PROPERTY_DAMAGE, -propTotal,
+        `${propLines.length} impact${propLines.length === 1 ? '' : 's'} on ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
         propLines.map((l) => l.surfaceId || 'surface'));
   }
 
@@ -187,6 +213,18 @@ export function buildInvoice(state, summary, opts = {}) {
     add(LINE_KINDS.PARTS_LEFT, -leftTotal,
         'parts left at pickup — ' + left.map((l) => `${wordsOf(l.defId)}: ${l.missing} of ${l.of} ${l.part}`).join(', '),
         left.map((l) => l.rowId));
+  }
+
+  /* §12.2 sanctions "partial completion, extra cost, negative profit" and until M13 the first
+   * was free: a crew that settled with twenty items still in the house took the full base.
+   * Each undelivered required row is priced at ECONOMY.leftBehindFee (the reasoning is
+   * beside the number in config.js) and cites its row — the same rows summary.delivered
+   * was counted from, so the line and the completeness grade cannot disagree. */
+  const leftBehind = itemsLeftBehind(state);
+  if (leftBehind.length > 0 && summary.delivered < summary.total) {
+    add(LINE_KINDS.LEFT_BEHIND, -(leftBehind.length * ECONOMY.leftBehindFee),
+        `${leftBehind.length} of ${summary.total} not delivered @ ${ECONOMY.leftBehindFee} each`,
+        leftBehind.map((r) => r.id));
   }
 
   if (collisions > 0) {
@@ -226,6 +264,10 @@ export function buildInvoice(state, summary, opts = {}) {
 export function gradeFor(profit, income, summary, itemLines = []) {
   const margin = income > 0 ? profit / income : 0;
   const completeness = summary.total > 0 ? summary.delivered / summary.total : 0;
+  /* ITEM lines only, on purpose (M14): §15.2's "damage ratio" is furniture — how much of
+   * the customer's manifest arrived marked. Property damage already lowers the margin
+   * through its own §15.1 line, and counting a wall twice would grade a scraped hallway as
+   * a broken television. */
   const damaged = new Set(itemLines.map((l) => l.entityId)).size;
   const damageRatio = summary.total > 0 ? damaged / summary.total : 0;
 
@@ -254,8 +296,36 @@ export function gradeFor(profit, income, summary, itemLines = []) {
  */
 export function reconcile(invoice, state, opts = {}) {
   const problems = [];
-  const { recoveries = 0, collisions = 0 } = opts;
+  const { recoveries = 0, collisions = 0, distanceKm = ECONOMY.routeDistanceKm } = opts;
   const find = (kind) => invoice.lines.find((l) => l.kind === kind);
+
+  /* Fuel must be the legs the trip count says were driven (M13) — see legsDriven() for why
+   * the count is derived from tripCount today and when it would have to be recorded. */
+  const fuelLine = find(LINE_KINDS.FUEL);
+  const expectFuel = Number((legsDriven(state) * distanceKm * ECONOMY.fuelPerKm).toFixed(2));
+  if (!fuelLine) problems.push(`${legsDriven(state)} legs were driven and no vehicle/fuel was billed`);
+  else if (Math.abs(-fuelLine.amount - expectFuel) > 0.01) {
+    problems.push(`vehicle/fuel ${-fuelLine.amount} does not match ${legsDriven(state)} legs (${expectFuel})`);
+  }
+
+  /* Items left behind must be the undelivered rows, to the cent, citing each one (M13). */
+  const leftRows = itemsLeftBehind(state);
+  const expectLeftBehind = Number((leftRows.length * ECONOMY.leftBehindFee).toFixed(2));
+  const leftBehindLine = find(LINE_KINDS.LEFT_BEHIND);
+  if (leftRows.length > 0) {
+    if (!leftBehindLine) problems.push(`${leftRows.length} items left behind and the invoice has no line`);
+    else {
+      if (Math.abs(-leftBehindLine.amount - expectLeftBehind) > 0.01) {
+        problems.push(`items left behind ${-leftBehindLine.amount} does not match the manifest's ${expectLeftBehind}`);
+      }
+      const ids = new Set(leftRows.map((r) => r.id));
+      if (leftBehindLine.from.length !== ids.size || leftBehindLine.from.some((id) => !ids.has(id))) {
+        problems.push(`items left behind cites ${leftBehindLine.from.length} rows, the manifest has ${ids.size} undelivered`);
+      }
+    }
+  } else if (leftBehindLine) {
+    problems.push('an items-left-behind line exists with everything delivered');
+  }
 
   // Every line must name its evidence.
   for (const l of invoice.lines) {
@@ -278,6 +348,24 @@ export function reconcile(invoice, state, opts = {}) {
     }
   } else if (itemLine) {
     problems.push('an item-damage line exists with nothing in the ledger');
+  }
+
+  // Property damage must equal ITS ledger, to the cent, and cite every entry (M14).
+  const propLines = state.ledger.propertyDamage || [];
+  const propTotal = Number(propLines.reduce((s, l) => s + (l.cost || 0), 0).toFixed(2));
+  const propLine = find(LINE_KINDS.PROPERTY_DAMAGE);
+  if (propTotal > 0) {
+    if (!propLine) problems.push(`ledger has ${propTotal} of property damage and the invoice has no line`);
+    else {
+      if (Math.abs(-propLine.amount - propTotal) > 0.01) {
+        problems.push(`property damage ${-propLine.amount} does not match the ledger's ${propTotal}`);
+      }
+      if (propLine.from.length !== propLines.length) {
+        problems.push(`property damage cites ${propLine.from.length} events, ledger has ${propLines.length}`);
+      }
+    }
+  } else if (propLine) {
+    problems.push('a property-damage line exists with nothing in the ledger');
   }
 
   // Recovery fees must equal the recoveries that were actually performed.
@@ -349,6 +437,10 @@ export function reviewFor(invoice, state, summary, opts = {}) {
     else tags.push('minor_damage');
   }
   if ((opts.recoveries || 0) > 0) tags.push('needed_a_callout');
+  /* M14: the walls. An ACTUAL event tag off the property ledger (§15.2), never off where
+   * anything ended up. Cost > 0, because a window that rounds to nothing writes no line. */
+  const propLines = state.ledger.propertyDamage || [];
+  if (propLines.reduce((s, l) => s + (l.cost || 0), 0) > 0) tags.push('marked_the_walls');
   if (state.tripCount > 1) tags.push('extra_trip');
   if (invoice.profit < 0) tags.push('cost_them_money');
   /* §15.2's own example tag (M11). state.doors is written by main.js from DOOR_STATE
@@ -379,6 +471,7 @@ export function reviewFor(invoice, state, summary, opts = {}) {
     parts_left_behind: 58,
     extra_trip: 55,
     front_door_removed: 50,   // remarkable, and not a complaint: it went back on (M11)
+    marked_the_walls: 50,     // a mark on the hallway is a complaint, a small one (M14)
     minor_damage: 40,
     every_room_right: 30,
     everything_delivered: 20,
@@ -409,6 +502,7 @@ const TEMPLATES = Object.freeze({
   front_door_removed: 'They took the front door off its hinges. It is back on. I think.',
   cost_them_money: 'I am not sure they made anything on this. That is not my problem.',
   parts_left_behind: 'The couch arrived. Its legs are in the old house.',
+  marked_the_walls: 'There is a new mark on the hallway wall. It is exactly couch height.',
   default: 'They came, they moved things, they left.',
 });
 
@@ -417,11 +511,14 @@ const TEMPLATES = Object.freeze({
  *  never a leaderboard, and nothing here is scored. */
 export function contributionStats(state, extra = {}) {
   const itemLines = state.ledger.itemDamage || [];
+  const propLines = state.ledger.propertyDamage || [];
   return {
     itemsDelivered: (state.manifest || []).filter((r) => r.delivered).length,
     strapsPlaced: extra.strapsPlaced || 0,
     recoveries: extra.recoveries || 0,
     damageEvents: itemLines.length,
+    /** §15.3 "damage involvement" — property lines this run (M14). A count, never a score. */
+    propertyEvents: propLines.length,
     heaviestMoved: extra.heaviestMoved || 0,
     trips: state.tripCount || 1,
   };

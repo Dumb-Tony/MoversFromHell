@@ -89,6 +89,32 @@ export class PhysicsWorld {
 
     /** Bookkeeping for the §22.5 overlay: bodies, colliders, constraints, contacts. */
     this.stats = { bodies: 0, colliders: 0, constraints: 0, contacts: 0 };
+
+    /* THE STATIC TAG MAP (Phase 11 build-side M14). Every static collider this world builds
+     * is remembered by handle with the tag it was built from — the scene's shared AABB record
+     * tag ('wall', 'doorHeader_door34', 'truckHeadboard', …), 'ground' and 'ramp' for the two
+     * built here. §8.4 wants property damage attributable to a LOCATION, and until this map
+     * existed addStaticFromColliders returned {body, collider, tag} to a caller that threw it
+     * away, so nothing could say WHAT an object hit. tagOf() is the read side, mirroring
+     * ObjectRegistry.fromCollider for entities: a static collider answers with its tag, an
+     * entity's or a mover's answers null. */
+    this.staticTags = new Map();
+    /** Every static built, in build order: {body, collider, tag}. */
+    this.statics = [];
+  }
+
+  /** The tag of a static collider (or its handle), or null for anything that is not one. */
+  tagOf(colliderOrHandle) {
+    if (colliderOrHandle == null) return null;
+    const h = typeof colliderOrHandle === 'number' ? colliderOrHandle : colliderOrHandle.handle;
+    return this.staticTags.has(h) ? this.staticTags.get(h) : null;
+  }
+
+  _registerStatic(body, collider, tag) {
+    this.staticTags.set(collider.handle, tag);
+    const rec = { body, collider, tag };
+    this.statics.push(rec);
+    return rec;
   }
 
   /* RAYCASTING AND THE QUERY PIPELINE — MEASURED, 2026-08-19, Rapier 0.20.0.
@@ -196,7 +222,7 @@ export class PhysicsWorld {
     const col = this.world.createCollider(
       R.ColliderDesc.cuboid(size / 2, thickness / 2, size / 2).setFriction(0.9)
         .setCollisionGroups(GROUP_PRESETS.world), body);
-    return { body, collider: col };
+    return this._registerStatic(body, col, 'ground');
   }
 
   /** Build static colliders from the scene's shared AABB records (§8.1: the visible
@@ -221,7 +247,7 @@ export class PhysicsWorld {
       const friction = c.friction !== undefined ? c.friction : 0.8;
       const col = this.world.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setFriction(friction)
         .setCollisionGroups(GROUP_PRESETS.world), body);
-      out.push({ body, collider: col, tag: c.tag });
+      out.push(this._registerStatic(body, col, c.tag));
     }
     return out;
   }
@@ -237,7 +263,8 @@ export class PhysicsWorld {
     const col = this.world.createCollider(
       R.ColliderDesc.cuboid(width / 2, thickness / 2, length / 2).setFriction(0.9)
         .setCollisionGroups(GROUP_PRESETS.world), body);
-    return { body, collider: col, angleRad };
+    this._registerStatic(body, col, 'ramp');
+    return { body, collider: col, angleRad, tag: 'ramp' };
   }
 
   free() {

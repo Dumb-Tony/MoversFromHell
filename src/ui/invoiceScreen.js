@@ -164,6 +164,7 @@ export class InvoiceScreen {
       ['straps placed', `${stats.strapsPlaced}`],
       ['recovery callouts', `${stats.recoveries}`],
       ['damage events', `${stats.damageEvents}`],
+      ['surfaces marked', `${stats.propertyEvents || 0}`],
       ['heaviest thing moved', `${Math.round(stats.heaviestMoved)} kg`],
       ['trips', `${stats.trips}`],
     ].map(([k, v]) => `<div class="stat"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');

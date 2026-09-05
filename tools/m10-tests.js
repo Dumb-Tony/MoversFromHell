@@ -134,6 +134,12 @@ lines.push('--- A. the invoice formula (GDD §15.1) ---');
      !!inv.lines.find((l) => l.kind === LINE_KINDS.LABOUR));
   ok('A3 …and a fuel line (§15.1 vehicle/fuel)',
      !!inv.lines.find((l) => l.kind === LINE_KINDS.FUEL));
+  /* Phase 11 build-side M13: fuel is per LEG (2 x tripCount - 1). One trip is one leg of
+   * ECONOMY.routeDistanceKm, so the single-trip invoice is the number it always was. */
+  const fuel = inv.lines.find((l) => l.kind === LINE_KINDS.FUEL) || { amount: NaN, detail: '' };
+  near('A3 …charging exactly one leg of routeDistanceKm x fuelPerKm with tripCount 1 (M13)',
+       fuel.amount, -(ECONOMY.routeDistanceKm * ECONOMY.fuelPerKm), 0.005);
+  ok('A3 …and the detail says so: /1 leg/', /1 leg\b/.test(fuel.detail), fuel.detail);
 
   /* §15.1 is an ADDITION: "Profit = base contract + bonuses + tips - labor time - overtime
    * - vehicle/fuel - property damage - item damage - violations - recovery/service fees."
@@ -226,6 +232,52 @@ lines.push('--- B. the gate: ledger matches events ---');
   missing.lines = missing.lines.filter((l) => l.kind !== LINE_KINDS.ITEM_DAMAGE);
   const bad2 = reconcile(missing, game.state, { recoveries: 2, collisions: 1 });
   ok('B12 …and one that quietly drops a ledger entry', !bad2.ok, bad2.problems.join(' | '));
+}
+emit('running...');
+
+/* ── B13-B15 (Phase 11 build-side M14). the gate holds for the PROPERTY line too ─────
+ * §15.1's other damage line is written now (damage.js, ledger.propertyDamage). A real hit —
+ * the m22 PD2 fixture: box_small_01 resting 0.16 m off the front wall's outer face, then
+ * 4 m/s into it — and the same three refusals B10-B12 make for item damage. */
+lines.push('--- B13-B15 (M14). the property line is derived, cited and gated the same way ---');
+{
+  const box = [...registry.entities.values()].find((e) => e.defId === 'box_small_01');
+  const before = game.state.ledger.propertyDamage.length;
+  parkAt(box, 1.60, 0.27, -1.50);
+  step(30);
+  box.body.setLinvel({ x: 0, y: 0, z: -4.0 }, true);
+  box.body.wakeUp();
+  step(90);
+  damage.flush();
+  const propLedger = game.state.ledger.propertyDamage;
+  const propTotal = Number(propLedger.reduce((s, l) => s + l.cost, 0).toFixed(2));
+  const opts = { recoveries: 2, collisions: 1 };
+  const inv = buildInvoice(game.state, manifestSummary(rows), opts);
+  const pl = inv.lines.find((l) => l.kind === LINE_KINDS.PROPERTY_DAMAGE);
+  lines.push(`      ${propLedger.length - before} property line(s) from the throw: ` +
+             propLedger.slice(before).map((l) => `${l.location} ${l.band} ${l.cost.toFixed(2)} (${l.impulse} N·s)`).join(', '));
+  ok('B13 a real wall hit wrote one property line; the invoice charges exactly it, cites it, and reconcile() agrees',
+     propLedger.length - before === 1 && !!pl && Math.abs(-pl.amount - propTotal) <= 0.01 && pl.from.length === propLedger.length &&
+     reconcile(inv, game.state, opts).ok,
+     pl ? `${-pl.amount} vs ${propTotal}, cites ${pl.from.length}/${propLedger.length}: ${reconcile(inv, game.state, opts).problems.join(' | ')}` : 'no property line');
+  // (a) a ledger entry deleted after the invoice was built.
+  const s2 = JSON.parse(JSON.stringify(game.state)); s2.ledger.propertyDamage.pop();
+  const badA = reconcile(inv, s2, opts);
+  // One line on the ledger, so deleting it empties the ledger: the refusal is the
+  // 'property-damage line exists with nothing in the ledger' one (B15's), naming the line.
+  ok('B13a …and an entry deleted after the invoice was built is refused, naming property damage',
+     !badA.ok && badA.problems.some((p) => /property[ -]damage/.test(p)), badA.problems.join(' | '));
+  // (b) the amount off by 1.00.
+  const inv2 = JSON.parse(JSON.stringify(inv));
+  const pl2 = inv2.lines.find((l) => l.kind === LINE_KINDS.PROPERTY_DAMAGE);
+  pl2.amount = Number((pl2.amount - 1).toFixed(2)); inv2.profit = Number((inv2.profit - 1).toFixed(2));
+  const badB = reconcile(inv2, game.state, opts);
+  ok('B14 a property amount off by 1.00 is refused', !badB.ok && badB.problems.some((p) => p.includes('property damage')), badB.problems.join(' | '));
+  // (c) a property line over an empty ledger.
+  const s3 = JSON.parse(JSON.stringify(game.state)); s3.ledger.propertyDamage = [];
+  const badC = reconcile(inv, s3, opts);
+  ok('B15 a property line with nothing in the ledger is "exists with nothing in the ledger"',
+     !badC.ok && badC.problems.some((p) => p.includes('exists with nothing in the ledger')), badC.problems.join(' | '));
 }
 emit('running...');
 

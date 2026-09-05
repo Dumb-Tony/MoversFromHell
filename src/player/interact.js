@@ -37,7 +37,7 @@
  * made, 7 honoured." That test is the reusable part.
  */
 
-import { TOOLS, GRIP, DOOR } from '../config.js';
+import { TOOLS, GRIP, DOOR, ECONOMY } from '../config.js';
 import { EVENTS, PHASES } from '../core/eventBus.js';
 import { disassemble, reassemble, currentDimensions, partStatus } from '../tools/tools.js';
 import { cargoAnchors, cabPoint, insideCargo, rampAnchorPoint, CARGO_BOX } from '../world/truck.js';
@@ -78,10 +78,15 @@ export class InteractionSystem {
    *        seconds are spent HERE, on the clock the invoice reads, rather than by freezing
    *        the player for a minute — the cost is real and the hands stay free. Defaults to
    *        a no-op for suites that build this system without a Game. Phase 11 M8.
+   * @param {()=>{away:number}} [tripStatus]  how many manifest rows still need another
+   *        trip (manifest.js tripStatus — 'away' rows: not on the truck, not at the
+   *        destination, or with a loose piece that is neither). The cab reads it at the
+   *        destination to offer §3.4's "crew elects another trip" beside settling up (M13).
+   *        Defaults to nothing away, which is today's single-trip cab.
    */
   constructor({ physics, registry, tools, straps, cargo, route, rig, camera, bus,
                 setPhase = null, now = null, manifestRow = null, roomLabel = null,
-                chargeWorkMs = null }) {
+                chargeWorkMs = null, tripStatus = null }) {
     this.physics = physics;
     this.registry = registry;
     this.tools = tools;
@@ -96,6 +101,7 @@ export class InteractionSystem {
     this.manifestRow = typeof manifestRow === 'function' ? manifestRow : () => null;
     this.roomLabel = typeof roomLabel === 'function' ? roomLabel : (id) => id;
     this.chargeWorkMs = typeof chargeWorkMs === 'function' ? chargeWorkMs : () => {};
+    this.tripStatus = typeof tripStatus === 'function' ? tripStatus : () => ({ away: 0 });
 
     /** Per-mover interaction state, keyed by the mover's stable id (§22.4). */
     this.state = new Map();
@@ -300,7 +306,7 @@ export class InteractionSystem {
         return { primary: 'start a strap here', secondary: null, target: t };
 
       case TARGET.CAB:
-        return { primary: this._cabLabel(), secondary: null, target: t };
+        return { primary: this._cabLabel(), secondary: this._cabSecondary(), target: t };
 
       case TARGET.OBJECT: {
         const e = t.entity;
@@ -432,13 +438,35 @@ export class InteractionSystem {
     return entry ? entry.part : null;
   }
 
+  /** How many rows still need another trip, as the cab sees it — only at the destination
+   *  (route ARRIVED); parked at the house the question does not arise. M13. */
+  _away() {
+    if (this.route.state !== 'arrived') return 0;
+    const s = this.tripStatus();
+    return s && s.away > 0 ? s.away : 0;
+  }
+
+  /* THE CHOICE AT THE CAB (M13; §3.4 Pickup exit "required cargo loaded OR CREW ELECTS
+   * ANOTHER TRIP", §12.2 "partial completion, extra cost"). With items still at the old
+   * house, E is the trip back and Q is settling without them — and the prompt prices the
+   * second in advance (§4.4: the key means what the line said; §2.1: told before, never
+   * refused after). With nothing away the cab is what it always was. */
   _cabLabel() {
     if (this.route.state === 'parked') {
       const advice = this.route.canDepart();
       return advice.warn ? `drive to the destination — ${advice.reason}` : 'drive to the destination';
     }
-    if (this.route.state === 'arrived') return 'finish the job and settle up';
+    if (this.route.state === 'arrived') {
+      const away = this._away();
+      return away > 0 ? `drive back for ${away} more` : 'finish the job and settle up';
+    }
     return null;
+  }
+
+  _cabSecondary() {
+    const away = this._away();
+    if (away <= 0) return null;
+    return `settle up — leave ${away} behind (${(away * ECONOMY.leftBehindFee).toFixed(2)})`;
   }
 
   /* ── acting ───────────────────────────────────────────────────────────────────── */
@@ -510,6 +538,16 @@ export class InteractionSystem {
       const tool = this.tools.get(s.carriedTool);
       this._putDown(mover, tool, t);
       return this._say(`put down the ${tool.def.label.toLowerCase()}`);
+    }
+
+    /* Q at the cab, empty-handed, with items still away: settle without them (M13). AFTER
+     * the put-downs above, because describe() promises "put down the …" whenever a tool is
+     * carried, whatever is under the reticle — m11 B6 holds the prompt to its word. */
+    if (t.kind === TARGET.CAB) {
+      const away = this._away();
+      if (away <= 0) return null;
+      this.setPhase(PHASES.SETTLEMENT, { ok: true, leftBehind: away });
+      return this._say(`settling up — ${away} left behind`);
     }
 
     if (t.kind === TARGET.OBJECT) {
@@ -704,6 +742,15 @@ export class InteractionSystem {
       return this._say(advice.warn ? `driving — ${advice.reason}` : 'driving');
     }
     if (this.route.state === 'arrived') {
+      /* §3.4's "crew elects another trip" (M13): the same timeline, heading back; the
+       * 'phase' system in main.js turns its arrival into PICKUP with tripCount + 1. A PHASE
+       * event, not a teleport — the truck never moves and both sites share one world. */
+      const away = this._away();
+      if (away > 0) {
+        this.route.depart({ heading: 'back' });
+        this.setPhase(PHASES.TRANSIT, { ok: true, returning: true, remaining: away });
+        return this._say(`driving back for ${away} more`);
+      }
       this.setPhase(PHASES.SETTLEMENT);
       return this._say('settling up');
     }

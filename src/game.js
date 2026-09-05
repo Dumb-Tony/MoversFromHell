@@ -45,7 +45,10 @@ export function createInitialState({ contractId = 'suburban_starter', seed = nul
     elapsedWorkMs: 0,
     estimateMs: 18 * 60 * 1000,        // §3.2 intro tier: 12-20 minutes
     overtimeTier: 0,
-    tripCount: 0,
+    /** The first trip IS trip 1 (M13): §10.2's per-item stamps (cargo.js loadedOnTrip) and
+     *  §23.2's tripCount agree from boot, and the 'phase' system adds one each time a
+     *  return leg arrives back at the house (§3.4 "crew elects another trip"). */
+    tripCount: 1,
 
     manifest: [],                      // filled at Phase 5
     entities: {},                      // id -> object runtime state (§7.2), Phase 2+

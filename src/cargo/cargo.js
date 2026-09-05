@@ -42,6 +42,9 @@ export class CargoSystem {
     this.straps = straps;
     this.tools = tools;
     this.bus = bus;
+    /** The trip an item settling in NOW is loaded on. Synced from game.state.tripCount by
+     *  main.js (the 'phase' system on a return arrival, resetContract after game.reset) —
+     *  the state is the record (§23.2), this is the stamp it hands out (§10.2). M13. */
     this.tripCount = 1;
   }
 

@@ -58,13 +58,21 @@ export class RouteDriver {
     this.fired = new Set();
     /** §11.2: "Driver can glance at a coarse cargo-status indicator." */
     this.activeEvent = null;
+    /** Which way this leg goes: 'out' (pickup -> destination) or 'back' (the §3.4 "crew
+     *  elects another trip" return, M13). ONE timeline for both — §11.1 asks for "a few
+     *  meaningful force events", and an empty or half-empty truck meets the same three
+     *  hazards on the way back. The heading is what the 'phase' system forks on at arrival:
+     *  'out' promotes to DELIVERY, 'back' returns to PICKUP with tripCount + 1. */
+    this.heading = 'out';
   }
 
   /** §3.4's TRANSIT phase begins. Nothing checks whether the load is secured first — see
-   *  the note in canDepart(). */
-  depart() {
+   *  the note in canDepart(). Restarting from ARRIVED is the return leg (M13): the timeline
+   *  simply runs again, `heading` says which way. */
+  depart({ heading = 'out' } = {}) {
     if (this.state === DRIVE_STATE.DRIVING) return false;
     this.state = DRIVE_STATE.DRIVING;
+    this.heading = heading === 'back' ? 'back' : 'out';
     this.elapsedS = 0;
     this.fired.clear();
     this.activeEvent = null;
@@ -129,6 +137,7 @@ export class RouteDriver {
   status() {
     return {
       state: this.state,
+      heading: this.heading,
       elapsedS: Number(this.elapsedS.toFixed(2)),
       progress: Math.min(1, this.elapsedS / ROUTE_DURATION_S),
       event: this.activeEvent ? this.activeEvent.label : null,
@@ -138,6 +147,7 @@ export class RouteDriver {
 
   reset() {
     this.state = DRIVE_STATE.PARKED;
+    this.heading = 'out';
     this.elapsedS = 0;
     this.fired.clear();
     this.activeEvent = null;

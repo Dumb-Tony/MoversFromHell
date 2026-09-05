@@ -169,13 +169,17 @@ function sample(label) {
     busLog: game.bus.log.length, notices: hud._notices.length, pending: M.pendingNotices.length,
     tools: tools.tools.size, registry: registry.count,
     itemDamage: game.state.ledger.itemDamage.length,
+    /* M14: the second ledger and its decal ring — the ring is scene geometry, so it is inside
+     * sceneChildren/geometries above; the count is asserted apart. */
+    propertyDamage: game.state.ledger.propertyDamage.length,
+    scuffs: M.scuffs.count,
     heap: (performance.memory && performance.memory.usedJSHeapSize) || null,
     rendered,
   };
   lines.push(`      [${label}] bodies ${s.bodies} colliders ${s.colliders} joints ${s.constraints} ` +
              `scene ${s.sceneChildren} geom ${s.geometries} tex ${s.textures} programs ${s.programs} ` +
              `straps ${s.straps} pool ${s.pool} log ${s.busLog} notices ${s.notices} pending ${s.pending} ` +
-             `tools ${s.tools} registry ${s.registry} ledger ${s.itemDamage} ` +
+             `tools ${s.tools} registry ${s.registry} ledger ${s.itemDamage} property ${s.propertyDamage} scuffs ${s.scuffs} ` +
              `heap ${s.heap ? (s.heap / 1048576).toFixed(1) + ' MB' : 'n/a'}${rendered ? '' : ' (no render)'}`);
   return s;
 }
@@ -231,6 +235,17 @@ function playRun(r) {
   F.pausedAtStart = game.state.paused;
   frames(60);
   F.toolsAfterWarmup = sweepTools();
+
+  // M14: one box thrown at the front wall every run — a property line and a scuff per run,
+  // so the reset has a second ledger and a decal ring to empty (m22 PD2's fixture).
+  const wallBox = byDef('box_small_01');
+  parkAt(wallBox, 1.60, 0.27, -1.50);
+  frames(30);
+  wallBox.body.setLinvel({ x: 0, y: 0, z: -4.0 }, true);
+  wallBox.body.wakeUp();
+  frames(60);
+  F.wallHit = game.state.ledger.propertyDamage.length >= 1 || damage._openProp.size > 0;
+  F.wallNotices = drainNotices();   // the two damage notices (box, wall) — S7 samples a drained queue
 
   // Strap on the fridge (m11 D, with T's camera snap after the teleport into the truck).
   parkAt(fridge, M.truckPose.x, I.minY + 0.90, I.maxZ - 0.6);
@@ -327,6 +342,8 @@ function playRun(r) {
   M.settle();
   F.settled = game.state.phase === PHASES.SETTLEMENT && game.state.paused && M.invoiceScreen.visible;
   F.ledgerAtSettlement = game.state.ledger.itemDamage.length;
+  F.propertyAtSettlement = game.state.ledger.propertyDamage.length;   // M14
+  F.scuffsAtSettlement = M.scuffs.count;                                // M14
   F.damageStateIsGameState = damage.state === game.state;
   const text = M.invoiceScreen.el.textContent;
   F.invoiceHasItemDamage = text.includes(LINE_KINDS.ITEM_DAMAGE);
@@ -417,6 +434,13 @@ lines.push('--- S3. replay damage reaches the ledger and the invoice (GDD §26.4
 ok('S3 game.state.ledger.itemDamage.length >= 1 at the settlement of run 2',
    runs[1].ledgerAtSettlement >= 1 && runs[1].damageStateIsGameState, `${runs[1].ledgerAtSettlement} lines`);
 ok('S3 …and of run 3', runs[2].ledgerAtSettlement >= 1 && runs[2].damageStateIsGameState, `${runs[2].ledgerAtSettlement} lines`);
+/* M14: the second ledger, every run — and the decal ring it feeds is empty after every replay. */
+ok('S3c M14: game.state.ledger.propertyDamage.length >= 1 at the settlement of every run (the wall throw), and the throw happened',
+   runs.every((F) => F.propertyAtSettlement >= 1 && F.wallHit && F.scuffsAtSettlement >= 1),
+   runs.map((F) => `run ${F.r}: ${F.propertyAtSettlement} lines, ${F.scuffsAtSettlement} marks, hit ${F.wallHit}`).join(' | '));
+ok('S1 M14: M.scuffs.count === 0 and propertyDamage.length === 0 after every replay (the ring is emptied, never grown)',
+   runs.every((F) => F.after.scuffs === 0 && F.after.propertyDamage === 0) && baseline.scuffs === 0,
+   runs.map((F) => `after run ${F.r}: scuffs ${F.after.scuffs} property ${F.after.propertyDamage}`).join(' | '));
 ok('S3 …and each of those invoices shows the item-damage line',
    runs.slice(1).every((F) => F.invoiceHasItemDamage), runs.map((F) => F.invoiceHasItemDamage).join(','));
 ok('S3b run 1 billed its recovery; runs 2 and 3 had none and bill none',

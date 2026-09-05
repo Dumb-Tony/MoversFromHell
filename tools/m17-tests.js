@@ -283,6 +283,10 @@ lines.push('--- R2. the run summary round-trips and names every §27.4 signal --
   const missingC = ck.filter((k) => !(k in rt.counters));
   ok('R2 …and counters.{grips,drops,recoveries,damageEvents,straps,cargo,trips,worstCargoShift} — one per §27.4 signal',
      missingC.length === 0, 'missing ' + missingC.join(','));
+  // Phase 11 build-side M14: the property ledger's count, apart from damageEvents (R1c).
+  ok('R2e M14: counters.propertyEvents is a number — the second ledger counted apart from damageEvents',
+     typeof rt.counters.propertyEvents === 'number' && rt.counters.propertyEvents === game.state.ledger.propertyDamage.length,
+     `${rt.counters.propertyEvents} vs ${game.state.ledger.propertyDamage.length}`);
   ok('R2a phases has every §3.4 phase, as numbers',
      Object.values(PHASES).every((p) => typeof rt.phases[p] === 'number'), JSON.stringify(rt.phases));
   ok('R2b before a settlement: invoice null, questionnaire null, restarts 0, complete false, trips 1',
@@ -489,12 +493,18 @@ lines.push('--- R6. same seed, same script, with and without the recorder (GDD �
     parkAt(tv, -38, tv.def.dimensions.y / 2 + 1.5, 30, Math.PI / 2);
     const box = byDef('box_small_01');
     parkAt(box, -35, box.def.dimensions.y / 2 + 1.0, 30);
+    // M14: a second box into the front wall, so the property ledger is exercised too.
+    const wallBox = [...registry.entities.values()].filter((e) => e.defId === 'box_small_01')[1];
+    parkAt(wallBox, 1.60, 0.27, -1.50);
+    wallBox.body.setLinvel({ x: 0, y: 0, z: -4.0 }, true);
+    wallBox.body.wakeUp();
     frames(240);
     damage.flush(game.clock.simTimeMs);
     const inv = invoiceNow();
     return {
       lines: JSON.parse(JSON.stringify(inv.lines)),
       ledger: JSON.parse(JSON.stringify(game.state.ledger.itemDamage)),
+      property: JSON.parse(JSON.stringify(game.state.ledger.propertyDamage)),   // M14
       profit: inv.profit,
       damageEvents: counters().damageEvents,
       recorded: recorder.attached ? recorder.events.length : null,
@@ -512,6 +522,10 @@ lines.push('--- R6. same seed, same script, with and without the recorder (GDD �
   ok('R6 fixture: the script damages something', A.ledger.length >= 1 && B.ledger.length >= 1, `${A.ledger.length}/${B.ledger.length}`);
   deep('R6 with and without the recorder: buildInvoice().lines deep-equal', B.lines, A.lines);
   deep('R6 …and ledger.itemDamage deep-equal', B.ledger, A.ledger);
+  // M14: the property ledger too, and it is not vacuous — the wall throw wrote a line.
+  ok('R6c M14: …and ledger.propertyDamage deep-equal, with at least one line on it',
+     deepEq(B.property, A.property) && A.property.length >= 1 && deepEq(A.property, C.property),
+     `A ${JSON.stringify(A.property)} vs B ${JSON.stringify(B.property)}`);
   ok('R6a control: two unattached runs agree too (the reset replays deterministically)',
      deepEq(A.lines, C.lines) && deepEq(A.ledger, C.ledger));
   ok('R6b the detached run counted nothing and the attached run counted every ledger line',

@@ -577,7 +577,18 @@ lines.push('--- E. the drive is reachable (GDD §3.4, §11.1) ---');
 
   lookAt(me(), standOffFrom(cab, 1.4), cab);
   const d2 = interact.describe(me());
-  ok('E7 the cab then offers to settle up', /settle/.test(d2.primary || ''), d2.primary || '');
+  /* E7 REWRITTEN ON PURPOSE (Phase 11 build-side M13). Nothing was delivered on this drive:
+   * 22 rows are still in the old house and one is aboard. Until M13 the cab offered only
+   * 'finish the job and settle up' whatever was still in the house; §3.4's Pickup exit is
+   * "required cargo loaded OR crew elects another trip", so E is now the trip back for the
+   * rows that need it (contractFacts().away) and settling without them is Q — priced in the
+   * prompt (§4.4), never refused (§2.1). tools/m21-trips-tests.js T3-T8 drive both. */
+  const awayAtArrival = M.contractFacts().away;
+  ok(`E7 the cab then offers the trip back for the ${awayAtArrival} still in the house (M13; was 'settle up')`,
+     /drive back/.test(d2.primary || '') && awayAtArrival > 0 && new RegExp(`\\b${awayAtArrival}\\b`).test(d2.primary || ''),
+     d2.primary || '');
+  ok('E7 …and settling up without them is Q, with the fee in the prompt',
+     /settle/.test(d2.secondary || '') && /\d+\.\d\d/.test(d2.secondary || ''), d2.secondary || '');
   route.reset();
 }
 emit('running...');
@@ -791,6 +802,10 @@ lines.push('--- G. settlement (GDD §15.2) ---');
   ok('G11 …nothing delivered, nothing damaged, no straps',
      game.state.ledger.itemDamage.length === 0 && straps.count === 0 &&
      game.state.manifest.every((r) => !r.delivered));
+  // Phase 11 build-side M14: the second ledger and its open windows go with the first.
+  ok('G11b …and no property damage either — reset clears BOTH ledgers and every open window (M14, §26.6)',
+     game.state.ledger.propertyDamage.length === 0 && damage._openProp.size === 0,
+     `${game.state.ledger.propertyDamage.length} lines, ${damage._openProp.size} open`);
   ok('G12 …and the game is running again', !game.state.paused);
   ok('T1c …with the phase clock back at zero for the new run',
      Object.values(game.state.telemetry.phaseMs).every((v) => v === 0),
@@ -967,13 +982,30 @@ lines.push('--- O. the next objective, the room, and the stall hint (M5: §26.7,
   parkAt(box, boxWas.x, boxWas.y, boxWas.z);
   for (let k = 0; k < 20 && cargo.loadedEntities().length > 0; k++) M.game.frame(FRAME);
 
-  // DELIVERY: how many are left. Phase set silently, the way reset() does (no event).
+  /* DELIVERY: how many are left. Phase set silently, the way reset() does (no event).
+   *
+   * O3 REWRITTEN ON PURPOSE (Phase 11 build-side M13). Until M13 this state — DELIVERY with
+   * the truck EMPTY and all 23 rows still in the old house — read 'unload — 23 left', which
+   * was a lie: there was nothing aboard to unload. §3.4's Pickup exit is "required cargo
+   * loaded OR crew elects another trip", and with everything away the objective now names
+   * that choice; the count is the rows that need the trip (contractFacts().away). O3b below
+   * keeps the 'unload' wording for the state it was always right about: something aboard. */
   game.state.phase = PHASES.DELIVERY;
   M.feedHuds();
   const sum = M.manifestSummary(game.state.manifest);
   const left = sum.total - sum.delivered;
-  ok(`O3 in DELIVERY the objective counts what is left (${left})`,
-     /unload/i.test(obj()) && new RegExp(`\\b${left}\\b`).test(obj()), obj());
+  ok(`O3 in DELIVERY with the truck empty the objective offers the trip back for what is left (${left}) — M13, was /unload/`,
+     /drive back/i.test(obj()) && new RegExp(`\\b${left}\\b`).test(obj()), obj());
+  eq('O3 …and contractFacts().away is that count (every row is in the old house)', M.contractFacts().away, left);
+  // O3b — one box aboard: the line is the unload, with the undelivered count.
+  parkAt(box, M.truckPose.x, I.minY + 0.30, I.maxZ - 1.0);
+  let dwell2 = 0;
+  while (cargo.loadedEntities().length === 0 && dwell2 < 240) { M.game.frame(FRAME); dwell2++; }
+  M.feedHuds();
+  ok(`O3b in DELIVERY with a box aboard the objective is the unload, counting what is left (${left})`,
+     cargo.loadedEntities().length === 1 && /unload/i.test(obj()) && new RegExp(`\\b${left}\\b`).test(obj()), obj());
+  parkAt(box, boxWas.x, boxWas.y, boxWas.z);
+  for (let k = 0; k < 20 && cargo.loadedEntities().length > 0; k++) M.game.frame(FRAME);
   game.state.phase = PHASES.TRANSIT;
   M.feedHuds();
   ok('O3a in TRANSIT it is the road', /road/i.test(obj()), obj());

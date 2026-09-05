@@ -519,3 +519,70 @@ With the eight done and batch 4 (audio, hand-frame damping) in flight, the two r
 - A capped surface posts no further lines (cost 0 lines are not written): the notice and decal stop with it — record in KNOWN_ISSUES; if the product wants the mark without the charge, emit the event with cost 0 and skip the ledger push (reconcile stays exact either way).
 - hud._notices is capped at 4 (hud.js:245-246) and m14 S7 requires pendingNotices drained at every sample: PD6's repeated hits push up to 6 notices — drain between throws as m14/m17 do (drainNotices).
 
+
+## Batch 7 addendum — the last two §26 lines that can be closed without a person (added 2026-09-04)
+
+§26.6 "no common sequence produces an unrecoverable soft lock" has a known counter-example (a tool lost off the world stays lost until replay; since batch 5, leaves and pieces share the exposure) and no sweep that would find others; §26.5 lists a camera-shake switch that could not exist because nothing shook. Both are small and both are provable headlessly.
+
+### M15 — No soft locks — tools, leaves and pieces recover out of bounds mid-run, and a randomised sweep proves every common sequence stays playable
+
+*GDD:* §26.6 'No common sequence produces an unrecoverable soft lock'; §18.3 out-of-bounds recovery (objects); §26.4 'Stuck recovery preserves progress and consequences'; §2.2 failure is a state, not a reset; §27.1 automated tests; §27.2 physics test scenes  
+*Size:* ~6 h · *depends on:* M2, M6, M11, M12
+
+**Why.** ObjectRegistry.step() recovers a manifest object that leaves the world (§18.3, RECOVERY events with a fee since M6), but ToolSystem has no such pass: a dolly, ramp, blanket or screwdriver knocked off the plot, dropped into the void between the pickup and the destination, or carried into the truck and lost, is gone until the next replay (KNOWN_ISSUES, Phase 17: 'tools still have no §18.3 out-of-bounds recovery'). Since Phase 20, door leaves (fixtures) and loose parts/fragments are bodies too, with the same exposure. A lost screwdriver is a soft lock for every disassembly and door on the contract; a lost dolly turns the fridge back into 'beyond one hand unaided' with no way out. §26.6 asks for the proof, not the fix alone: a randomised sequence of the common actions must never reach a state from which the contract cannot be completed.
+
+**Scope.** (1) src/tools/tools.js: a per-step out-of-bounds pass mirroring registry.step's (position below RECOVERY.objectFloorY, or outside the world's play AABB from config RECOVERY.bounds, or NaN/non-finite) that teleports the tool to its rack slot (PHASE6_TOOL_SPAWNS) or the last stable pose, zeroes its velocities, detaches it if it was attached/deployed (detachDolly/retrieveRamp/removeBlanket through the existing calls so the parent's friction/collider are restored), restores its collision group, emits RECOVERY {toolId, reason, fee: ECONOMY.recoveryFee} once, and increments a per-tool recoveries counter the invoice already sums (recoveryCount). (2) Fixtures and pieces: registry.step's existing recovery covers every registry entity — verify a door leaf recovers to its rest pose (not its home: re-hanging is the player's Q) and a piece to beside its parent's current position (not the parent's spawn); fix whichever is not true. (3) A carried tool or entity that goes out of bounds while held: release the grip first (grip.js release with reason 'lost'), then recover — never teleport a body the spring is pulling. (4) NEW tools/m23-softlock-tests.js: a seeded randomised sweep (mulberry32 from Dev INDEX — copy it) of N=40 short scripted sessions over the common verb set {grab/drop, carry to truck, strap, dolly under/off, blanket on/off, ramp deploy/retrieve, screwdriver on every disassemblable, door off/on, drive, drive back (M13), recover, replay} with 3 random teleports-to-void per session, asserting after each session that (a) every tool is on the rack or inside the play AABB and dynamic, (b) every manifest row can still be completed (its entity and all its pieces exist and are inside bounds), (c) every door leaf exists and is either hung or inside bounds, (d) the cab prompt is reachable (describe() at the cab returns a primary), (e) game.state JSON round-trips; and a final settle() that renders the invoice. Record the seed of any failure in the FAIL line. (5) Debug overlay: a 'lost' counter (recoveries this run by kind). (6) config.js RECOVERY: bounds AABB (derived from the plot extents in scene.js, not a magic number), toolFloorY, the sweep's N and seed under DEBUG.
+
+**Files:** src/tools/tools.js, src/objects/registry.js, src/player/grip.js, src/main.js, src/config.js, src/dev/debugOverlay.js, tools/m6-tests.js, tools/m11-tests.js · **new:** tools/m23-softlock-tests.js
+
+**Reuse.** registry.step's §18.3 recovery (the pattern to mirror), main.js's mover RECOVERY emission (recoveriesSeen), AirportBaggageCrew tools/_soak.js + _invariants.js (INDEX: 'check every invariant after every step; assert the thing you randomised actually differs'), mulberry32 from Chameleon/Something's Different (INDEX RNG row) — copy, keep the name.
+
+**Acceptance tests.**
+- m23 L1: each of the four tools teleported to (0, −50, 0) → within RECOVERY.maxFrames of game.frame() it is back on its rack slot (± 0.05 m), isDynamic(), collision groups === GROUP_PRESETS.object, linvel < 0.01 m/s, exactly one RECOVERY event with fee === ECONOMY.recoveryFee, tools.recoveries === 1 for that tool, recoveryCount() incremented by 1.
+- m23 L2: a dolly ATTACHED under the couch teleported away with the couch left behind → the couch's friction is def.physics.friction again and dollyId null before the dolly lands on the rack; a DEPLOYED ramp teleported away → retrieved (no ramp collider left in the world).
+- m23 L3: a tool HELD by mover 0 teleported out of bounds → the grip is released with reason 'lost' (GRIP_ENDED), then recovered; the mover is not moved; no NaN in any body.
+- m23 L4: a door leaf (removed, carried 20 m off the plot) → recovered to its rest pose, hung === false, isDynamic(); a hung leaf is never recovered (Fixed bodies skip the pass).
+- m23 L5: four couch legs teleported to the void → recovered beside the couch's CURRENT position (not its spawn) within PARTS.pieceSpacing × 4; a fragment likewise beside its hulk.
+- m23 L6: the randomised sweep, DEBUG.softlockSessions (≥ 40) seeded sessions → zero sessions fail invariants (a)-(e); the suite prints the worst session's action count and the number of recoveries triggered (≥ 1, or the teleports did nothing).
+- m23 L7: after the sweep, one settle() → the invoice renders, reconcile() ok, and its recovery line equals recoveryCount() × ECONOMY.recoveryFee.
+- m23 L8: bounds are derived, not typed: RECOVERY.bounds encloses every spawn, the truck cargo box, both houses' zones and the route's teleport target with ≥ 5 m margin (assert against scene/destination/truck constants).
+- m14 equality unchanged (tool recoveries leave bodies/colliders/scene children equal); m6 B-series and D-series (tools) unchanged in numbers; m11 all green.
+- Regression: m0, m6, m9, m10, m11, m14 ALL-PASS.
+
+**Risks.**
+- The soak must stay inside smoketest.ps1's virtual-time budget: 40 sessions × a few hundred frames is fine (m14 does 6804 frames in 8 s); driving a route per session is not (1681 frames each) — drive in at most a handful of sessions and say which.
+- Recovering a tool that is attached to an object must go through the existing detach calls, or the parent keeps a dolly's friction forever (the exact Phase 17 M2 bug class).
+- A body at NaN cannot be read by translation() safely on every Rapier build — guard with Number.isFinite on all three axes before deciding.
+- M13 (second trip) may have landed: the sweep's 'drive back' verb must use the real cab seam, and 'every row can be completed' must respect trips.
+- Keep the pass cheap: one AABB check per body per step is fine; no raycasts.
+
+### M16 — Camera shake that means something — road events and near impacts nudge the camera, with the §26.5 switch that turns it off
+
+*GDD:* §26.5 'Grip toggle, sensitivity, camera shake, UI scale, subtitles, and color-independent cues exist'; §21.4 Motion (camera shake); §11.3 road events are felt; §8.4 'one cost notice' — feedback without a second HUD element; §22.4 the renderer reads state and never writes it  
+*Size:* ~4 h · *depends on:* M4, M9
+
+**Why.** M4 shipped every §26.5 switch except camera shake, because nothing produced any: the road events (hard brake, sharp turn, speed bump) reach the cargo as forces and the HUD as a label, but the camera sits perfectly still through a truck slamming its brakes, and a fridge landing beside a mover is silent to the eyes. §26.5 lists the switch by name; §21.4 Motion lists it as an accessibility baseline. A small, physically-motivated shake (impulse decaying with damping, capped, never on the pointer-lock look axes) closes the criterion and gives the drive its one missing feel cue — and the switch must exist so it can be turned off.
+
+**Scope.** (1) src/render/camera.js ThirdPersonCamera: `nudge(impulse: {x,y,z} in metres, rotMrad?)` adds to a damped spring offset (RENDER.camera.shake: stiffness, damping, maxOffset, maxRot) applied AFTER the follow/boom solve and BEFORE the collision probe, so the shake never pushes the camera through a wall; `update()` integrates it on sim time; `shakeEnabled` flag (default from settings) makes nudge() a no-op. (2) Sources, all read-only observers of the bus (never inside a system): ROAD_FORCE → nudge by TRUCK.roadEvents[type].severity × RENDER.camera.shake.road (brake pitches forward, turn rolls sideways, bump lifts); IMPACT within RENDER.camera.shake.impactRange of a seat's mover → nudge ∝ relVelocity above AUDIO.impact.minVelocity, attenuated by distance; a mover's own knockdown → one nudge. Per seat: only that seat's camera. (3) Settings: 'Camera shake' checkbox on the M4 card (shell key `cameraShake`, default true), consumed by every rig's shakeEnabled — m16 U2's walk must find it; also a 'Reduced motion' reading of prefers-reduced-motion at boot that defaults the switch off (§21.4 Motion) — record it, do not fight the OS. (4) The debug overlay shows the current shake offset magnitude. (5) config.js RENDER.camera.shake block; nothing in a system, nothing in game.state.
+
+**Files:** src/render/camera.js, src/main.js, src/config.js, src/ui/settings.js, src/core/save.js, src/dev/debugOverlay.js, tools/m16-tests.js, tools/m12-tests.js · **new:** tools/m24-shake-tests.js
+
+**Reuse.** ThirdPersonCamera's existing boom/collision solve (this project); the settings card row pattern (M4, src/ui/settings.js ROWS, data-setting consumption walk); AirportBaggageCrew's camera nudge on baggage impacts if present (grep 'shake' / 'nudge' in C:/Dev/AirportBaggageCrew/src — copy if it exists, and say so).
+
+**Acceptance tests.**
+- m24 K1: with the rig at rest, nudge({x:0,y:0.05,z:0}) → the camera's world position differs from the un-nudged solve by ≤ RENDER.camera.shake.maxOffset on the next update and returns within 1 mm of it inside RENDER.camera.shake.settleMs of driven sim frames (damped, no residual).
+- m24 K2: a ROAD_FORCE 'hardBrake' on the bus during TRANSIT → seat 0's camera offset peaks at severity × shake.road (± 5 %) within 3 frames; 'sharpTurn' produces a sideways component and 'speedBump' a vertical one (sign and axis asserted); no offset on a seat that is not driving.
+- m24 K3: an IMPACT with relVelocity 4 at 1 m from mover 0 → an offset; the same at shake.impactRange + 1 m → zero; relVelocity below AUDIO.impact.minVelocity → zero.
+- m24 K4: the offset never exceeds maxOffset / maxRot under 50 stacked nudges in one frame (cap, not sum), and the camera's collision probe still runs after the shake (a nudge toward a wall never puts the camera inside it: place the rig against a wall, nudge toward it, assert the probe's clamp).
+- m24 K5: cameraShake off (settingsStore.apply({cameraShake:false})) → nudge() leaves the offset at zero; on again → K2 passes; the setting persists (save round-trip) and m16 U2's consumption walk covers it (rig.shakeEnabled moves).
+- m24 K6: the shake never touches the look axes: rig.yaw/pitch identical before and after a nudge; game.state JSON identical before and after 300 frames of nudges (§22.4).
+- m24 K7: prefers-reduced-motion stubbed true at boot → the setting defaults off and the card shows it off; stubbed false → on.
+- m12 co-op: a ROAD_FORCE nudges only the driving seat's camera; the other seat's camera position is unchanged to 1e-9.
+- Regression: m0, m11, m12, m15, m16 ALL-PASS; m13/m15 screenshots unchanged (shake is zero at rest).
+
+**Risks.**
+- Shake must be applied after the boom solve and before the collision probe, or it either fights the follow lerp (jitter) or pushes through walls.
+- Sim-time integration under the harness: performance.now() is frozen; drive with game.frame() and read the rig after M.present() or a rig.update(dt) call, as the shot scripts do.
+- The pointer-lock look must be untouched: any shake on yaw/pitch feels like input loss.
+- Co-op: each seat has its own rig; the bus observer must map the event to the seat(s) it concerns (the truck's driver seat for road events, the nearest mover for impacts).
+

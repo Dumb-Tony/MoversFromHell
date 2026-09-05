@@ -153,6 +153,19 @@ invoice bills "parts left behind" per piece from its share of the replacement va
 stays deliverable as a hulk and leaves two or three trackable fragments beside it. Reset removes
 every piece.
 
+**More than one trip.** A contract can take a second trip (§3.4): at the destination the cab
+offers "drive back for N more" beside "settle up — leave N behind", the return is the same route
+heading back with fuel billed per leg (2 × trips − 1) and the time on the clock, the objective
+and HUD say "trip 2", and the invoice prices every item left behind at 60 each, so partial
+completion is an outcome with a number on it rather than a free settlement. Leave twenty-three
+behind and the job loses money, by design.
+
+**Walls are billed.** A wall, a door frame or the truck body that an object hits above 12 N·s of
+the object's own lost momentum writes one property-damage entry at 1.6 per N·s (capped at 400
+per surface), with a notice naming the surface ("front wall — scuffed · 30.82"), a caption, a
+bounded scuff mark, the §15.1 line on the invoice and a review tag. Floors, the ground, the deck
+and the ramp are never billed; a landing that grazes a wall is a landing.
+
 ## Test it
 
 ```bash
@@ -216,7 +229,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**1862 assertions across twenty-one suites, all passing** — plus a GPU-only suite that the
+**2068 assertions across twenty-three suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -250,7 +263,11 @@ literal: four doorways have their doors on (the "impossible 32-inch door" of nin
 34-inch door with its 40 mm leaf hung), the screwdriver takes a leaf off its hinges for 45 s of
 labour and it becomes an 18 kg object you can carry, load or lose; and detached parts are bodies
 that must also reach the truck, a broken item leaves trackable fragments, and the invoice bills
-parts left behind. Batch 6 (the second trip; property damage priced) is briefed in the plan.
+parts left behind. Batch 6 made §26.1's invoice honest: a crew can drive back for the rest
+(fuel per leg, the time on the clock, "trip 2" on the HUD, every item left behind priced at 60),
+and a wall, a door frame or the truck body that an object hits hard enough writes one
+property-damage entry with a notice, a caption, a bounded scuff and the §15.1 line. Batch 7
+(soft-lock recovery and a randomised sweep; camera shake with its switch) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -267,6 +284,10 @@ parts left behind. Batch 6 (the second trip; property damage priced) is briefed 
 ![A door on its hinges in the kitchen doorway](docs/phase20-door.png)
 
 ![The kitchen after the legs come off, a door on its hinges beside it](docs/phase20-pieces.png)
+
+![The choice at the cab after the first delivery](docs/phase21-drive-back.png)
+
+![A wall billed for a thrown box](docs/phase21-scuff.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 
@@ -398,7 +419,7 @@ mode is the same change seen from the other side.
 |---|---|---|
 | Four tools | `src/tools/` | Dolly (friction), blanket (impact tolerance), ramp (clearance), screwdriver (dimensions). Real world bodies with mass — §9.2's "tools are world objects". |
 | Tow speed limit | `src/player/grip.js` | You cannot walk faster than what you are towing can follow. A hand is a spring; walk past √(k/m)·maxStretch and the hold tears. |
-| Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs. |
+| Impact-speed damage | `src/config.js` | Item damage keyed on speed, not impulse — impulse made a couch more fragile than glassware for being heavy. Property damage keeps the impulse, where mass belongs: since Phase 21 a wall, door frame or the truck body is billed the object's m·Δv above 12 N·s at 1.6 per N·s, capped at 400 per surface, from the narrow phase for the one step the object lost speed (`src/damage/damage.js`, `src/damage/surfaces.js`). A 9 kg box thrown at 4 m/s costs the front wall 30.82; floors, the ground, the deck and the ramp are never billed. |
 | Friction combine fix | `src/tools/tools.js` | An object's declared friction is averaged with the floor's. The dolly switches to `Min` so its 8.75× cut is not delivered as 1.3×. |
 
 **Measured:** couch hauled by one hand for 3 s — **0.34 m bare, 6.52 m on the dolly** (Phase 11 M10; Phase 6 measured 0.00 / 2.12). Fridge
@@ -529,7 +550,7 @@ Names were kept so the lineage stays greppable.
 - **Nothing is uploaded, ever.** The project rule is zero external requests, so §27.4's
   "opt-in upload" is the Copy button; a playtest group sends the pasted JSON by hand. The
   recorder's frame cost was measured in a real Chrome (0.03 ms per step at worst), not in the
-  harness, where virtual time freezes the clock. The report's `trips` is always 1 and its
+  harness, where virtual time freezes the clock. The report's
   `briefing` / `settlement` phases are always 0 in this build.
 
 - **Replay is a full unwind** (Phase 11 M2): tools are detached and retrieved, parts

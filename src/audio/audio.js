@@ -205,6 +205,11 @@ export const CUES = Object.freeze({
       scratched: { caption: 'scratched',         parts: [[1800, 900, 0.06, 'square', 0.10]] },
       cracked:   { caption: 'something cracked', parts: [[1300, 300, 0.12, 'square', 0.22], [400, 120, 0.18, 'sawtooth', 0.16, 0.02]] },
       broken:    { caption: 'something broke',   parts: [[900, 90, 0.36, 'sawtooth', 0.34], [160, 40, 0.55, 'triangle', 0.26, 0.04]], noise: [0.12, 1400, 0.30] },
+      // M14: the PROPERTY bands (DAMAGE.property.bands) — a wall, not an item. The HUD notice
+      // names the surface; the caption stays a string (m18 A1b) so it says what kind of mark.
+      scuffed:   { caption: 'wall scuffed',      parts: [[700, 380, 0.08, 'triangle', 0.14]], noise: [0.05, 900, 0.22] },
+      dented:    { caption: 'wall dented',       parts: [[420, 160, 0.14, 'square', 0.22]], noise: [0.08, 600, 0.28] },
+      holed:     { caption: 'wall holed',        parts: [[260, 70, 0.30, 'sawtooth', 0.30], [120, 40, 0.40, 'triangle', 0.20, 0.03]], noise: [0.12, 500, 0.34] },
       _:         { caption: 'damage',            parts: [[1100, 400, 0.10, 'square', 0.16]] },
     },
   },
@@ -289,9 +294,11 @@ export const CUES = Object.freeze({
   RECOVERY: { bus: 'ui', minGapMs: 200, positional: true, caption: 'recovered — a fee', parts: [[520, 880, 0.08, 'sine', 0.18], [880, 520, 0.14, 'sine', 0.14, 0.09]] },
   /* §3.4 phase stings, the invoice one last (§20.4 Invoice stingers). */
   CONTRACT_PHASE: {
-    bus: 'ui', minGapMs: 500, variant: (e) => (e && e.to) || '_',
+    // M13: a PICKUP entered FROM transit is the return leg arriving, not the job starting.
+    bus: 'ui', minGapMs: 500, variant: (e) => (e && e.to === PHASES.PICKUP && e.from === PHASES.TRANSIT ? 'return' : (e && e.to)) || '_',
     variants: {
       [PHASES.PICKUP]:     { caption: 'the job starts',          parts: [[392, 392, 0.14, 'sine', 0.16], [523, 523, 0.22, 'sine', 0.14, 0.12]] },
+      return:              { caption: 'back at the house',       parts: [[523, 523, 0.14, 'sine', 0.16], [392, 392, 0.22, 'sine', 0.14, 0.12]] },
       [PHASES.TRANSIT]:    { caption: 'on the road',             parts: [[60, 45, 0.60, 'sawtooth', 0.22], [330, 392, 0.16, 'sine', 0.14, 0.10]] },
       [PHASES.DELIVERY]:   { caption: 'arrived',                 parts: [[523, 523, 0.14, 'sine', 0.18], [659, 659, 0.14, 'sine', 0.16, 0.12], [784, 784, 0.30, 'sine', 0.16, 0.24]] },
       [PHASES.SETTLEMENT]: { caption: 'the invoice',             parts: [[392, 392, 0.30, 'sine', 0.24], [523, 523, 0.30, 'sine', 0.22, 0.22], [659, 659, 0.60, 'sine', 0.20, 0.44]] },
