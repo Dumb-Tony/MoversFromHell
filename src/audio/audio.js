@@ -256,6 +256,16 @@ export const CUES = Object.freeze({
       _:        { caption: 'part changed',     parts: [[1000, 1000, 0.05, 'square', 0.12]] },
     },
   },
+  /* §8.2 a door off its hinges (M11): the hinge pins tapped out and the leaf set down on the
+   * floor; back on with a clack. The boot state is data, not an event (no 'hung' cue). */
+  DOOR_STATE: {
+    bus: 'foley', minGapMs: 150, positional: true, variant: (e) => (e && e.state) || '_',
+    variants: {
+      removed: { caption: 'door off its hinges', parts: [[820, 980, 0.05, 'square', 0.14], [820, 980, 0.05, 'square', 0.14, 0.09], [140, 70, 0.22, 'triangle', 0.26, 0.30]] },
+      rehung:  { caption: 'door back on',        parts: [[980, 820, 0.05, 'square', 0.14], [520, 300, 0.07, 'square', 0.16, 0.10]] },
+      _:       { caption: 'door',                parts: [[600, 600, 0.06, 'square', 0.10]] },
+    },
+  },
   /* §10.2 loaded is a fact about the truck, not a menu: a chime in, a low note out. */
   CARGO_STATE: {
     bus: 'ui', minGapMs: 150, variant: (e) => (e && e.loaded ? 'loaded' : 'unloaded'),

@@ -14,7 +14,7 @@
  * packed moving box is 8-20 kg; these keep that range because nothing yet says otherwise.
  */
 
-import { MASS_CLASS, DAMAGE } from '../config.js';
+import { MASS_CLASS, DAMAGE, PARTS, DOOR } from '../config.js';
 
 /** @typedef {object} ObjectDef  the §23.1 schema. Fields not needed until a later phase
  *  are present and marked, so the shape does not churn when that phase arrives. */
@@ -133,8 +133,13 @@ export const OBJECT_DEFS = Object.freeze({
      * where intact it is -30 mm and +10 mm. Anything >= 30 mm of leg would clear 0.82; 80 mm
      * is what a three-seater's legs actually are. 60 s is the §8.2 "preparation time" —
      * billed to the labour clock by the interaction system, not free (§2.3). Packed volume
-     * 1.6065 -> 1.4553 m3 (-9.4%). Phase 11 M8. */
-    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 60, reversible: true, shrinksTo: { x: 2.10, y: 0.77, z: 0.90 } }],
+     * 1.6065 -> 1.4553 m3 (-9.4%). Phase 11 M8.
+     *
+     * `piece` (M12) is what a detached part IS once it is off: four 60 x 80 x 60 mm feet,
+     * each 90 x 0.14 / 4 = 3.15 kg, spawned beside the couch as real bodies that must also
+     * reach the truck (§9.1 "creates loose parts … loose pieces get lost"). */
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 60, reversible: true, shrinksTo: { x: 2.10, y: 0.77, z: 0.90 },
+                    piece: { name: 'leg', count: 4, dims: { x: 0.06, y: 0.08, z: 0.06 }, prefab: 'leg' } }],
   },
 
   /* The middle rung, so "heavy" is not a single data point. 55 kg is liftable one-handed
@@ -229,7 +234,8 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'stackable'],
     colour: 0x8f6f45,
     cargoHints: ['nest'],
-    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 40, reversible: true, shrinksTo: { x: 0.46, y: 0.52, z: 0.50 } }],
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 40, reversible: true, shrinksTo: { x: 0.46, y: 0.52, z: 0.50 },
+                    piece: { name: 'leg', count: 4, dims: { x: 0.43, y: 0.035, z: 0.035 }, prefab: 'leg' } }],
   },
 
   /* 5 kg and 1.65 m tall. §13.2 wants small furniture to test "awkward silhouettes", and
@@ -276,7 +282,8 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture'],
     colour: 0x9c7c50,
     cargoHints: [],
-    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 35, reversible: true, shrinksTo: { x: 0.55, y: 0.12, z: 0.55 } }],
+    disassembly: [{ part: 'legs', tool: 'screwdriver', seconds: 35, reversible: true, shrinksTo: { x: 0.55, y: 0.12, z: 0.55 },
+                    piece: { name: 'leg', count: 4, dims: { x: 0.46, y: 0.04, z: 0.04 }, prefab: 'leg' } }],
   },
 
   nightstand_01: {
@@ -323,7 +330,8 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['fragile', 'electronics', 'flat'],
     colour: 0x2b2f36,
     cargoHints: ['upright-only', 'no-stack-on', 'strap'],
-    disassembly: [{ part: 'stand', tool: 'screwdriver', seconds: 50, reversible: true, shrinksTo: { x: 1.24, y: 0.72, z: 0.07 } }],
+    disassembly: [{ part: 'stand', tool: 'screwdriver', seconds: 50, reversible: true, shrinksTo: { x: 1.24, y: 0.72, z: 0.07 },
+                    piece: { name: 'stand', count: 1, dims: { x: 0.62, y: 0.05, z: 0.26 }, prefab: 'stand' } }],
   },
 
   bookshelf_01: {
@@ -345,7 +353,8 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'tall'],
     colour: 0x7d5f3c,
     cargoHints: ['heavy-low', 'lay-flat'],
-    disassembly: [{ part: 'shelves', tool: 'screwdriver', seconds: 90, reversible: true, shrinksTo: { x: 0.80, y: 1.80, z: 0.06 } }],
+    disassembly: [{ part: 'shelves', tool: 'screwdriver', seconds: 90, reversible: true, shrinksTo: { x: 0.80, y: 1.80, z: 0.06 },
+                    piece: { name: 'shelf', count: 4, dims: { x: 0.76, y: 0.035, z: 0.24 }, prefab: 'board' } }],
   },
 
   armchair_01: {
@@ -417,7 +426,8 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['furniture', 'tall'],
     colour: 0x6f5334,
     cargoHints: ['heavy-low', 'strap'],
-    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 120, reversible: true, shrinksTo: { x: 1.20, y: 2.00, z: 0.52 } }],
+    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 120, reversible: true, shrinksTo: { x: 1.20, y: 2.00, z: 0.52 },
+                    piece: { name: 'door', count: 2, dims: { x: 0.58, y: 0.04, z: 1.90 }, prefab: 'panel' } }],
   },
 
   mirror_framed_01: {
@@ -465,7 +475,38 @@ export const OBJECT_DEFS = Object.freeze({
     tags: ['appliance', 'showcase', 'tall'],
     colour: 0xc9ced4,
     cargoHints: ['upright-only', 'heavy-low', 'strap'],
-    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 100, reversible: true, shrinksTo: { x: 0.62, y: 1.75, z: 0.66 } }],
+    disassembly: [{ part: 'doors', tool: 'screwdriver', seconds: 100, reversible: true, shrinksTo: { x: 0.62, y: 1.75, z: 0.66 },
+                    piece: { name: 'door', count: 2, dims: { x: 0.62, y: 0.05, z: 0.80 }, prefab: 'panel' } }],
+  },
+
+  /* THE HOUSE'S OWN DOORS (Phase 11 build-side M11; §8.2 "Door: open or remove from hinges",
+   * §2.1 "removing doors ... where the authored level supports them", §9.1 "loose pieces get
+   * lost"). One leaf definition, hung once per door record that carries a `leaf` (house.js
+   * INTERIOR_DOORS, scene.js APERTURES) — spawned by main.js through the registry, NOT a
+   * PHASE5_SPAWNS row, so it is never on the manifest and never counts as cargo delivered.
+   * Category 'fixture': part of the house, not the customer's goods. 18 kg lifts one-handed
+   * (177 N against ~358 N); 40 × 2000 × 800 mm is a stock internal door. While hung its body
+   * is FIXED at the jamb (registry.hang); off its hinges it is an ordinary dynamic object
+   * that can be carried, dropped, damaged (fragility 'normal', replacementValue from
+   * config DOOR — §8.2 "replacement risk") and, per §9.1, lost. Local axes: x thickness,
+   * y height, z length, handle at +z (house.js leafPose relies on that). */
+  door_leaf_01: {
+    id: 'door_leaf_01',
+    category: 'fixture',
+    prefab: 'door_leaf',
+    massClass: 'medium',
+    mass: DOOR.leaf.mass,
+    dimensions: { x: DOOR.leaf.t, y: DOOR.leaf.height, z: DOOR.leaf.length },
+    centerOfMassOffset: { x: 0, y: 0, z: 0 },
+    physics: { friction: 0.55, restitution: 0.02, linearDamping: 0.16, angularDamping: 0.7 },
+    grip: { forceMult: 0.96, surface: 'wood' },
+    fragility: 'normal',
+    replacementValue: DOOR.replacementValue,
+    surfaceTags: ['wood', 'fixture'],
+    tags: ['fixture', 'flat', 'door'],
+    colour: 0xe4dccb,
+    cargoHints: ['flat-against-wall'],
+    disassembly: [],
   },
 });
 
@@ -498,7 +539,10 @@ export function validateDef(def) {
   if (!d || !(d.x > 0 && d.y > 0 && d.z > 0)) problems.push('dimensions must all be positive');
   const cls = MASS_CLASS[def.massClass];
   if (!cls) problems.push(`unknown massClass "${def.massClass}"`);
-  else {
+  else if (def.category !== 'part') {
+    /* A PART is exempt from the band floor (M12): a dining chair's leg is 7 x 0.14 / 4 =
+     * 0.245 kg, under the 1 kg 'light' floor by nature, and §6.3's classes are guidance
+     * for HANDLING — nothing handles a leg differently for being under a kilogram. */
     const [lo, hi] = cls.massRange;
     if (def.mass < lo || def.mass > hi) {
       problems.push(`mass ${def.mass} is outside the ${def.massClass} band ${lo}-${hi}`);
@@ -527,11 +571,129 @@ export function validateDef(def) {
     problems.push('unknown fragility "' + def.fragility + '"; have ' +
                   Object.keys(DAMAGE.fragility).join(', '));
   }
-  const CATEGORIES = ['box', 'small', 'medium', 'large', 'fragile', 'showcase'];
+  // 'part' (M12: a detached part or a fragment, never a manifest row) and 'fixture' (M11: a
+  // door leaf, part of the house) are the two non-manifest categories beside §13.2's six.
+  const CATEGORIES = ['box', 'small', 'medium', 'large', 'fragile', 'showcase', 'part', 'fixture'];
   if (def.category && !CATEGORIES.includes(def.category)) {
     problems.push('unknown category "' + def.category + '" (§13.2)');
   }
+
+  /* EVERY AUTHORED PART HAS A SHAPE (M12). §9.1's screwdriver "creates loose parts", and a
+   * part with no `piece` would come off as a string in removedParts and nothing else —
+   * which is exactly what three phases of KNOWN_ISSUES called vacuous. Checked here, at
+   * load, so an entry authored without one announces itself in the build it ships in. */
+  for (const p of def.disassembly || []) {
+    const pc = p.piece;
+    if (!pc) { problems.push(`part "${p.part}" has no piece shape (M12: a part is a body)`); continue; }
+    if (!(Number.isInteger(pc.count) && pc.count >= 1)) problems.push(`part "${p.part}": piece.count must be a positive integer`);
+    const pd = pc.dims;
+    if (!pd || !(pd.x > 0 && pd.y > 0 && pd.z > 0)) problems.push(`part "${p.part}": piece.dims must all be positive`);
+    if (typeof pc.prefab !== 'string' || !pc.prefab) problems.push(`part "${p.part}": piece.prefab must name a prefab`);
+    if (typeof pc.name !== 'string' || !pc.name) problems.push(`part "${p.part}": piece.name (the singular the prompt prints) is missing`);
+  }
   return problems;
+}
+
+/* ── derived definitions: pieces and fragments (M12; §9.1, §26.4) ─────────────────────
+ *
+ * A piece is an ObjectDef like any other — the registry spawns it through the same
+ * spawn(), the same validator, the same prefab table — DERIVED from its parent's row rather
+ * than authored twice (§24.4: a part authored separately from the object it came off is how
+ * the two drift). Memoised per parent/part so an entity's `def` is a stable object across
+ * the run, the way every OBJECT_DEFS entry is. */
+const _derivedDefs = new Map();
+
+/** 'couch_3seat_01' -> 'couch 3seat': the same derivation interact.js label() uses. */
+function wordsOf(id) {
+  return (id || '').replace(/_\d+$/, '').replace(/_/g, ' ');
+}
+
+/**
+ * The definition of ONE piece of an authored part: mass and replacement value are the
+ * parent's share by PARTS.partMassFraction split across the count (a couch leg is 3.15 kg
+ * and 31.50 of the couch's 900), fragility is the parent's, and the category is 'part' so
+ * nothing counts it as a manifest row.
+ */
+export function pieceDefFor(parent, entry) {
+  const key = `${parent.id}#${entry.part}`;
+  const hit = _derivedDefs.get(key);
+  if (hit) return hit;
+  const pc = entry.piece;
+  const count = pc.count;
+  const def = {
+    id: key,
+    label: `${wordsOf(parent.id)} ${pc.name}`,
+    category: 'part',
+    prefab: pc.prefab,
+    massClass: 'light',
+    mass: parent.mass * PARTS.partMassFraction / count,
+    dimensions: { x: pc.dims.x, y: pc.dims.y, z: pc.dims.z },
+    centerOfMassOffset: { x: 0, y: 0, z: 0 },
+    physics: { ...parent.physics },
+    grip: { ...(parent.grip || { forceMult: 1.0, surface: 'wood' }) },
+    fragility: parent.fragility,
+    replacementValue: parent.replacementValue * PARTS.partMassFraction / count,
+    surfaceTags: [...(parent.surfaceTags || [])],
+    tags: ['part'],
+    colour: parent.colour,
+    cargoHints: [],
+    disassembly: [],
+    /** Which object and part this is a piece of — data, so the manifest can price a piece
+     *  left behind without the entity (§15.1). */
+    partOf: { defId: parent.id, part: entry.part, name: pc.name, count },
+  };
+  _derivedDefs.set(key, def);
+  return def;
+}
+
+/**
+ * The definition of one FRAGMENT of a broken object (§26.4 "becomes trackable pieces").
+ * PARTS.brokenFragmentCount[fragility] of them; each PARTS.fragmentScale of the parent's
+ * dimensions (floored at fragmentMinDim, never larger than the parent), laid flat — the
+ * smallest scaled axis is the height. replacementValue 0: the 'broken' band already charged
+ * the whole object (DAMAGE.bands), so a fragment is tracked, not priced.
+ */
+export function fragmentDefFor(parent) {
+  const key = `${parent.id}#fragment`;
+  const hit = _derivedDefs.get(key);
+  if (hit) return hit;
+  const count = PARTS.brokenFragmentCount[parent.fragility] ?? PARTS.defaultFragmentCount;
+  const d = parent.dimensions;
+  const scaled = (v) => Math.min(v, Math.max(v * PARTS.fragmentScale, PARTS.fragmentMinDim));
+  const axes = [scaled(d.x), scaled(d.y), scaled(d.z)].sort((a, b) => b - a);
+  const def = {
+    id: key,
+    label: `${wordsOf(parent.id)} fragment`,
+    category: 'part',
+    prefab: 'fragment',
+    massClass: 'light',
+    mass: parent.mass * PARTS.partMassFraction / count,
+    dimensions: { x: axes[0], y: axes[2], z: axes[1] },
+    centerOfMassOffset: { x: 0, y: 0, z: 0 },
+    physics: { ...parent.physics },
+    grip: { ...(parent.grip || { forceMult: 1.0, surface: 'wood' }) },
+    fragility: parent.fragility,
+    replacementValue: 0,
+    surfaceTags: [...(parent.surfaceTags || [])],
+    tags: ['part', 'fragment'],
+    colour: parent.colour,
+    cargoHints: [],
+    disassembly: [],
+    fragmentOf: { defId: parent.id, count },
+  };
+  _derivedDefs.set(key, def);
+  return def;
+}
+
+/** Every derived definition the authored table implies — for a suite that wants to check
+ *  the piece prefabs the way m13 checks the object prefabs (inside their own dimensions). */
+export function derivedDefs() {
+  const out = [];
+  for (const def of Object.values(OBJECT_DEFS)) {
+    for (const entry of def.disassembly || []) out.push(pieceDefFor(def, entry));
+    out.push(fragmentDefFor(def));
+  }
+  return out;
 }
 
 export function validateAllDefs() {

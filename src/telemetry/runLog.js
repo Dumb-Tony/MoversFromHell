@@ -51,6 +51,12 @@ export function createTelemetryCounters() {
     roadEvents: 0,
     toolChanges: 0,
     partChanges: 0,
+    /** M12 (§9.1 loose parts, §26.4 trackable pieces): piece bodies spawned this run — by
+     *  the screwdriver (PART_CHANGED 'removed', `pieces`) and by breakage ('broken') — and
+     *  how many were not at the destination at settlement (written by settle() in main.js
+     *  from the manifest's piece status, the way worstCargoShift is written by 'phase'). */
+    piecesCreated: 0,
+    piecesLeftBehind: 0,
     /** Metres: the single largest departure-to-arrival displacement of a loaded item. Written
      *  by the 'phase' system in main.js from cargo.shiftSince (§27.4 "cargo motion"). */
     worstCargoShift: 0,
@@ -80,7 +86,13 @@ export function countEvent(c, evt) {
     case EVENTS.CARGO_STATE:    if (evt.loaded) c.cargo.loaded++; else c.cargo.unloaded++; break;
     case EVENTS.ROAD_FORCE:     c.roadEvents++; break;
     case EVENTS.TOOL_STATE:     c.toolChanges++; break;
-    case EVENTS.PART_CHANGED:   c.partChanges++; break;
+    case EVENTS.PART_CHANGED:
+      /* M12: a 'broken' PART_CHANGED is the damage system fragmenting an item, not a
+       * screwdriver change, so it counts pieces and not partChanges; a 'removed' one counts
+       * both. `pieces` is the number of bodies the event created. */
+      if (evt.action === 'broken') c.piecesCreated += evt.pieces || 0;
+      else { c.partChanges++; if (evt.action === 'removed') c.piecesCreated += evt.pieces || 0; }
+      break;
     default:
       /* Kept as a guard, not a path. M6 MEASURED (m17 R4e) that a ROAD_FORCE arrived here
        * stamped 'hardBrake': route.js's payload carried its own `type` and EventBus.emit
@@ -200,6 +212,8 @@ export function buildRunSummary(state, invoice, review, summary, stats, recorder
       roadEvents: c.roadEvents,
       toolChanges: c.toolChanges,
       partChanges: c.partChanges,
+      piecesCreated: c.piecesCreated || 0,
+      piecesLeftBehind: c.piecesLeftBehind || 0,
       /** Constant 1 in this build (state.tripCount is never written — recorded honestly). */
       trips: (stats && stats.trips) || state.tripCount || 1,
       worstCargoShift: Math.round((c.worstCargoShift || 0) * TELEMETRY.precision.metres) / TELEMETRY.precision.metres,

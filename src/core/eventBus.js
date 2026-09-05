@@ -32,6 +32,9 @@ export const EVENTS = Object.freeze({
    * rather than inferred from watching a body move. */
   TOOL_STATE:       'TOOL_STATE',       // toolId, entityId, state: attached|covered|deployed|detached
   PART_CHANGED:     'PART_CHANGED',     // entityId, part, removed|restored, dimensions
+  /* Phase 11 M11. §8.2's door leaf on or off its hinges — observable, like a tool's state,
+   * because §15.2's review tag front_door_removed and the run record both read it. */
+  DOOR_STATE:       'DOOR_STATE',       // doorId, entityId, state: removed|rehung (boot state is entity.state.hung; 'hung' is never emitted)
   ZONE_CHANGED:     'ZONE_CHANGED',     // entityId, zoneId, entered|exited, settled
   CARGO_STATE:      'CARGO_STATE',      // entityId, truckId, secured, support, risk
   ROAD_FORCE:       'ROAD_FORCE',       // roadType, label, severity (never `type` — the envelope owns it)

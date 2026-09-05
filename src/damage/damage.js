@@ -29,7 +29,7 @@
 
 import { DAMAGE } from '../config.js';
 import { EVENTS } from '../core/eventBus.js';
-import { conditionLossFor, impactToleranceOf } from '../tools/tools.js';
+import { conditionLossFor, impactToleranceOf, breakInto } from '../tools/tools.js';
 
 /** §8.3's condition bands, as a lookup. Condition is 0..100 (§7.2). */
 export function bandFor(condition) {
@@ -83,6 +83,10 @@ export class DamageSystem {
    * cannot fire while something is sitting still.
    */
   step(stepMs, simTimeMs = 0) {
+    /* Items that entered the 'broken' band THIS step. Fragmented after the loop, not inside
+     * it: breakInto spawns bodies into the map being iterated, and a fragment born mid-loop
+     * would be visited with no previous speed (harmless, but a wasted read). M12. */
+    const broke = [];
     for (const e of this.registry.entities.values()) {
       const v = e.body.linvel();
       const speed = Math.hypot(v.x, v.y, v.z);
@@ -115,13 +119,36 @@ export class DamageSystem {
 
       // The condition change itself is immediate — §8.4 wants a mark AT impact. It is the
       // COST REPORT that is aggregated, not the physics.
+      const bandBefore = bandFor(e.state.condition).name;
       e.state.condition = Math.max(0, e.state.condition - loss);
+      if (bandBefore !== 'broken' && bandFor(e.state.condition).name === 'broken' && !e.state.fragments) broke.push(e);
 
       this.impactCount++;
       if (this.bus) {
         this.bus.emit(EVENTS.IMPACT, {
           entityId: e.id, relVelocity: lost, position: { x: t.x, y: t.y, z: t.z },
           materials: e.def.surfaceTags,
+        }, simTimeMs);
+      }
+    }
+
+    /* §26.4 "BROKEN REQUIRED CARGO STAYS DELIVERABLE OR BECOMES TRACKABLE PIECES" — both,
+     * in the same step the band was crossed (M12). The hulk keeps its row, its mass and its
+     * collider (nothing here touches them: it is still the thing that has to reach its
+     * room); PARTS.brokenFragmentCount[fragility] fragments appear beside it as bodies the
+     * registry, the cargo box and this system all see from now on. The cost was already
+     * posted by the band (DAMAGE.bands 'broken' = the whole replacement value) — a fragment
+     * is priced at 0, so nothing is billed twice (§10.4: no damage without a physical cause,
+     * and no second bill for one cause). The event reuses PART_CHANGED with action 'broken'
+     * so the recorder (runLog.js) and the caption layer already know its shape. */
+    for (const e of broke) {
+      const ids = breakInto(this.registry, e);
+      if (!ids.length) continue;
+      if (this.bus) {
+        const t = e.body.translation();
+        this.bus.emit(EVENTS.PART_CHANGED, {
+          entityId: e.id, part: 'fragments', action: 'broken', pieces: ids.length,
+          position: { x: t.x, y: t.y, z: t.z },
         }, simTimeMs);
       }
     }

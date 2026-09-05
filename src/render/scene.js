@@ -52,7 +52,7 @@
  * re-runs both against the destination's doors as well).
  */
 
-import { RENDER } from '../config.js';
+import { RENDER, DOOR } from '../config.js';
 
 /** Real dimensions, metres. §7.1 gives couch_3seat_01 as 2.1 x 0.9 x 0.85 explicitly. */
 export const REFERENCE_DIMS = Object.freeze({
@@ -80,10 +80,21 @@ export const REFERENCE_DIMS = Object.freeze({
  * All three are built into the Phase 0 wall so the relationship is measurable on day one
  * rather than discovered at Phase 5. tools\m0-tests.js asserts each case.
  */
+/* …AND SINCE M11 TWO OF THEM HAVE THEIR DOORS ON. `leaf` hangs a real 40 mm leaf in the
+ * opening (house.js — hinge jamb, swing side, and how a removed leaf is laid down), so the
+ * usable width is gap − 0.04 until the screwdriver takes it off: the 34" door is 0.82 m clear
+ * with its leaf hung, i.e. the "impossible" 32-inch figure was this door with its door on.
+ * door34 is the §15.2 front door (`front`: its removal earns the review tag
+ * front_door_removed). interior32 swings OUT onto the grass — it opens onto no room, and the
+ * living-room side is where door34's leaf is laid down. front36 stays leafless: it is the
+ * opening on every route and the one a couch actually uses. `height` is the header line
+ * every front opening has always been built to (REFERENCE_DIMS.doorwayHeight). */
 export const APERTURES = Object.freeze([
-  { id: 'interior32', gap: 0.82, label: '32" interior', x: -3.2 },
-  { id: 'door34',     gap: 0.86, label: '34" door',     x:  0.0 },
-  { id: 'front36',    gap: 0.91, label: '36" front',    x:  3.2 },
+  { id: 'interior32', gap: 0.82, label: '32" interior', x: -3.2, height: REFERENCE_DIMS.doorwayHeight,
+    leaf: { t: DOOR.leaf.t, hinge: +1, swing: +1, lay: 'room' } },
+  { id: 'door34',     gap: 0.86, label: '34" door',     x:  0.0, height: REFERENCE_DIMS.doorwayHeight,
+    leaf: { t: DOOR.leaf.t, hinge: -1, swing: -1, lay: 'room', front: true } },
+  { id: 'front36',    gap: 0.91, label: '36" front',    x:  3.2, height: REFERENCE_DIMS.doorwayHeight },
 ]);
 
 /* ── Phase 1 test geometry ───────────────────────────────────────────────────────────

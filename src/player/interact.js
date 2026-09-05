@@ -37,9 +37,9 @@
  * made, 7 honoured." That test is the reusable part.
  */
 
-import { TOOLS, GRIP } from '../config.js';
+import { TOOLS, GRIP, DOOR } from '../config.js';
 import { EVENTS, PHASES } from '../core/eventBus.js';
-import { disassemble, reassemble, currentDimensions } from '../tools/tools.js';
+import { disassemble, reassemble, currentDimensions, partStatus } from '../tools/tools.js';
 import { cargoAnchors, cabPoint, insideCargo, rampAnchorPoint, CARGO_BOX } from '../world/truck.js';
 import { STRAP_STATE } from '../cargo/straps.js';
 import { GROUP_PRESETS } from '../physics/world.js';
@@ -304,6 +304,12 @@ export class InteractionSystem {
 
       case TARGET.OBJECT: {
         const e = t.entity;
+        /* A door on its hinges (M11). Nothing E or a bare hand does to it; the prompt says
+         * what would — §2.1: told in advance, never refused after the fact. */
+        if (isLeaf(e) && e.state.hung) {
+          return { primary: null, secondary: null, target: t,
+                   hint: 'door — on its hinges; the screwdriver takes it off' };
+        }
         const onIt = this.straps.onEntity(e.id).filter((x) => x.state !== STRAP_STATE.FAILED);
         const tool = e.state.dollyId || e.state.blanketId;
         if (onIt.length) {
@@ -318,7 +324,12 @@ export class InteractionSystem {
           return { primary: null, secondary: `take the ${which} off`, target: t };
         }
         if ((e.state.removedParts || []).length) {
-          return { primary: null, secondary: `put the ${e.state.removedParts[0]} back on`, target: t };
+          return { primary: null, secondary: this._partLabel(e), target: t };
+        }
+        // A leaf off its hinges, within reach of its jamb: Q hangs it back (§8.2 "reattach").
+        if (isLeaf(e) && this._atJamb(e)) {
+          return { primary: null, secondary: DOOR_REHANG_LABEL, target: t,
+                   hint: `${label(e)} — hold {gripL}/{gripR} to carry` };
         }
         /* DEVICE-NEUTRAL. The grips are LMB/RMB for seat 0's mouse, [ ] for seat 1's
          * keyboard and LT/RT on a pad; the HUD knows which seat and device it is drawing
@@ -337,9 +348,22 @@ export class InteractionSystem {
    *  panel's 'right room' line appears only AFTER the first delivery; this names the room
    *  BEFORE the pickup, which is when the choice is made (§21.1, §26.7). */
   _roomHint(entity) {
-    const row = this.manifestRow(entity.id);
+    // A loose piece (M12) goes where its parent goes: the leg's room is the couch's row.
+    const link = entity.state.partOf || entity.state.fragmentOf;
+    const row = this.manifestRow(link ? link.entityId : entity.id);
     if (!row || !row.toZone || (row.delivered && row.roomCorrect)) return '';
     return ` → ${this.roomLabel(row.toZone)}`;
+  }
+
+  /** Q's line for an object with a part off (M12): 'put the legs back on' when every piece
+   *  is within PARTS.reattachRange, else 'find the legs (1 of 4 missing)' — the same
+   *  partStatus reassemble() refuses on, so the prompt never promises what Q cannot do. */
+  _partLabel(entity) {
+    const part = (entity.state.removedParts || [])[0];
+    if (!part) return null;
+    const st = partStatus(this.registry, entity, part);
+    if (st.missing > 0) return `find the ${part} (${st.missing} of ${st.of} missing)`;
+    return `put the ${part} back on`;
   }
 
   _applyLabel(tool, t) {
@@ -348,6 +372,10 @@ export class InteractionSystem {
       return null;
     }
     const e = t.entity;
+    /* A door leaf (M11). Hung, the screwdriver is the only tool with anything to say
+     * (§8.2 "remove from hinges"); a dolly or a blanket on a door that is part of the wall
+     * would be a promise act() could not keep. Off its hinges it is an ordinary object. */
+    if (isLeaf(e) && e.state.hung) return tool.def.effect === 'dimensions' ? DOOR_REMOVE_LABEL : null;
     switch (tool.def.effect) {
       case 'friction':
         return e.state.dollyId ? null : `put ${label(e)} on the dolly`;
@@ -370,7 +398,20 @@ export class InteractionSystem {
     if (!entity) return false;
     if (this.straps.onEntity(entity.id).some((s) => s.state !== STRAP_STATE.FAILED)) return true;
     if (entity.state.dollyId || entity.state.blanketId) return true;
-    return (entity.state.removedParts || []).length > 0;
+    if ((entity.state.removedParts || []).length > 0) return true;
+    return isLeaf(entity) && this._atJamb(entity);
+  }
+
+  /** A door leaf that is off its hinges and close enough to its jamb to be hung back:
+   *  horizontal distance from where it is to where it hangs (state.home, house.js leafPose)
+   *  within DOOR.rehangRange. One place, so describe(), _undoable() and secondary() agree. */
+  _atJamb(entity) {
+    if (!isLeaf(entity) || entity.state.hung || !entity.state.home) return false;
+    // Not while a hand is on it: hanging a held leaf would leave a grip spring pulling on
+    // a Fixed body and the leaf in the held collision group. Put it down, then Q.
+    if (entity.state.held) return false;
+    const t = entity.body.translation(), h = entity.state.home;
+    return Math.hypot(t.x - h.x, t.z - h.z) <= DOOR.rehangRange;
   }
 
   /** …and what to call it. */
@@ -381,7 +422,8 @@ export class InteractionSystem {
     if (entity.state.dollyId) return 'take the dolly off';
     if (entity.state.blanketId) return 'take the blanket off';
     const part = (entity.state.removedParts || [])[0];
-    return part ? `put the ${part} back on` : null;
+    if (part) return this._partLabel(entity);
+    return this._atJamb(entity) ? DOOR_REHANG_LABEL : null;
   }
 
   _nextPart(entity) {
@@ -487,9 +529,30 @@ export class InteractionSystem {
       }
       const part = (e.state.removedParts || [])[0];
       if (part) {
-        reassemble(this.registry, e, part);
-        if (this.bus) this.bus.emit(EVENTS.PART_CHANGED, { entityId: e.id, part, action: 'restored' }, this.now());
+        /* M12: reassemble() refuses while a piece is out of PARTS.reattachRange — the part
+         * is not back on, nothing changes, and Q says what the prompt said (§4.4: the key
+         * means what the line under the reticle said it would). */
+        const r = reassemble(this.registry, e, part);
+        if (!r) {
+          const st = partStatus(this.registry, e, part);
+          return this._say(`${part}: ${st.missing} of ${st.of} missing — find them first`);
+        }
+        if (this.bus) {
+          this.bus.emit(EVENTS.PART_CHANGED,
+            { entityId: e.id, part, action: 'restored', pieces: r.piecesRemoved }, this.now());
+        }
         return this._say(`${part} back on`);
+      }
+      /* §8.2 "reattach", for the house's own doors (M11): a leaf within DOOR.rehangRange of
+       * its jamb goes back on its hinges — Fixed again at its home pose, the clear width
+       * back to gap − t. Free of charge: the preparation was paid taking it off. */
+      if (isLeaf(e) && this._atJamb(e)) {
+        this.registry.hang(e, e.state.home);
+        if (this.bus) {
+          this.bus.emit(EVENTS.DOOR_STATE,
+            { doorId: e.state.doorId, entityId: e.id, state: 'rehung', by: mover.id }, this.now());
+        }
+        return this._say('door back on its hinges');
       }
     }
     return null;
@@ -549,6 +612,25 @@ export class InteractionSystem {
     if (t.kind !== TARGET.OBJECT) return null;
     const e = t.entity;
 
+    /* A door on its hinges (M11; §8.2 "Door: open or remove from hinges — preparation time
+     * and replacement risk"). The screwdriver takes it off: the body goes Dynamic and is laid
+     * flat beside the doorway (registry.unhang, house.js leafRestPose), DOOR.removeSeconds
+     * land on the labour clock through the same chargeWorkMs hook a disassembly uses (M8;
+     * §2.3), and DOOR_STATE 'removed' is on the bus for the run record and §15.2's review.
+     * The opening is the full gap from this moment. Any other tool: nothing — _applyLabel
+     * promised nothing, so nothing is refused here. */
+    if (isLeaf(e) && e.state.hung) {
+      if (tool.def.effect !== 'dimensions') return null;
+      this.registry.unhang(e, e.state.rest || null);
+      const seconds = DOOR.removeSeconds * TOOLS.screwdriver.timeScale;
+      if (this.bus) {
+        this.bus.emit(EVENTS.DOOR_STATE,
+          { doorId: e.state.doorId, entityId: e.id, state: 'removed', by: mover.id }, simTimeMs);
+      }
+      this.chargeWorkMs(seconds * 1000, { entityId: e.id, doorId: e.state.doorId, seconds });
+      return this._say(`door off its hinges — ${seconds.toFixed(0)} s of prep`);
+    }
+
     switch (tool.def.effect) {
       case 'friction': {
         if (!this.tools.attachDolly(tool, e)) return null;
@@ -573,8 +655,9 @@ export class InteractionSystem {
         const r = disassemble(this.registry, e, part);
         if (!r) return null;
         if (this.bus) {
+          // `pieces` (M12): how many bodies the part became — the recorder counts them.
           this.bus.emit(EVENTS.PART_CHANGED,
-            { entityId: e.id, part, action: 'removed', dimensions: r.after }, simTimeMs);
+            { entityId: e.id, part, action: 'removed', dimensions: r.after, pieces: (r.pieces || []).length }, simTimeMs);
         }
         /* §8.2's tradeoff is "preparation time", and until Phase 11 M8 it was never paid:
          * disassemble() returned the authored seconds and this line threw them away, so
@@ -585,7 +668,9 @@ export class InteractionSystem {
         const prepMs = r.seconds * 1000;
         this.chargeWorkMs(prepMs, { entityId: e.id, part, seconds: r.seconds });
         const saved = (1 - r.volumeAfter / r.volumeBefore) * 100;
-        return this._say(`${part} off — ${saved.toFixed(0)}% smaller · ${r.seconds.toFixed(0)} s of prep`);
+        const loose = (r.pieces || []).length;
+        return this._say(`${part} off — ${saved.toFixed(0)}% smaller · ${r.seconds.toFixed(0)} s of prep` +
+                         (loose ? ` · ${loose} loose` : ''));
       }
       default:
         return null;
@@ -645,10 +730,25 @@ export class InteractionSystem {
   _say(msg) { this.lastMessage = msg; return msg; }
 }
 
+/* ── door leaves (M11) ─────────────────────────────────────────────────────────── */
+
+/** The two door verbs, as the prompt prints them — one string each, so describe() and the
+ *  suites (m11 DL, m19 D4) can never disagree about the words. */
+export const DOOR_REMOVE_LABEL = 'take the door off its hinges';
+export const DOOR_REHANG_LABEL = 'hang the door back on its hinges';
+
+/** Is this registry entity one of the house's door leaves? By its state, which main.js
+ *  gives every leaf at spawn ({doorId, hung, home, rest} — plain data, §22.4). */
+export function isLeaf(entity) {
+  return !!(entity && entity.state && entity.state.doorId != null);
+}
+
 /** A short human name for an object. §21.2 needs to say WHICH thing, and `box_small_01#7`
  *  is an identifier rather than a name. */
 export function label(entity) {
   if (!entity) return 'it';
+  // A derived definition names itself (M12: 'couch 3seat leg', 'tv 55 fragment').
+  if (entity.def && typeof entity.def.label === 'string' && entity.def.label) return entity.def.label;
   return (entity.defId || '')
     .replace(/_\d+$/, '')
     .replace(/_/g, ' ')

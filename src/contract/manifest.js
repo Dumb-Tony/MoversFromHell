@@ -30,7 +30,7 @@
  * delivered — §2.2's "failure becomes state". This module reports; it never terminates.
  */
 
-import { MANIFEST } from '../config.js';
+import { PARTS,  MANIFEST } from '../config.js';
 import { ZONES, zoneAt, zoneById } from '../world/house.js';
 import { DEST_ZONES, destZoneAt, insideDestination, destZoneIds } from '../world/destination.js';
 import { OBJECT_DEFS } from '../objects/definitions.js';
@@ -112,7 +112,22 @@ export function stepManifest(rows, registry, stepMs, zones = ZONES) {
 
     if (settledHere) row.dwellMs = Math.min(MANIFEST.dwellMs, row.dwellMs + stepMs);
     else row.dwellMs = 0;
-    row.delivered = row.dwellMs >= MANIFEST.dwellMs;
+
+    /* ITS PIECES HAVE TO BE HERE TOO (M12; §9.1 "loose pieces get lost", §12.3 "settled
+     * validation" per piece). An object whose legs are still at the pickup is not delivered
+     * — its row stays in progress with `piecesMissing` saying how many, and the objective
+     * line and the invoice read that count. Site-level, like the row itself: a piece counts
+     * once it is inside the destination, the same test the hulk passes. FRAGMENTS of a broken
+     * item are the other kind of piece (§26.4 "stays deliverable OR becomes trackable
+     * pieces"): tracked here as `fragmentsLeft` for the run summary, never a gate — the
+     * broken band already charged the item, and a hulk that could not be delivered without
+     * every shard would be a hard denial §2.1 forbids. */
+    const pieces = pieceStatusOf(e, registry);
+    row.piecesTotal = pieces.total;
+    row.piecesMissing = pieces.missing;
+    row.partsLeft = pieces.left;
+    row.fragmentsLeft = pieces.fragmentsLeft;
+    row.delivered = row.dwellMs >= MANIFEST.dwellMs && row.piecesMissing === 0;
 
     // …and the accuracy half, recorded whether or not it is right.
     const room = destZoneAt(centre);
@@ -121,6 +136,52 @@ export function stepManifest(rows, registry, stepMs, zones = ZONES) {
     row.roomCorrect = !!row.delivered && !!room && room.id === row.toZone &&
       substantiallyInside(target || room, centre, e.def.dimensions);
   }
+}
+
+/**
+ * Where an object's loose pieces are, as plain data for its manifest row (M12).
+ *
+ * `left` is one record per detached part with pieces not at the destination — part name,
+ * how many of how many, and the per-piece replacementValue share the invoice prices it at
+ * (read off the piece's own derived definition, so the row carries the number and the
+ * invoice never needs the entity). A piece whose entity is gone counts as missing.
+ *
+ * @returns {{total, missing, left: {part, name, missing, of, value}[], fragmentsLeft}}
+ */
+export function pieceStatusOf(entity, registry) {
+  const parts = entity.state.parts || null;
+  const fragments = entity.state.fragments || null;
+  if (!parts && !fragments) return { total: 0, missing: 0, left: [], fragmentsLeft: 0 };
+  let total = 0, missing = 0;
+  const left = [];
+  for (const [part, ids] of Object.entries(parts || {})) {
+    let gone = 0, value = 0, name = part;
+    for (const id of ids) {
+      total++;
+      const p = registry.get(id);
+      if (p) {
+        value = p.def.replacementValue;
+        name = (p.def.partOf && p.def.partOf.name) || part;
+        const t = p.body.translation();
+        if (insideDestination({ x: t.x, y: t.y, z: t.z })) continue;
+      }
+      gone++;
+    }
+    missing += gone;
+    /* Every piece gone from the registry (lost off the world and never recovered, or a
+     * stale id): the share is still the parent's value × partMassFraction / count, so the
+     * row is not both undeliverable AND unbilled (review minor, Phase 20). */
+    if (gone > 0 && !(value > 0)) value = (entity.def.replacementValue || 0) * PARTS.partMassFraction / Math.max(1, ids.length);
+    if (gone > 0) left.push({ part, name, missing: gone, of: ids.length, value });
+  }
+  let fragmentsLeft = 0;
+  for (const id of fragments || []) {
+    const p = registry.get(id);
+    if (!p) { fragmentsLeft++; continue; }
+    const t = p.body.translation();
+    if (!insideDestination({ x: t.x, y: t.y, z: t.z })) fragmentsLeft++;
+  }
+  return { total, missing, left, fragmentsLeft };
 }
 
 /** Which pickup zone each manifest object is in right now. Used by the HUD and by the
@@ -155,6 +216,10 @@ export function manifestSummary(rows) {
     roomCorrect,
     roomAccuracy: delivered > 0 ? roomCorrect / delivered : 1,
     complete: delivered === total && total > 0,
+    /** M12: detached-part pieces not at the destination (these hold rows open), and every
+     *  loose piece not there — parts plus fragments — for §27.4's piecesLeftBehind. */
+    piecesMissing: rows.reduce((s, r) => s + (r.piecesMissing || 0), 0),
+    piecesLeft: rows.reduce((s, r) => s + (r.piecesMissing || 0) + (r.fragmentsLeft || 0), 0),
   };
 }
 
@@ -173,11 +238,13 @@ export function deliveryStatus(rows, registry) {
     if (!e) { outstanding.push({ id: row.id, defId: row.defId, why: 'missing' }); continue; }
     const t = e.body.translation();
     const inBuilding = insideDestination({ x: t.x, y: t.y, z: t.z });
+    const parts = (row.partsLeft || []).map((l) => `${l.missing} of ${l.of} ${l.part}`).join(', ');
     outstanding.push({
       id: row.id,
       defId: row.defId,
       why: !inBuilding ? 'not at the destination'
          : !e.state.settled ? 'still moving'
+         : row.piecesMissing > 0 ? `parts missing (${parts})`
          : 'settling',
     });
   }

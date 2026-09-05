@@ -125,6 +125,11 @@ const PART = Object.freeze({
   tapeWidth: 0.06, tapeThick: 0.006, tapeDrop: 0.35,
   /** Handles: nothing under 15 mm reads at 4 m (P7); tape is a highlight strip, not a part. */
   handleThick: 0.024, handleLen: 0.14, wardrobeHandleLen: 0.18, barRadiusFrac: 0.45,
+  /** Door leaf (M11): the slab is this fraction of the collider's thickness, and the rest is
+   *  what the two moulded panels and the lever handle stand proud by — so the whole visual
+   *  stays inside the 40 mm the physics uses (§13.4, m13 A1). Handle 12 cm, 10 cm in from
+   *  the free end at mid height; panels 62 % of the width. */
+  doorSlabFrac: 0.6, doorPanelFrac: 0.62, doorHandleLen: 0.12, doorHandleW: 0.02, doorHandleInset: 0.10,
   /** Drawer/door gap, front radius, front thickness, front recess behind the cap edge. */
   gap: 0.012, frontRadius: 0.018, frontT: 0.02, frontRecess: 0.04,
   capT: 0.02, plinthH: 0.05, plinthInset: 0.02,
@@ -778,10 +783,95 @@ const BUILD = {
       cyl(g, PART.buttonR, PART.buttonR, PART.buttonT, bx, d.y / 2 - PART.buttonT / 2, bz, button);
     }
   },
+
+  /* ── loose parts and fragments (Phase 11 build-side M12; §9.1, §26.4) ──────────────────
+   *
+   * A piece is grabbed, dropped, packed and priced by its collider like any object, so each
+   * of these is built INSIDE def.dimensions and centred on them (m13 A1/A2's rule, asserted
+   * for every derived definition by m20 P9). The material follows the parent: def.colour
+   * and surfaceTags come across in pieceDefFor / fragmentDefFor (definitions.js). */
+
+  /** A turned foot or leg: a tapered cylinder along the LONGEST axis — a couch foot stands
+   *  on its 80 mm, a chair leg lies flat on its 430 — with a pad at the fat end when it stands. */
+  leg(g, d, def) {
+    const wood = tex('walnut', texWood('walnut'));
+    const axis = (d.x >= d.y && d.x >= d.z) ? 'x' : (d.z > d.y ? 'z' : 'y');
+    const across = Math.min(...['x', 'y', 'z'].filter((a) => a !== axis).map((a) => d[a]));
+    const r = across / 2;
+    const len = d[axis];
+    if (axis === 'y') {
+      const padH = Math.min(PART.capT, d.y * 0.15);
+      part(g, d.x, padH, d.z, 0, d.y / 2 - padH / 2, 0, wood, { name: 'pad' });
+      // Height len - padH centred at -padH/2: bottom exactly -d.y/2, top meets the pad.
+      cyl(g, r, r * PART.driverHandleTaper, len - padH, 0, -padH / 2, 0, wood, PART.segments);
+    } else {
+      cyl(g, r, r * PART.driverHandleTaper, len, 0, 0, 0, wood, PART.segments,
+          axis === 'x' ? Math.PI / 2 : 0, axis === 'z' ? Math.PI / 2 : 0);
+    }
+    void def;
+  },
+
+  /** A door leaf lying flat: one rounded slab the full size. Steel for an appliance's door
+   *  (surfaceTags), walnut for furniture. No handle — anything proud of the slab leaves the
+   *  collider, and a 40 mm leaf has no room for one inside it. */
+  panel(g, d, def) {
+    const metal = (def.surfaceTags || []).some((t) => t === 'steel' || t === 'appliance' || t === 'metal');
+    const face = metal ? mat('paint', def.colour || PREFAB_PALETTE.fallback)
+                       : tex('walnut', texWood('walnut', PREFAB_PALETTE.walnutDoor));
+    slab(g, d.x, d.y, d.z, 0, 0, 0, [face, face], { name: 'leaf' });
+  },
+
+  /** A shelf board. */
+  board(g, d, def) {
+    const wood = tex('walnut', texWood('walnut'));
+    slab(g, d.x, d.y, d.z, 0, 0, 0, [wood, wood], { name: 'board' });
+    void def;
+  },
+
+  /** A television's stand: a plate the full footprint with the neck stub on it. */
+  stand(g, d, def) {
+    const dark = mat('plastic', def.colour || PREFAB_PALETTE.fallback);
+    const plateH = d.y * 0.5;
+    slab(g, d.x, plateH, d.z, 0, -d.y / 2 + plateH / 2, 0, [dark, dark], { name: 'plate' });
+    part(g, d.x * 0.25, d.y - plateH, d.z * 0.5, 0, d.y / 2 - (d.y - plateH) / 2, 0, dark, { name: 'neck' });
+  },
+
+  /** A broken chunk: two offset slabs inside the box read as a jagged piece without leaving it. */
+  fragment(g, d, def) {
+    const paint = mat('paint', def.colour || PREFAB_PALETTE.fallback);
+    part(g, d.x, d.y, d.z * 0.7, 0, 0, -d.z * 0.15, paint, { name: 'chunk' });
+    part(g, d.x * 0.6, d.y, d.z * 0.6, d.x * 0.2, 0, d.z * 0.2, paint, { name: 'shard' });
+  },
+
+  /* A door leaf (M11, §8.2): a painted slab 60 % of the collider's thickness, two moulded
+   * panels on each face standing proud in the remaining 8 mm, and a lever handle at the
+   * free (+z) end at mid height. Everything inside d: the slab's faces plus the proud parts
+   * reach exactly ±d.x/2, never beyond (m13 A1), and the group is centred (A2). */
+  door(g, d, def) {
+    const paint = mat('paintedTimber', def.colour || PREFAB_PALETTE.fallback);
+    const brass = mat('chrome', PREFAB_PALETTE.chrome);
+    const slabT = d.x * PART.doorSlabFrac;
+    const proud = (d.x - slabT) / 2;
+    part(g, slabT, d.y, d.z, 0, 0, 0, paint, { radius: Math.min(PART.frontRadius, slabT * PART.maxRadiusFrac), name: 'leaf' });
+    const pw = d.z * PART.doorPanelFrac;
+    for (const s of [-1, 1]) {
+      const px = s * (slabT / 2 + proud * 0.25);
+      part(g, proud * 0.5, d.y * 0.34, pw, px, d.y * 0.22, 0, paint, { radius: proud * 0.2, name: 'panel' });
+      part(g, proud * 0.5, d.y * 0.30, pw, px, -d.y * 0.25, 0, paint, { radius: proud * 0.2, name: 'panel' });
+      bar(g, PART.doorHandleLen, proud, s * (slabT / 2 + proud / 2), 0,
+          d.z / 2 - PART.doorHandleInset - PART.doorHandleLen / 2, brass, 'z', PART.doorHandleW, 'x', 'handle');
+    }
+  },
 };
 
 /** prefab name -> builder + options. Anything unlisted falls back to a painted box. */
 const PREFABS = {
+  // M12: the derived piece definitions (definitions.js pieceDefFor / fragmentDefFor).
+  leg:             [BUILD.leg],
+  panel:           [BUILD.panel],
+  board:           [BUILD.board],
+  stand:           [BUILD.stand],
+  fragment:        [BUILD.fragment],
   box_small:       [BUILD.box],
   box_heavy:       [BUILD.box],
   box_fragile:     [BUILD.box],
@@ -798,6 +888,7 @@ const PREFABS = {
   mirror_framed:   [BUILD.mirror],
   fridge:          [BUILD.fridge],
   mattress_double: [BUILD.mattress],
+  door_leaf:       [BUILD.door],        // M11: the house's own doors, off their hinges
 };
 
 /**

@@ -24,6 +24,7 @@ import { OBJECT_DEFS, PHASE5_SPAWNS, validateAllDefs } from '../src/objects/defi
 import {
   ZONES, INTERIOR_DOORS, PARTITIONS, ROUTES, ROOM, PARTITION_T,
   zoneAt, zoneById, overlappingZones, wallSegments, tightestOnRoute,
+  leafDoors, leafPose, leafRestPose, leafAabb, hungClear,   // Phase 11 build-side M11, section DL
 } from '../src/world/house.js';
 import {
   buildManifest, validateManifest, overlappingSpawns, manifestSummary,
@@ -307,13 +308,22 @@ lines.push('--- B. the house and its route (GDD §13.1, §8.1) ---');
    * reach its own room — a hard denial §2.1 forbids, arriving through level geometry. */
   const couch = OBJECT_DEFS.couch_3seat_01.dimensions;
   const narrowest = minProjectedWidth(couch.z, couch.y);
-  const tightest = tightestOnRoute('bedroom', APERTURES);
-  ok('B6 the couch can physically reach the bedroom (§2.1 no accidental hard denial)',
+  /* SINCE M11 THE DOORS ARE HUNG, and tightestOnRoute reads the EFFECTIVE width: the 0.86 m
+   * living->kitchen opening is 0.82 with its 40 mm leaf on. So the claim is now the §3.3
+   * pair: with the doors off their hinges the couch reaches the bedroom (0.850 <= 0.86);
+   * with every leaf hung it does not (0.850 > 0.82) — the preparation gate, not a hard
+   * denial, because the screwdriver opens it (§2.1, §8.2). */
+  const tightest = tightestOnRoute('bedroom', APERTURES, INTERIOR_DOORS, () => false);
+  ok('B6 the couch can physically reach the bedroom with the doors off their hinges (§2.1 no accidental hard denial)',
      narrowest <= tightest,
      `couch ${narrowest.toFixed(3)} m vs tightest opening ${tightest.toFixed(3)} m`);
   ok('B7 …but only just: under 100 mm of clearance',
      tightest - narrowest < 0.10,
      `${((tightest - narrowest) * 1000).toFixed(0)} mm`);
+  const tightestHung = tightestOnRoute('bedroom', APERTURES);
+  ok('B6b …and NOT with every door hung: 0.82 m against 0.850 — §8.2\'s door is the key, and the screwdriver turns it (M11)',
+     tightestHung === 0.82 && narrowest > tightestHung,
+     `hung ${tightestHung.toFixed(3)} vs couch ${narrowest.toFixed(3)}`);
 
   // The 32" front aperture remains impossible for the couch — the Phase 0 fact, unchanged.
   const tiny = APERTURES.find((a) => a.id === 'interior32');
@@ -596,15 +606,19 @@ lines.push('--- H. the couch starts behind the 34" door (M8: GDD §3.3, §8.1, �
   // The route this puts it on.
   eq('H6 the kitchen\'s route is two legs — front36 then living_kitchen from the driveway in',
      ROUTES.kitchen.join(' -> '), 'front36 -> living_kitchen');
-  const tightest = tightestOnRoute('kitchen', APERTURES);
-  near('H6a …so the tightest opening on the couch\'s route is now 0.86 m — the 34" door (was 0.91)', tightest, 0.86, 1e-9);
+  // M11: the 34" door has its leaf hung now, so the route's tightest EFFECTIVE width is 0.82 until
+  // the screwdriver takes the leaf off; the M8 numbers below are the door-off ones.
+  const tightest = tightestOnRoute('kitchen', APERTURES, INTERIOR_DOORS, () => false);
+  near('H6a …so the tightest opening on the couch\'s route is 0.86 m with the leaf off — the 34" door (was 0.91 before M8)', tightest, 0.86, 1e-9);
+  near('H6b …and 0.82 m with it hung (M11: a 40 mm leaf in the 0.86 opening)', tightestOnRoute('kitchen', APERTURES), 0.82, 1e-9);
   const narrowest = minProjectedWidth(cd.z, cd.y);
-  ok('H7 intact, the couch can still get out: 0.850 <= 0.86 (§2.1 no accidental hard denial)',
+  ok('H7 intact, the couch can still get out once the door is off: 0.850 <= 0.86 (§2.1 no accidental hard denial)',
      narrowest <= tightest, `${narrowest.toFixed(3)} vs ${tightest.toFixed(3)}`);
   near('H7a …with exactly 10 mm to spare, on its side', tightest - narrowest, 0.010, 1e-9);
   const legs = (OBJECT_DEFS.couch_3seat_01.disassembly || [])[0];
   const legsOff = legs ? minProjectedWidth(legs.shrinksTo.z, legs.shrinksTo.y) : NaN;
   near('H7b …or 90 mm with the legs off — §3.3\'s prepared branch, on the shipped contract', tightest - legsOff, 0.090, 1e-9);
+  near('H7c …and 50 mm with the legs off past the HUNG leaf: prepare the couch or prepare the door (M11)', tightestOnRoute('kitchen', APERTURES) - legsOff, 0.050, 1e-9);
 
   // The manifest row: same destination, and fromZone finally filled (KNOWN_ISSUES had it null on every row).
   const row = rows[idx];
@@ -618,6 +632,133 @@ lines.push('--- H. the couch starts behind the 34" door (M8: GDD §3.3, §8.1, �
      wrongFrom.map((r) => `${r.defId}:${r.fromZone}`).join(', '));
   const fromCounts = rows.reduce((m, r) => { m[r.fromZone] = (m[r.fromZone] || 0) + 1; return m; }, {});
   lines.push(`      fromZone: ${Object.entries(fromCounts).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+}
+emit('running...');
+
+/* ── DL. THE DOOR LEAVES (Phase 11 build-side M11: GDD §8.2, §8.1, §3.3, §2.1) ───────────
+ *
+ * Every door record with a `leaf` hangs a 40 mm door_leaf_01 in its opening (house.js
+ * leafPose) and lays it down beside the doorway when the screwdriver takes it off (house.js
+ * leafRestPose). Both poses are authored data, and the placement rules the file header
+ * promises apply to them as to any spawn: a leaf inside a wall or on top of a box is the
+ * authoring bug §24.4 names. Then the physical claim: a mover still walks the route through
+ * both interior doors with every leaf HUNG (a 0.32 m capsule in 0.82 m of air), and through
+ * the door centres with the leaves REMOVED. */
+lines.push('--- DL. the door leaves are placed clear, and the route still walks (M11: GDD §8.2, §8.1, §3.3) ---');
+{
+  const overlaps1D = (aLo, aHi, bLo, bHi) => aLo < bHi && bLo < aHi;
+  const boxOf = (s) => {
+    const d = OBJECT_DEFS[s.def].dimensions;
+    return { id: s.def, minX: s.x - d.x / 2, maxX: s.x + d.x / 2, minZ: s.z - d.z / 2, maxZ: s.z + d.z / 2, minY: s.y - d.y / 2, maxY: s.y + d.y / 2 };
+  };
+  const hits3 = (a, b) => overlaps1D(a.minX, a.maxX, b.minX, b.maxX) && overlaps1D(a.minZ, a.maxZ, b.minZ, b.maxZ) && overlaps1D(a.minY, a.maxY, b.minY, b.maxY);
+  const hits2 = (a, b) => overlaps1D(a.minX, a.maxX, b.minX, b.maxX) && overlaps1D(a.minZ, a.maxZ, b.minZ, b.maxZ);
+  // Every wall as a box: the partition runs either side of each opening, the shell, and the front wall's runs.
+  const wallBoxes = [];
+  for (const p of PARTITIONS) {
+    for (const seg of wallSegments(p)) {
+      wallBoxes.push(p.axis === 'x'
+        ? { id: p.id, minX: seg.lo, maxX: seg.hi, minZ: p.at - PARTITION_T / 2, maxZ: p.at + PARTITION_T / 2 }
+        : { id: p.id, minX: p.at - PARTITION_T / 2, maxX: p.at + PARTITION_T / 2, minZ: seg.lo, maxZ: seg.hi });
+    }
+  }
+  const T = ROOM.wallT / 2;
+  wallBoxes.push({ id: 'shell_back', minX: ROOM.minX, maxX: ROOM.maxX, minZ: ROOM.minZ - T, maxZ: ROOM.minZ + T });
+  wallBoxes.push({ id: 'shell_west', minX: ROOM.minX - T, maxX: ROOM.minX + T, minZ: ROOM.minZ, maxZ: ROOM.maxZ });
+  wallBoxes.push({ id: 'shell_east', minX: ROOM.maxX - T, maxX: ROOM.maxX + T, minZ: ROOM.minZ, maxZ: ROOM.maxZ });
+  const edges = APERTURES.map((a) => [a.x - a.gap / 2, a.x + a.gap / 2]).sort((p, q) => p[0] - q[0]);
+  let cursor = edges[0][0] - 3.0;
+  for (const [lo, hi] of edges) { wallBoxes.push({ id: 'front', minX: cursor, maxX: lo, minZ: ROOM.maxZ - T, maxZ: ROOM.maxZ + T }); cursor = hi; }
+  wallBoxes.push({ id: 'front', minX: cursor, maxX: cursor + 3.0, minZ: ROOM.maxZ - T, maxZ: ROOM.maxZ + T });
+
+  const records = leafDoors(APERTURES);
+  eq('DL1 four doors carry a leaf', records.length, 4);
+  const spawnBoxes = PHASE5_SPAWNS.map(boxOf);
+  const poses = [];
+  for (const d of records) {
+    poses.push({ door: d, kind: 'hung', aabb: leafAabb(d, leafPose(d)) });
+    poses.push({ door: d, kind: 'rest', aabb: leafAabb(d, leafRestPose(d)) });
+  }
+  const inSpawn = [], inWall = [], inDoor = [];
+  for (const p of poses) {
+    for (const s of spawnBoxes) if (hits3(p.aabb, s)) inSpawn.push(`${p.door.id}/${p.kind} vs ${s.id}`);
+    for (const w of wallBoxes) if (hits2(p.aabb, w)) inWall.push(`${p.door.id}/${p.kind} in ${w.id}`);
+    if (p.kind === 'rest') {
+      // A laid-down leaf must be OUT of its own opening (the clear width is the whole gap the moment it is off)…
+      const d = p.door;
+      const gapLo = d.centre - d.gap / 2, gapHi = d.centre + d.gap / 2;
+      const along = d.axis === 'x' ? [p.aabb.minX, p.aabb.maxX] : [p.aabb.minZ, p.aabb.maxZ];
+      if (overlaps1D(along[0], along[1], gapLo, gapHi)) inDoor.push(`${d.id}/rest lies across its own opening`);
+    }
+  }
+  ok('DL2 no PHASE5_SPAWNS footprint overlaps a hung leaf, nor a laid-down one', inSpawn.length === 0, inSpawn.join(' | '));
+  ok('DL3 no leaf pose overlaps a wall — partition run, shell or front wall', inWall.length === 0, inWall.join(' | '));
+  ok('DL4 a laid-down leaf is beside its doorway, never across it', inDoor.length === 0, inDoor.join(' | '));
+  const restVsRest = [];
+  for (let i = 0; i < poses.length; i++) {
+    for (let j = i + 1; j < poses.length; j++) {
+      if (poses[i].door === poses[j].door) continue;
+      if (hits3(poses[i].aabb, poses[j].aabb)) restVsRest.push(`${poses[i].door.id}/${poses[i].kind} vs ${poses[j].door.id}/${poses[j].kind}`);
+    }
+  }
+  ok('DL5 no two leaves ever share floor: every hung/rest pose of one door is clear of every pose of the others', restVsRest.length === 0, restVsRest.join(' | '));
+  for (const p of poses) {
+    const a = p.aabb;
+    lines.push(`      ${p.door.id} ${p.kind}: x ${a.minX.toFixed(2)}..${a.maxX.toFixed(2)} z ${a.minZ.toFixed(2)}..${a.maxZ.toFixed(2)} y ${a.minY.toFixed(2)}..${a.maxY.toFixed(2)}`);
+  }
+  // The hinge faces away from the route's approach (house.js): living_kitchen swings into the
+  // kitchen (approached from the living room), kitchen_bedroom into the bedroom (from the kitchen).
+  const lk = records.find((d) => d.id === 'living_kitchen'), kb = records.find((d) => d.id === 'kitchen_bedroom');
+  ok('DL6 the route\'s two doors swing AWAY from the approach: living_kitchen into the kitchen, kitchen_bedroom into the bedroom',
+     lk.leaf.swing === -1 && kb.leaf.swing === -1, `${lk.leaf.swing} ${kb.leaf.swing}`);
+
+  /* THE WALK. A mover through each interior door on the route, twice: with the leaf hung
+   * (aimed at the centre of the 0.82 m that is open) and with it removed (the door centre). */
+  const doorsApi = M.doors;
+  const walk = (d, hung, seconds = 1.2) => {
+    releaseAll();
+    if (hung) doorsApi.rehangAll('walk');
+    else { const e = doorsApi.leafFor(d.id); registry.unhang(e, e.state.rest); }
+    const m = movers[0];
+    placeMover(movers[1], PAD.x + 30, PAD.z + 30);
+    const clear = hungClear(d.id, APERTURES, INTERIOR_DOORS, () => hung);
+    // Centre of what is open: the whole gap, or the gap less the leaf on its hinge side.
+    const openCentre = hung ? d.centre - d.leaf.hinge * d.leaf.t / 2 : d.centre;
+    let start, yaw, crossed;
+    if (d.axis === 'x') {        // living_kitchen: from the living room (+z) into the kitchen (−z)
+      start = { x: openCentre, z: d.at + 1.1 }; yaw = 0;
+      crossed = () => m.controller.position.z < d.at - 0.6;
+    } else {                      // kitchen_bedroom: from the kitchen (+x) into the bedroom (−x)
+      start = { x: d.at + 0.6, z: openCentre }; yaw = Math.PI / 2;
+      crossed = () => m.controller.position.x < d.at - 0.6;
+    }
+    placeMover(m, start.x, start.z);
+    step(5);
+    const n = Math.round(seconds * 1000 / STEP);
+    let steps = 0, ok_ = false;
+    for (let k = 0; k < n; k++) {
+      step(1, { [m.id]: { move: { x: 0, y: 1 }, yaw } });
+      steps++;
+      if (crossed()) { ok_ = true; break; }
+    }
+    const p = { ...m.controller.position };
+    const e = doorsApi.leafFor(d.id);
+    const leafMoved = Math.hypot(e.body.translation().x - (hung ? e.state.home.x : e.state.rest.x), e.body.translation().z - (hung ? e.state.home.z : e.state.rest.z));
+    return { crossed: ok_, steps, p, clear, leafMoved };
+  };
+  for (const d of [lk, kb]) {
+    const off = walk(d, false);
+    ok(`DL7 ${d.id}: a mover walks through the door centre with the leaf removed`, off.crossed,
+       `at (${off.p.x.toFixed(2)}, ${off.p.z.toFixed(2)}) after ${off.steps} steps`);
+    const on = walk(d, true);
+    ok(`DL8 ${d.id}: …and through the ${on.clear.toFixed(2)} m that is open with the leaf HUNG`, on.crossed,
+       `at (${on.p.x.toFixed(2)}, ${on.p.z.toFixed(2)}) after ${on.steps} steps`);
+    ok(`DL8a ${d.id}: …without moving the hung leaf (a Fixed body)`, on.leafMoved < 1e-6, `${on.leafMoved.toFixed(4)} m`);
+    lines.push(`      ${d.id}: removed ${off.steps} steps, hung ${on.steps} steps`);
+  }
+  doorsApi.rehangAll('walk');
+  restoreAllToSpawn();
+  releaseAll();
 }
 emit('running...');
 

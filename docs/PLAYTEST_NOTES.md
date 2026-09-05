@@ -683,3 +683,27 @@ Questions for the external group: does the strain pitch read as 'about to fall o
 
 **Phase 11 M10 — dragging: it moves now.** Grab the couch one-handed, back up, and it comes: 0.34 m in the first three seconds (most of that is the ramp — your legs are allowed 0.74 m/s² of acceleration against a 90 kg couch), then a steady ~0.3 m/s, 2.45 m in ten seconds, for as long as you like; no stumble, no tear. It feels heavy in three ways: the walk animates at ~1.2 m/s while the body nets 0.4 (the couch hauls you back 0.8 m/s of it — CARRY.tractionN is what your legs hold before that starts), starts and turns are sluggish, and anything the couch snags on tears the hold at once. Two movers one hand each tow it at 2 m/s (5.1 m in 3 s), the dolly at 2.6 (6.5 m). Expect testers to try BRACING to drag harder and find it stops them: braced towing is an anchor (2 cm in 3 s — braced legs walk 0.76 m/s against a 0.69 m/s haul-back) — say so in the room; it is the right move for the partner who is holding the couch still while the other pivots it. Expect one tester to topple the fridge by grabbing it high and leaning back for seven seconds (5.9° at 3 s, over at 6.9 s at a 1.2 m grab); it is damage, it is not a way to move it, and it is left in. Holding the bare fridge you crawl at 0.15 m/s instead of being yanked about. Carrying a box is unchanged or slightly snappier (its tow cap is 4.78 m/s against a 4.5 m/s loaded run; it was 3.85).
 
+
+## Phase 20 — Phase 11 build side, batch 5: doors come off their hinges, and loose parts are real — 2026-09-04
+
+### M11
+
+### M11 — doors (2026-09-04)
+
+**How it plays.** Every doorway in the house has its door on, swung open against the jamb: living→kitchen is 0.82 m wide until you take the leaf off, 0.86 after. Look at a hung door empty-handed and the prompt says 'door — on its hinges; the screwdriver takes it off'. With the screwdriver, E reads 'take the door off its hinges', costs 45 s on the labour clock (the notice says so), and the door lies flat on the floor beside the doorway — never in it. Q while looking at it reads 'hang the door back on its hinges' and puts it back for free from anywhere within 1.25 m of its jamb; carry it further and you have to bring it back. A door is an 18 kg, 2 m × 0.8 m flat object: one hand lifts it, it takes truck space, it can be lost, and dropped from 1.5 m onto its face it is broken (180 on the invoice, and the customer's review notices the front door).
+
+**The couch decision at the 34" door now has three honest answers**, all measured: take the door off (45 s) and squeeze the intact couch on its side (10 mm); take the legs off (60 s) and go straight through the hung door (50 mm, if you line up on the open part); or both (90 mm). Intact and door on: impossible (−30 mm) — the prompt tells you why before you commit.
+
+**Watch for.** (1) Do testers notice the door at all, or do they ram the couch into it and read the jam as a physics bug? The hung leaf is a 40 mm edge in a 0.86 opening. (2) Do they take the door off BEFORE the couch reaches it or after jamming? (3) Do they carry the door away and forget it (§9.1 'loose pieces get lost')? (4) Q from beside the door is meant to be the undo — do they find it, or expect E with the screwdriver? (5) Anyone who grabs a hung door with a bare hand gets a stuck grip that tears — a known gap in grip.js.
+
+**Numbers to quote:** 45 s per door; 0.82/0.86; door 18 kg, one hand lifts it 0.25 m; a mover walks through a hung 0.82 door with 9 cm to spare each side.
+
+### M12
+
+M12 (loose parts) — things to watch with an external group:
+- Do testers notice the four legs at all? They spawn in a row on the couch's free side (0.35 m apart, 60 mm tall). The notice reads 'legs off — 9% smaller · 60 s of prep · 4 loose'; the reticle over a leg says 'couch 3seat leg → living room'.
+- Does 'find the legs (1 of 4 missing)' read as an instruction or as a refusal? Q on the couch with a leg missing says 'legs: 1 of 4 missing — find them first' and does nothing else. Measure: how long between the first 'find the legs' and the reattach, and whether anyone carries the couch to the truck legless instead (the intended shortcut — the legs are 3.15 kg each and fit anywhere).
+- The wardrobe's two doors stack flat beside it (0.58 x 1.90 m, 5.25 kg each). In the bedroom corner the free face is -z or +x; watch for a door stacked across the mattress path.
+- Broken TV: 3 fragments beside the hulk. Do testers understand the hulk still has to be delivered (its row completes without the shards) and that the shards are free to leave? The objective line does not mention fragments — only detached parts ('— 4 loose parts still to bring in').
+- Invoice: 'parts left behind' (2 legs = 63.00) reads next to furniture damage. Ask Q3/Q4 of the §27.3 form with a leg deliberately left behind.
+

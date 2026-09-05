@@ -23,6 +23,8 @@
 import { SIM, TOOLS, MANIFEST } from '../src/config.js';
 import { CONTRACT } from '../src/config.js';   // Phase 11 build-side M5, section O
 import { TARGET } from '../src/player/interact.js';
+import { DOOR_REMOVE_LABEL, DOOR_REHANG_LABEL } from '../src/player/interact.js';   // Phase 11 build-side M11, section DL
+import { DOOR } from '../src/config.js';                                             // M11
 import { STRAP_STATE } from '../src/cargo/straps.js';
 import { cabPoint, cargoAnchors, cargoInterior, rampAnchorPoint } from '../src/world/truck.js';
 import { DEFAULT_BINDINGS, CONTEXTS } from '../src/core/input.js';
@@ -34,6 +36,8 @@ import { routeSteps } from '../src/drive/route.js';
 import { RECOVERY } from '../src/config.js';
 import { LINE_KINDS } from '../src/contract/invoice.js';
 import { disassemble } from '../src/tools/tools.js';
+import { partStatus, clearFragments } from '../src/tools/tools.js';   // Phase 11 build-side M12, situation 9 / section Q
+import { PARTS } from '../src/config.js';                              // M12
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -176,10 +180,14 @@ function reset() {
    * contract in TRANSIT. Put it back the way route.reset() puts the truck back: silently,
    * without a CONTRACT_PHASE event, so G2c's log records only the real run from E onward. */
   if (game.state.phase !== PHASES.PICKUP) game.state.phase = PHASES.PICKUP;
-  for (const e of registry.entities.values()) {
+  for (const e of [...registry.entities.values()]) {
+    if (e.state.partOf || e.state.fragmentOf) continue;   // M12: a piece is unwound through its parent
     if (e.state.dollyId) tools.detachDolly(tools.get(e.state.dollyId));
     if (e.state.blanketId) tools.removeBlanket(tools.get(e.state.blanketId));
-    for (const p of [...(e.state.removedParts || [])]) reassemble(registry, e, p);
+    /* `force` (M12): a part whose piece was carried away (situation 9) refuses a plain
+     * reassemble by design; the fixture's reset gathers it the way the contract reset does. */
+    for (const p of [...(e.state.removedParts || [])]) reassemble(registry, e, p, { force: true });
+    clearFragments(registry, e);   // M12: a TV dropped in T leaves fragments; the next section starts without them
   }
   for (const s of interact.state.values()) { s.carriedTool = null; s.pendingAnchor = null; }
   for (const t of tools.tools.values()) {
@@ -309,25 +317,60 @@ lines.push('--- B. promised == delivered (GDD §4.4, §2.1) ---');
     interact.act(me());
     lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
   }]);
+  /* 9. THE REASSEMBLE REFUSAL (Phase 11 build-side M12; §9.1 "loose pieces get lost", §4.4).
+   * The screwdriver at the couch with its legs already off and one leg carried 3 m away —
+   * outside PARTS.reattachRange. The promise under test is Q's line, not E's: E has nothing
+   * left to take off, and Q must NOT read 'put the legs back on' (reassemble would refuse
+   * and the key would silently do nothing). It reads 'find the legs (1 of 4 missing)', and
+   * pressing Q says the same and changes nothing. The third element names the key. */
+  situations.push(['screwdriver+couch, one leg carried away (M12)', () => {
+    reset();
+    parkAt(couch, -22, 0.45, 30);
+    const sd = toolByDef('screwdriver_01');
+    const p = posOf(sd);
+    lookAt(me(), standOffFrom(p, 1.1), p);
+    interact.act(me());
+    lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
+    interact.act(me(), game.clock.simTimeMs);          // legs off: four pieces beside the couch
+    const ids = (couch.state.parts || {}).legs || [];
+    const leg = ids.length ? registry.get(ids[0]) : null;
+    if (leg) parkAt(leg, -22 + 3.0, 0.05, 30);          // one leg 3 m away
+    step(2);
+    lookAt(me(), standOffFrom({ x: -22, y: 0.45, z: 30 }, 1.5), { x: -22, y: 0.45, z: 30 });
+  }, 'Q']);
 
   let promised = 0, honoured = 0;
   const broken = [];
-  for (const [name, setup] of situations) {
+  const refusal = {};
+  for (const [name, setup, key] of situations) {
     setup();
     step(4);
     const d = interact.describe(me());
-    if (!d.primary) continue;
+    const promise = key === 'Q' ? d.secondary : d.primary;
+    if (!promise) continue;
     promised++;
-    const did = interact.act(me(), game.clock.simTimeMs);
-    if (did) honoured++; else broken.push(`${name}: promised "${d.primary}"`);
+    const did = key === 'Q' ? interact.secondary(me()) : interact.act(me(), game.clock.simTimeMs);
+    if (did) honoured++; else broken.push(`${name}: promised "${promise}"`);
+    if (key === 'Q') {
+      refusal.promise = promise; refusal.said = did;
+      refusal.stillOff = (couch.state.removedParts || []).includes('legs');
+      refusal.collider = couch.collider.halfExtents().y * 2;
+      refusal.pieces = ((couch.state.parts || {}).legs || []).filter((id) => registry.get(id)).length;
+    }
   }
   lines.push(`      ${promised} promises made, ${honoured} honoured`);
   ok('B6 every action the prompt offers is one E can perform (§4.4)',
      broken.length === 0, broken.join(' | '));
   ok('B7 …and the sweep actually exercised several situations', promised >= 5, `${promised}`);
   // Phase 11 M8: the couch's legs added a promise; the count is asserted so it cannot slip out silently.
-  ok('B7c M8: eight promises made and eight honoured — the couch-legs verb among them',
-     promised === 8 && honoured === 8, `${promised} made, ${honoured} honoured`);
+  // M12 added the reassemble refusal as situation 9 (a Q promise): nine made, nine honoured.
+  ok('B7c M8+M12: nine promises made and nine honoured — the couch-legs verb and the reassemble refusal among them',
+     promised === 9 && honoured === 9, `${promised} made, ${honoured} honoured`);
+  ok('B7d M12 situation 9: the prompt read "find the legs (1 of 4 missing)", Q said so, and nothing changed (legs still off, collider still 0.77, four pieces still live)',
+     /find the legs \(1 of 4 missing\)/.test(refusal.promise || '') && /1 of 4 missing/.test(refusal.said || '') &&
+     refusal.stillOff === true && Math.abs(refusal.collider - 0.77) < 1e-6 && refusal.pieces === 4,
+     `promise "${refusal.promise}" said "${refusal.said}" off=${refusal.stillOff} collider=${refusal.collider} pieces=${refusal.pieces}`);
+  reset();
   void box;
 }
 emit('running...');
@@ -974,7 +1017,7 @@ lines.push('--- O. the next objective, the room, and the stall hint (M5: §26.7,
 
   // O5 — §21.1 with the new line included (F2's predicate, plus .objective), and ONE row.
   M.feedHuds();
-  const centreClearO = ['.contract', '.cargo-status', '.notices', '.route-bar', '.objective'].every((sel) => {
+  const centreClearO = ['.contract', '.cargo-status', '.notices', '.route-bar', '.objective', '.caption'].every((sel) => {
     const el = hud.el.querySelector(sel);
     if (!el || !el.offsetParent) return true;
     const r = el.getBoundingClientRect();
@@ -1132,6 +1175,74 @@ lines.push('--- P. couch legs and the prep-time charge (M8: GDD §7.1, §8.2, §
     parkAt(couch, home.x, home.y, home.z);
     reset();
   }
+}
+emit('running...');
+
+/* ── DL. THE DOOR VERBS (Phase 11 build-side M11: GDD §8.2, §9.2, §4.4, §2.3) ────────────
+ *
+ * Section B's invariant — "if describe() promises it, act() does it" — applied to the two
+ * verbs M11 adds: E with the screwdriver at a HUNG door leaf reads 'take the door off its
+ * hinges' and does exactly that (billing DOOR.removeSeconds to the clock, M8's hook); Q at
+ * the leaf lying beside its doorway reads 'hang the door back on its hinges' and does that.
+ * Kept OUT of the B sweep so B7c's count stays the eight M8 pinned (M12 adds its own ninth
+ * there); the promise/honour pair is counted here instead. The full door physics is
+ * tools/m19-tests.js; this is the prompt contract only. */
+lines.push('--- DL. the door verbs keep their promises (M11: GDD §8.2, §9.2, §4.4, §2.3) ---');
+{
+  reset();
+  const leaf = M.doors.leafFor('living_kitchen');
+  const home = leaf.state.home;
+  const d = M.doors.doorById('living_kitchen');
+  const sd = toolByDef('screwdriver_01');
+  // The screwdriver, picked up from open ground with an exact aim (the rack sits under the
+  // truck deck and a camera behind a mover standing there aims through the deck collider).
+  M.doors.rehangAll('test');
+  parkAt(sd, -50, 0.05, 40);
+  let p = posOf(sd);
+  lookAt(me(), standOffFrom(p, 1.1), p, true);
+  step(2);
+  interact.act(me());
+  eq('DL0 the screwdriver is in hand', interact._for(me().id).carriedTool, sd.id);
+  let promised = 0, honoured = 0;
+
+  // E at the hung leaf, from the living room: its hinge end stands in the opening at z = -5.
+  lookAt(me(), { x: home.x, z: d.at + 1.0 }, { x: home.x, y: 1.0, z: d.at - 0.05 }, true);
+  step(4);
+  const seen = interact.describe(me());
+  eq('DL1 the screwdriver at a hung door promises exactly \'take the door off its hinges\' (§4.4)', seen.primary, DOOR_REMOVE_LABEL);
+  ok('DL1a …and Q, with nothing to undo yet, offers the screwdriver down', /put down the screwdriver/.test(seen.secondary || ''), seen.secondary || '');
+  const work0 = game.state.elapsedWorkMs;
+  if (seen.primary) {
+    promised++;
+    const r = pressE(me());
+    if (r.did) honoured++;
+    ok('DL2 …and E honours it: the leaf is off (dynamic, hung false)', !!r.did && leaf.body.isDynamic() && leaf.state.hung === false, `${r.did} / hung ${leaf.state.hung}`);
+    ok(`DL2a …billing DOOR.removeSeconds (${DOOR.removeSeconds} s) to the labour clock, M8's hook — no frame ran, only the charge`,
+       Math.abs(game.state.elapsedWorkMs - work0 - DOOR.removeSeconds * 1000 * TOOLS.screwdriver.timeScale) < 1e-6, `${game.state.elapsedWorkMs - work0} ms`);
+    ok('DL2b …and the notice names the cost', new RegExp(`${DOOR.removeSeconds} s`).test(r.did || ''), r.did || '');
+  }
+  // Q at the leaf, which now lies in the kitchen along the partition (x 0.15..2.15, z -5.87..-5.07).
+  step(20);
+  lookAt(me(), { x: 0.6, z: -6.4 }, { x: 0.9, y: 0.03, z: -5.5 }, true);
+  step(2);
+  const seen2 = interact.describe(me());
+  eq('DL3 at the leaf beside its doorway, Q promises exactly \'hang the door back on its hinges\' (§8.2 reattach)', seen2.secondary, DOOR_REHANG_LABEL);
+  ok('DL3a …and E promises nothing for a door that is already off', !seen2.primary, seen2.primary || '');
+  if (seen2.secondary === DOOR_REHANG_LABEL) {
+    promised++;
+    const did = interact.secondary(me());
+    if (did) honoured++;
+    ok('DL4 …and Q honours it: Fixed again at its jamb, hung true', !!did && leaf.body.isFixed() && leaf.state.hung === true &&
+       Math.hypot(posOf(leaf).x - home.x, posOf(leaf).z - home.z) < 1e-3, `${did} / hung ${leaf.state.hung}`);
+  }
+  lines.push(`      ${promised} door promises made, ${honoured} honoured`);
+  ok('DL5 two door promises made, two honoured — the M11 verbs keep section B\'s invariant', promised === 2 && honoured === 2, `${promised}/${honoured}`);
+  // Everything back: the screwdriver on its rack, the leaf on its hinges, nothing carried.
+  interact._putDown(me(), sd, { point: { x: -50, y: 0.1, z: 42 } });
+  parkAt(sd, -0.10, 0.05, 9.0);
+  M.doors.rehangAll('test');
+  reset();
+  void p;
 }
 emit('running...');
 

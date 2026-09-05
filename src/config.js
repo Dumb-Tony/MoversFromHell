@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 19,
-  label: 'phase-19',
+  phase: 20,
+  label: 'phase-20',
   date: '2026-09-04',
 });
 
@@ -591,6 +591,58 @@ export const DAMAGE = Object.freeze({
   aggregationRadius: 0.8,    // m — contacts within this of each other merge
 });
 
+/** §9.1 "the screwdriver changes an object's dimensions and CREATES LOOSE PARTS … loose
+ *  pieces get lost"; §26.4 "broken required cargo stays deliverable or becomes trackable
+ *  pieces"; §26.6 "reset removes … fragments". Phase 11 build-side M12.
+ *
+ *  A detached part and a broken item's fragments are REAL BODIES — spawned through the
+ *  registry, damage-tracked, grabbable, counted by the cargo box — and nothing here is a
+ *  gate: an object whose legs are somewhere else is not refused, it is simply not delivered
+ *  yet (§2.2 failure is a state), and the invoice names what was left (§15.1). */
+export const PARTS = Object.freeze({
+  /** How heavy an object's detached parts are, together, relative to what they came off.
+   *  Moved here from TOOLS.screwdriver, which keeps the name as an alias for one phase.
+   *  Couch: 90 kg x 0.14 = 12.6 kg of legs, 3.15 kg each; wardrobe: 5.25 kg a door. */
+  partMassFraction: 0.14,
+  /** m — every piece of a part must lie within this of the parent's centre before Q can
+   *  put the part back; otherwise the prompt reads 'find the legs (1 of 4 missing)'. */
+  reattachRange: 1.5,
+  /** m — pieces are laid in a row beside the parent, this far apart centre to centre (or
+   *  the piece's own width plus `pieceGap`, whichever is more). P1 pins that a piece lands
+   *  within pieceSpacing x 4 of the parent. */
+  pieceSpacing: 0.35,
+  pieceGap: 0.05,
+  /** A piece no taller than this fraction of its parent's short side lies FLAT and stacks. */
+  flatAspect: 0.5,
+  /** m — the floor probe under a candidate slot starts this far above the parent's top and
+   *  casts this far down (a parent on the truck deck or a table still finds its floor). */
+  floorProbeLift: 0.5,
+  floorProbeLength: 2.0,
+  /** Fragments for an item whose fragility band has no entry (validateDef guarantees one). */
+  defaultFragmentCount: 2,
+  /** m — flat pieces (a door, a shelf board) are STACKED on one footprint, this much air
+   *  between each and the next, rather than laid out in a three-metre row. */
+  stackGap: 0.004,
+  /** m — clear air between the parent's world AABB and the nearest piece. Spawning INSIDE
+   *  the parent fires a contact impulse the damage system would bill as a fake impact. */
+  pieceClearance: 0.12,
+  /** m — pieces spawn this far above their resting height and drop: 0.44 m/s, under the
+   *  0.7 m/s the most fragile band tolerates (DAMAGE.fragility.extreme), so a disassembly
+   *  never bills damage on its own pieces (m20 P1b). */
+  spawnLift: 0.01,
+  /** Fragments a broken item (§8.3's 'broken' band) leaves beside its hulk, by fragility. */
+  brokenFragmentCount: { sturdy: 2, normal: 2, fragile: 3, extreme: 3 },
+  /** Fragment shape: each axis of the parent's dimensions x this, no smaller than min. */
+  fragmentScale: 0.30,
+  fragmentMinDim: 0.06,
+  /** §15.1 "parts left at pickup": what one piece left behind costs, as a fraction of its
+   *  replacementValue share (parent value x partMassFraction / count — a couch leg is
+   *  31.50 of the couch's 900). Fragments are not priced: the 'broken' band already
+   *  charged the whole replacement value, and pricing the pieces again would bill one
+   *  mistake twice. */
+  leftBehindCostFraction: 1.0,
+});
+
 /** §9.1 tools, §9.2 interaction contract, §8.2 modifiable environment. Validated: Phase 6.
  *
  *  §9.1's rule governs every number here: "Tools create new physical solutions; they do not
@@ -678,10 +730,39 @@ export const TOOLS = Object.freeze({
     /** §23.1's disassembly entries carry their own `seconds`; this scales all of them, so
      *  one number tunes how much preparation costs without re-authoring every object. */
     timeScale: 1.0,
-    /** §9.1 "loose pieces get lost" — detached parts are real bodies with real recovery,
-     *  not a flag on the parent. This is how heavy they are relative to what they came off. */
-    partMassFraction: 0.14,
+    /** ALIAS, one phase only (M12): the number lives in PARTS.partMassFraction now, where
+     *  its consumer is. Nothing in src/ reads this key; it stays so a suite or a doc that
+     *  cites TOOLS.screwdriver.partMassFraction still sees the same value. */
+    partMassFraction: PARTS.partMassFraction,
   },
+});
+
+/** §8.2 "Door: open or remove from hinges — preparation time and replacement risk".
+ *  Phase 11 build-side M11: every door leaf in the house is one of these, hung swung open
+ *  against its hinge jamb, so the OPENING you can use is the gap less the leaf's thickness
+ *  (house.js hungClear). The 34" door is a 0.86 m opening that a hung 40 mm leaf leaves 0.82
+ *  clear — the "impossible" 32-inch number KNOWN_ISSUES carried for nine phases was this
+ *  door with its leaf on. The screwdriver takes the leaf off (DOOR.removeSeconds billed to the
+ *  labour clock through the same hook as a disassembly) and gives the full gap back.
+ *  Validated: Phase 11 M11 (tools/m19-tests.js). */
+export const DOOR = Object.freeze({
+  /** One leaf shape for every door in the house: 40 mm thick, 2.00 m tall (30 mm under the
+   *  2.03 m header), 0.80 m long, 18 kg — one hand lifts it (177 N against the ~358 N a
+   *  single hand develops, definitions.js couch note). */
+  leaf: { t: 0.04, height: 2.00, length: 0.80, mass: 18 },
+  /** §8.2 "preparation time", seconds, scaled by TOOLS.screwdriver.timeScale like every
+   *  other screwdriver job (three hinge pins: less than the couch's four legs at 60). */
+  removeSeconds: 45,
+  /** m, horizontal — a removed leaf within this of its jamb can be hung back (Q). Covers the
+   *  spot it is laid down on at removal (≤ 1.04 m from the jamb for every door), so undo is
+   *  one key from where you stand; carry it further and you must bring it back. */
+  rehangRange: 1.25,
+  /** m — a removed leaf is laid flat this far clear of the wall face and of the jamb, so its
+   *  edge never starts inside the plaster (a penetration the solver would have to eject). */
+  restPad: 0.02,
+  /** §8.2 "replacement risk": what the customer bills for a door leaf broken in transit
+   *  (definitions.js door_leaf_01.replacementValue), between a bookshelf and a nightstand. */
+  replacementValue: 180,
 });
 
 /** §10.3 straps. Validated: Phase 7. */

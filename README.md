@@ -139,6 +139,20 @@ arrow to where it happened; the caption works with the volume at 0. Master, inte
 volume and the captions switch are on the settings card and are kept between runs. `?audio=off`
 disables the layer entirely.
 
+**Doors.** Four doorways have their doors on, swung open against the jamb: the 34" door
+(living → kitchen) is 0.82 m wide with its 40 mm leaf hung and 0.86 m with it off; the bedroom
+door 0.87 / 0.91. With the screwdriver, **E** at a hung door takes it off its hinges (45 s of prep
+on the clock) and lays it beside the doorway; **Q** at the leaf hangs it back. A removed door is
+an ordinary 18 kg object: carry it, load it, lose it, break it — and the customer's review says so
+if the front-wall door came off. Replay hangs every door back.
+
+**Loose parts are real.** The screwdriver's parts come off as bodies (four 3.15 kg couch legs,
+two 5.25 kg wardrobe doors, shelf boards) that must also reach the truck: a couch whose legs are
+still at the pickup is not delivered, the prompt says "find the legs (1 of 4 missing)", and the
+invoice bills "parts left behind" per piece from its share of the replacement value. A broken item
+stays deliverable as a hulk and leaves two or three trackable fragments beside it. Reset removes
+every piece.
+
 ## Test it
 
 ```bash
@@ -202,7 +216,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**1615 assertions across nineteen suites, all passing** — plus a GPU-only suite that the
+**1862 assertions across twenty-one suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -231,8 +245,12 @@ done, and the plan's addendum went next: batch 4 added the sound layer (synthesi
 every cue captioned with a direction arrow, volumes and captions on the settings card) and damped
 the grip spring in the hand's frame — the fix M7's numbers pointed at — so a solo couch drag now
 travels (0.34 m in 3 s where it was 0.00; the dolly haul 2.1 → 6.5 m; two movers 1.3 → 5.1 m; the
-fridge still 0.00 m unaided). Batch 5 (door leaves as removable objects; loose parts as real
-bodies) is briefed in the plan.
+fridge still 0.00 m unaided). Batch 5 made §8.2's third answer real and §9.1's loose parts
+literal: four doorways have their doors on (the "impossible 32-inch door" of nine phases was the
+34-inch door with its 40 mm leaf hung), the screwdriver takes a leaf off its hinges for 45 s of
+labour and it becomes an 18 kg object you can carry, load or lose; and detached parts are bodies
+that must also reach the truck, a broken item leaves trackable fragments, and the invoice bills
+parts left behind. Batch 6 (the second trip; property damage priced) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -245,6 +263,10 @@ bodies) is briefed in the plan.
 ![The couch with its legs off, behind the 34" door](docs/phase18-couch-legs.png)
 
 ![A caption with its direction arrow](docs/phase19-caption.png)
+
+![A door on its hinges in the kitchen doorway](docs/phase20-door.png)
+
+![The kitchen after the legs come off, a door on its hinges beside it](docs/phase20-pieces.png)
 
 ![The Overcooked overhaul](docs/phase15-look.png)
 

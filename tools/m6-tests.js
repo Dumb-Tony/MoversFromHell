@@ -985,7 +985,11 @@ lines.push('--- E13-E16. the couch\'s legs come off (M8: GDD §7.1, §8.2, §3.3
     /** Push along -z for `seconds`; returns the end AABB and the deepest the leading face got
      *  past the wall's near face (penetration, m) while the couch was still outside it. */
     const push = (legsOff, x, z0, wallNearZ, newtons, seconds) => {
-      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p);
+      /* `force` (Phase 11 build-side M12): the legs are real bodies left beside the start
+       * line while the couch is pushed metres away, and a plain reassemble() now REFUSES
+       * while a piece is out of PARTS.reattachRange (m20 P2). Without it the "legs on" push
+       * was silently a legs-off couch — measured: 2087 mm of "penetration" at the 32" jamb. */
+      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p, { force: true });
       if (legsOff) disassemble(registry, couch, 'legs');
       parkRolled(couch, x, z0);
       settle(40);
@@ -1001,7 +1005,7 @@ lines.push('--- E13-E16. the couch\'s legs come off (M8: GDD §7.1, §8.2, §3.3
       }
       physics.clearForces();
       const a = aabbOf(couch);
-      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p);
+      for (const p of [...(couch.state.removedParts || [])]) reassemble(registry, couch, p, { force: true });
       return { ...a, width: a.maxX - a.minX, maxPen };
     };
 
@@ -1042,9 +1046,17 @@ lines.push('--- E13-E16. the couch\'s legs come off (M8: GDD §7.1, §8.2, §3.3
       }
     }
     settle(10);
+    /* M11 hung a 40 mm leaf in this door: while it hangs the opening is 0.82 m clear and the
+     * intact couch (0.85) cannot pass at ANY force — measured 700 N -> centre -3.941, where M8
+     * recorded -7.563. E16d-f measure the 0.86 OPENING as M8 authored them (§3.3's brute
+     * branch through the door itself), so the leaf comes off its hinges into the field for
+     * the three pushes and goes back on after. With it hung the leaf's own answer is m19 D6. */
+    const leaf86 = M.doors && M.doors.leafFor ? M.doors.leafFor('living_kitchen') : null;
+    if (leaf86) { registry.unhang(leaf86, { x: PAD.x + 32, y: 0.5, z: PAD.z + 30, yaw: 0 }); physics.primeQueries(); settle(5); }
     const off86 = push(true, door.centre, -3.5, NEAR86, 600, 4);
     const on86 = push(false, door.centre, -3.5, NEAR86, 600, 4);
     const on86hard = push(false, door.centre, -3.5, NEAR86, 700, 3);
+    if (leaf86) registry.hang(leaf86, leaf86.state.home);
     lines.push(`      34" (0.86): legs off 600 N -> centre z ${off86.cz.toFixed(3)}; legs on 600 N -> ` +
                `centre z ${on86.cz.toFixed(3)}, penetration ${(on86.maxPen * 1000).toFixed(1)} mm; legs on 700 N -> ${on86hard.cz.toFixed(3)}`);
     ok('E16d the shipped door: legs off, 600 N takes the couch straight into the kitchen (90 mm)',

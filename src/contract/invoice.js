@@ -25,7 +25,7 @@
  * afternoon is not among them).
  */
 
-import { ECONOMY, DAMAGE } from '../config.js';
+import { ECONOMY, DAMAGE, PARTS } from '../config.js';
 
 /** §15.1's line items, in the order the formula names them. `sign` is +1 for money in. */
 export const LINE_KINDS = Object.freeze({
@@ -38,9 +38,38 @@ export const LINE_KINDS = Object.freeze({
   FUEL: 'vehicle/fuel',
   PROPERTY_DAMAGE: 'property damage',
   ITEM_DAMAGE: 'furniture damage',
+  /** M12 (§15.1 names what was lost; §9.1 "loose pieces get lost"): detached parts that
+   *  never reached the destination, priced per piece from its replacementValue share. */
+  PARTS_LEFT: 'parts left behind',
   VIOLATIONS: 'violations',
   RECOVERY: 'recovery/service fees',
 });
+
+/* 'couch_3seat_01' -> 'couch 3seat', the words every prompt uses for the object. */
+const wordsOf = (id) => (id || '').replace(/_\d+$/, '').replace(/_/g, ' ');
+
+/**
+ * The §15.1 'parts left' evidence: one record per manifest row and detached part with
+ * pieces not at the destination, straight off the rows stepManifest wrote (manifest.js
+ * pieceStatusOf) — the same record the delivery flag itself is derived from, so the line
+ * and the row can never disagree about what was left. Exported for reconcile() and tests.
+ *
+ * @returns {{rowId, defId, part, name, missing, of, value, cost}[]}
+ */
+export function partsLeftBehind(state) {
+  const out = [];
+  for (const row of state.manifest || []) {
+    for (const l of row.partsLeft || []) {
+      if (!(l.missing > 0) || !(l.value > 0)) continue;
+      out.push({
+        rowId: row.id, defId: row.defId, part: l.part, name: l.name || l.part,
+        missing: l.missing, of: l.of, value: l.value,
+        cost: Number((l.missing * l.value * PARTS.leftBehindCostFraction).toFixed(2)),
+      });
+    }
+  }
+  return out;
+}
 
 /**
  * Build the invoice.
@@ -147,6 +176,19 @@ export function buildInvoice(state, summary, opts = {}) {
         propLines.map((l) => l.surfaceId || 'surface'));
   }
 
+  /* §15.1 "the invoice names what was lost" (M12). Each piece of a detached part that is
+   * not at the destination is billed at PARTS.leftBehindCostFraction of its share of the
+   * parent's replacement value — a couch leg is 31.50 of the couch's 900. The evidence is
+   * the manifest row, which is also why the row is not delivered (manifest.js). Fragments
+   * are deliberately absent: the 'broken' band already charged the whole item. */
+  const left = partsLeftBehind(state);
+  const leftTotal = left.reduce((s, l) => s + l.cost, 0);
+  if (leftTotal > 0) {
+    add(LINE_KINDS.PARTS_LEFT, -leftTotal,
+        'parts left at pickup — ' + left.map((l) => `${wordsOf(l.defId)}: ${l.missing} of ${l.of} ${l.part}`).join(', '),
+        left.map((l) => l.rowId));
+  }
+
   if (collisions > 0) {
     add(LINE_KINDS.VIOLATIONS, -(collisions * ECONOMY.collisionFeeBase),
         `${collisions} collision${collisions === 1 ? '' : 's'}`, ['route']);
@@ -249,6 +291,25 @@ export function reconcile(invoice, state, opts = {}) {
   const violLine = find(LINE_KINDS.VIOLATIONS);
   if (collisions === 0 && violLine) problems.push('a violations line exists with no collisions');
 
+  // Parts left behind must equal what the manifest rows record as missing, to the cent (M12).
+  const left = partsLeftBehind(state);
+  const expectLeft = Number(left.reduce((s, l) => s + l.cost, 0).toFixed(2));
+  const leftLine = find(LINE_KINDS.PARTS_LEFT);
+  if (expectLeft > 0) {
+    if (!leftLine) problems.push(`the manifest records ${expectLeft} of parts left behind and the invoice has no line`);
+    else {
+      if (Math.abs(-leftLine.amount - expectLeft) > 0.01) {
+        problems.push(`parts left behind ${-leftLine.amount} does not match the manifest's ${expectLeft}`);
+      }
+      const rows = new Set(left.map((l) => l.rowId));
+      if (leftLine.from.length !== rows.size || leftLine.from.some((id) => !rows.has(id))) {
+        problems.push(`parts left behind cites ${leftLine.from.length} rows, the manifest has ${rows.size}`);
+      }
+    }
+  } else if (leftLine) {
+    problems.push('a parts-left line exists with nothing recorded as missing');
+  }
+
   // Labour must match the work clock, which is the only place time is recorded.
   const labourLine = find(LINE_KINDS.LABOUR);
   if (state.elapsedWorkMs > 0 && !labourLine) problems.push('time was worked and no labour was billed');
@@ -290,6 +351,13 @@ export function reviewFor(invoice, state, summary, opts = {}) {
   if ((opts.recoveries || 0) > 0) tags.push('needed_a_callout');
   if (state.tripCount > 1) tags.push('extra_trip');
   if (invoice.profit < 0) tags.push('cost_them_money');
+  /* §15.2's own example tag (M11). state.doors is written by main.js from DOOR_STATE
+   * events — a fact about what happened in the run, never inferred from where the leaf
+   * ended up (§10.4's rule applied to the review). The front door is whichever door record
+   * carries `leaf.front` (scene.js APERTURES door34). */
+  if (state.doors && state.doors.frontRemoved) tags.push('front_door_removed');
+  // M12: the legs are in the old house. An ACTUAL event tag, off the same rows the line came from.
+  if (partsLeftBehind(state).length > 0) tags.push('parts_left_behind');
 
   /* §15.2: "Select only the two or three MOST SALIENT events."
    *
@@ -308,7 +376,9 @@ export function reviewFor(invoice, state, summary, opts = {}) {
     items_left_behind: 85,
     wrong_rooms: 70,
     needed_a_callout: 60,
+    parts_left_behind: 58,
     extra_trip: 55,
+    front_door_removed: 50,   // remarkable, and not a complaint: it went back on (M11)
     minor_damage: 40,
     every_room_right: 30,
     everything_delivered: 20,
@@ -336,7 +406,9 @@ const TEMPLATES = Object.freeze({
   minor_damage: 'A few marks. Nothing I will not notice every single day.',
   needed_a_callout: 'At one point they had to call someone to get something back.',
   extra_trip: 'They went round twice. I paid for both.',
+  front_door_removed: 'They took the front door off its hinges. It is back on. I think.',
   cost_them_money: 'I am not sure they made anything on this. That is not my problem.',
+  parts_left_behind: 'The couch arrived. Its legs are in the old house.',
   default: 'They came, they moved things, they left.',
 });
 

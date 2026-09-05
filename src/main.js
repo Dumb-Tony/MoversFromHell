@@ -35,7 +35,9 @@ import { ObjectRegistry } from './objects/registry.js';
 import { PHASE5_SPAWNS } from './objects/definitions.js';
 import { buildManifest, stepManifest, validateManifest, overlappingSpawns } from './contract/manifest.js';
 import { overlappingZones, zoneAt, ZONES, ROOM as HOUSE_ROOM } from './world/house.js';
-import { ToolSystem, reassemble } from './tools/tools.js';
+/* Phase 11 M11: the house's door leaves — records, poses and the effective clear widths. */
+import { INTERIOR_DOORS, doorById, leafDoors, leafPose, leafRestPose, hungClear, tightestOnRoute } from './world/house.js';
+import { ToolSystem, reassemble, clearFragments } from './tools/tools.js';
 import { StrapSystem } from './cargo/straps.js';
 import { CargoSystem } from './cargo/cargo.js';
 import { TRUCK_POSE, cargoInterior, cargoAnchors } from './world/truck.js';
@@ -202,6 +204,80 @@ async function boot() {
   const tools = new ToolSystem(physics, registry, world.scene, bus, () => game.clock.simTimeMs);
   for (const s of PHASE6_TOOL_SPAWNS) tools.spawn(s.def, s);
   physics.primeQueries();
+
+  /* ---- the house's doors (Phase 11 build-side M11; §8.2, §2.1, §9.1, §15.2) -----------------
+   * Every door record with a `leaf` (house.js INTERIOR_DOORS, scene.js APERTURES) gets one
+   * door_leaf_01 hung in it: a registry entity — so the grip, the damage model, the recovery
+   * and the m13 doorway sweeps all treat it as the object it is — with its body FIXED at the
+   * jamb (registry.hang) and `manifest: false`, so it is never a manifest row and never
+   * counts toward the contract panel. Its state is plain data (§22.4): doorId, hung, and the
+   * two poses house.js computes — `home` (hung, swung open against the hinge jamb, its 40 mm
+   * inside the opening) and `rest` (laid flat beside the doorway when the screwdriver takes
+   * it off). The opening's EFFECTIVE clear width is gap − 0.04 while it hangs (hungClear):
+   * living_kitchen is 0.82 m with its door on and 0.86 m with it off. */
+  const leafEntities = new Map();                       // doorId -> entity (engine half; the state half is entity.state)
+  for (const d of leafDoors(world.apertures)) {
+    const home = leafPose(d);
+    const rest = leafRestPose(d);
+    const e = registry.spawn('door_leaf_01', home, { manifest: false, state: { doorId: d.id, hung: false, home, rest } });
+    registry.hang(e, home);
+    leafEntities.set(d.id, e);
+  }
+  physics.primeQueries();
+  /** Is this door's leaf on its hinges right now? The live predicate hungClear/tightestOnRoute take. */
+  const leafHung = (doorId) => { const e = leafEntities.get(doorId); return !!(e && e.state.hung); };
+  /** The doors, as the suites and the HUD read them (m19). Records are re-derived from the
+   *  apertures each call — they are frozen data; nothing here caches a body. */
+  const doors = {
+    records: () => leafDoors(world.apertures),
+    doorById: (id) => doorById(id, world.apertures),
+    leaves: () => [...leafEntities.values()],
+    leafFor: (doorId) => leafEntities.get(doorId) || null,
+    isHung: leafHung,
+    hungClear: (doorId) => hungClear(doorId, world.apertures, INTERIOR_DOORS, leafHung),
+    tightestOnRoute: (roomId) => tightestOnRoute(roomId, world.apertures, INTERIOR_DOORS, leafHung),
+    /** Every leaf back on its hinges at its home pose, with the run-scoped state a manifest
+     *  object gets at respawn (condition, recoveries, loaded …). Emits DOOR_STATE 'rehung'
+     *  only for a leaf that was actually off, so a replay with the doors untouched is silent. */
+    rehangAll(reason = 'contract reset') {
+      for (const e of leafEntities.values()) {
+        const wasOff = !e.state.hung;
+        registry.hang(e, e.state.home);
+        e.state.condition = 100;
+        e.state.recoveries = 0;
+        e.state.loaded = false;
+        e.state.loadedOnTrip = null;
+        e.state.cargoDwellMs = 0;
+        e.state.removedParts = [];
+        e.state.dimensions = null;
+        e.state.dollyId = null;
+        e.state.blanketId = null;
+        e.state.frictionBefore = null;
+        e.state.combineRuleBefore = null;
+        e.state.everHeld = false;
+        e.state.awaitingPlayerClearance = false;
+        e.collider.setCollisionGroups(GROUP_PRESETS.object);
+        if (wasOff) {
+          bus.emit(EVENTS.DOOR_STATE, { doorId: e.state.doorId, entityId: e.id, state: 'rehung', reason }, game.clock.simTimeMs);
+        }
+      }
+      physics.primeQueries();
+    },
+  };
+  /** §15.2's front_door_removed and the run's door facts live on game.state as plain data
+   *  (§22.4), written from DOOR_STATE events — never inferred from where a leaf ended up.
+   *  game.reset() replaces the state wholesale, so resetContract re-attaches this. */
+  const attachDoorState = () => {
+    game.state.doors = { removed: {}, frontRemoved: false };
+  };
+  attachDoorState();
+  bus.on(EVENTS.DOOR_STATE, (e) => {
+    const ds = game.state.doors;
+    if (!ds || e.state !== 'removed') return;
+    ds.removed[e.doorId] = (ds.removed[e.doorId] || 0) + 1;
+    const d = doorById(e.doorId, world.apertures);
+    if (d && d.leaf && d.leaf.front) ds.frontRemoved = true;
+  });
 
   /* ---- cargo (Phase 7) -------------------------------------------------------------------
    * §10.1: the cargo box is a real collision-enabled space, built in scene.js from
@@ -908,8 +984,13 @@ async function boot() {
       phase: game.state.phase,
       delivered: summary.delivered,
       total: summary.total,
-      loaded: cargo.loadedEntities().length,
+      // Cargo the CONTRACT is about: a door leaf in the truck takes space (cargo.js counts
+      // it) but it is not the customer's goods, so the panel's "in the truck" and the
+      // objective line's "load N more" never count a fixture (M11).
+      loaded: cargo.loadedEntities().filter((e) => e.manifest !== false).length,
       roomCorrect: summary.roomCorrect,
+      /** M12: detached-part pieces not yet at the destination — rows these hold open. */
+      piecesMissing: summary.piecesMissing || 0,
       elapsedMin: game.state.elapsedWorkMs / 60000,
       estimateMin: game.state.estimateMs / 60000,
     };
@@ -935,6 +1016,12 @@ async function boot() {
     // were posted, not 0 (§27.4).
     damage.flush(game.clock.simTimeMs);
     const summary = manifestSummary(game.state.manifest);
+    /* §27.4 / M12: how many loose pieces — detached parts and fragments — were not at the
+     * destination when the job was called done. Written here the way worstCargoShift is
+     * written by 'phase': a settlement fact, not a bus event. */
+    if (game.state.telemetry && game.state.telemetry.counters) {
+      game.state.telemetry.counters.piecesLeftBehind = summary.piecesLeft || 0;
+    }
     const opts = {
       recoveries: recoveryCount(),
       collisions: 0,
@@ -1028,6 +1115,23 @@ async function boot() {
     }
     for (const s of interact.state.values()) { s.carriedTool = null; s.pendingAnchor = null; }
     strapsPlacedTotal = 0;
+    /* §26.6 "reset removes … FRAGMENTS" (M12), inside this same unwind — after the grips
+     * and straps that might hold a piece have let go, before the counters are read and the
+     * state goes. Every detached part is put back THROUGH reassemble() with `force`, which
+     * gathers its pieces from wherever they were lost (a replay starts whole — the guard
+     * M2 wrote about still holds: the collider comes back only through the real call), and
+     * every broken item's fragments are removed. The sweep after it is belt and braces:
+     * nothing with partOf/fragmentOf may survive a reset, or the registry grows by a leg
+     * per run (m14 S1/S7). */
+    for (const e of [...registry.entities.values()]) {
+      if (e.state.partOf || e.state.fragmentOf) continue;
+      for (const p of [...(e.state.removedParts || [])]) reassemble(registry, e, p, { force: true });
+      clearFragments(registry, e);
+      if (e.state.parts) e.state.parts = {};
+    }
+    for (const e of [...registry.entities.values()]) {
+      if (e.state.partOf || e.state.fragmentOf) registry.remove(e.id);
+    }
 
     // The record closes here, after the unwind and before the state goes (see the top).
     finishRun(closing);
@@ -1039,6 +1143,7 @@ async function boot() {
     // AFTER game.reset(): the damage system reads game.state through a getter, so this
     // clears the NEW run's ledger and windows rather than the state just thrown away.
     damage.reset();
+    attachDoorState();        // M11: the new run has removed no door yet
 
     // Re-attach what the fresh state does not know about.
     game.state.manifest = buildManifest(PHASE5_SPAWNS);
@@ -1158,6 +1263,10 @@ async function boot() {
       e.state.lastStable = { x: s.x, y: s.y, z: s.z };
       e.body.wakeUp();
     });
+    /* And the house's doors back on their hinges (M11) — wherever a leaf got to: the truck,
+     * the grass, the bedroom floor. Like the tools, they are teleported home, so the M2
+     * soak's counters stay equal run to run (m14 S4/S5, m19 D7). */
+    doors.rehangAll('contract reset');
     physics.primeQueries();
   }
 
@@ -1257,7 +1366,9 @@ async function boot() {
           : 'on the road';
       case PHASES.DELIVERY: {
         const left = facts.total - facts.delivered;
-        return left > 0 ? `unload — ${left} left, each to its room` : 'all delivered — settle up at the cab';
+        // M12: an item whose legs are elsewhere is not delivered; the line says why (§26.7).
+        const parts = facts.piecesMissing > 0 ? ` — ${facts.piecesMissing} loose part${facts.piecesMissing === 1 ? '' : 's'} still to bring in` : '';
+        return left > 0 ? `unload — ${left} left, each to its room${parts}` : 'all delivered — settle up at the cab';
       }
       case PHASES.SETTLEMENT: return 'settling up';
       default: return '';
@@ -1501,6 +1612,9 @@ async function boot() {
     /* The §26.6 reset and the per-run recovery tally, so a soak can replay without going
      * through the settlement sheet and assert what the invoice will be told (M2). */
     resetContract, recoveryCount,
+    /* The house's doors (M11): the leaves, the live hung predicate, the effective clear
+     * widths and the reset re-hang, so a suite can take a door off and measure the opening. */
+    doors,
     /* §27.4 instrumentation (M6): the run recorder, the run summary the Copy button exports,
      * the §27.3 questionnaire and the kept runs the save holds. */
     recorder, runSummary, buildRunSummary,

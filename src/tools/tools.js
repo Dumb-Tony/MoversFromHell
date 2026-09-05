@@ -28,8 +28,9 @@
  * for one gesture is how a player ends up pressing the wrong key at the top of a ramp.
  */
 
-import { TOOLS, DAMAGE } from '../config.js';
+import { TOOLS, DAMAGE, PARTS } from '../config.js';
 import { TOOL_DEFS, validateToolDef } from './definitions.js';
+import { pieceDefFor, fragmentDefFor } from '../objects/definitions.js';
 import { EVENTS } from '../core/eventBus.js';
 import { GROUP_PRESETS } from '../physics/world.js';
 import { buildToolVisual } from '../render/prefabs.js';
@@ -417,30 +418,249 @@ export function disassemble(registry, entity, partName) {
   entity.state.removedParts = [...(entity.state.removedParts || []), partName];
   entity.body.wakeUp();
 
+  /* THE PART IS NOW SEVERAL BODIES (M12). §9.1's second clause, "creates loose parts",
+   * was a comment for five phases; now the pieces spawn beside the parent — clear of its
+   * AABB so no contact impulse fires, on whatever floor it stands on — and the parent
+   * records their ids. Everything after this point (carrying them, losing them, packing
+   * them, pricing them) is the ordinary entity machinery seeing four more entities. */
+  const pieces = spawnPieces(registry, entity, pieceDefFor(entity.def, entry), entry.piece.count,
+    (p, i) => { p.state.partOf = { entityId: entity.id, defId: entity.defId, part: partName, index: i }; });
+  entity.state.parts = { ...(entity.state.parts || {}), [partName]: pieces.map((p) => p.id) };
+
   return {
     before, after,
     volumeBefore: packedVolume(before),
     volumeAfter: packedVolume(after),
     seconds: entry.seconds * TOOLS.screwdriver.timeScale,
     reversible: entry.reversible !== false,
+    pieces: pieces.map((p) => p.id),
   };
 }
 
-/** §8.2: "Unscrew and reattach". Preparation that could not be undone would be a trap, and
- *  §2.1 has no patience for traps. */
-export function reassemble(registry, entity, partName) {
+/**
+ * §8.2: "Unscrew and reattach". Preparation that could not be undone would be a trap, and
+ * §2.1 has no patience for traps.
+ *
+ * M12: the pieces have to be HERE. Every piece of the part must lie within
+ * PARTS.reattachRange of the parent, or this refuses (null, nothing changes) and the prompt
+ * says which are missing (partStatus). `force` is the contract reset's override: it gathers
+ * the pieces from wherever they were lost, because a replay starts whole (§26.6).
+ *
+ * @returns {{restored, piecesRemoved}|null}
+ */
+export function reassemble(registry, entity, partName, { force = false } = {}) {
   const removed = entity.state.removedParts || [];
   if (!removed.includes(partName)) return null;
+  const status = partStatus(registry, entity, partName);
+  if (!force && status.missing > 0) return null;
+  let piecesRemoved = 0;
+  for (const id of status.ids) if (registry.remove(id)) piecesRemoved++;
+  if (entity.state.parts) {
+    const parts = { ...entity.state.parts };
+    delete parts[partName];
+    entity.state.parts = parts;
+  }
   const d = entity.def.dimensions;
   entity.collider.setHalfExtents({ x: d.x / 2, y: d.y / 2, z: d.z / 2 });
   entity.mesh.scale.set(1, 1, 1);
   entity.state.dimensions = { ...d };
   entity.state.removedParts = removed.filter((p) => p !== partName);
   entity.body.wakeUp();
-  return { restored: { ...d } };
+  if (piecesRemoved && registry.physics && registry.physics.primeQueries) registry.physics.primeQueries();
+  return { restored: { ...d }, piecesRemoved };
 }
 
 /** Current dimensions, which are the definition's unless something has been taken off. */
 export function currentDimensions(entity) {
   return entity.state.dimensions || entity.def.dimensions;
+}
+
+/* ── loose parts and fragments (M12; §9.1, §26.4, §26.6, §2.2) ─────────────────────────
+ *
+ * "An object in pieces is several objects, and pieces get left behind." Everything below
+ * is placement and bookkeeping; the pieces themselves are ordinary registry entities.
+ */
+
+/** The world-space AABB of an entity's cuboid collider under its current rotation:
+ *  half-extent per world axis = sum over local axes of |R_ij| x h_j. */
+export function worldAabbOf(entity) {
+  const q = entity.body.rotation();
+  const he = entity.collider.halfExtents();
+  const t = entity.body.translation();
+  // Rotation matrix rows from the quaternion (column-major elements as Three.js lays them).
+  const xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
+  const xy = q.x * q.y, xz = q.x * q.z, yz = q.y * q.z;
+  const wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
+  const r = [
+    [1 - 2 * (yy + zz), 2 * (xy - wz),     2 * (xz + wy)],
+    [2 * (xy + wz),     1 - 2 * (xx + zz), 2 * (yz - wx)],
+    [2 * (xz - wy),     2 * (yz + wx),     1 - 2 * (xx + yy)],
+  ];
+  const h = [he.x, he.y, he.z];
+  const ext = r.map((row) => Math.abs(row[0]) * h[0] + Math.abs(row[1]) * h[1] + Math.abs(row[2]) * h[2]);
+  return {
+    min: { x: t.x - ext[0], y: t.y - ext[1], z: t.z - ext[2] },
+    max: { x: t.x + ext[0], y: t.y + ext[1], z: t.z + ext[2] },
+    centre: { x: t.x, y: t.y, z: t.z },
+  };
+}
+
+/** The floor under (x, z), by a ray cast down from `fromY` past the parent — the ground,
+ *  the truck deck, a ramp, whatever is there. Falls back to `fallbackY` when nothing is
+ *  within reach (or the query pipeline has not been primed). */
+function floorUnder(physics, x, z, fromY, excludeBody, fallbackY) {
+  if (!physics || !physics.R || !physics.world) return fallbackY;
+  try {
+    const R = physics.R;
+    const ray = new R.Ray({ x, y: fromY, z }, { x: 0, y: -1, z: 0 });
+    const hit = physics.world.castRay(ray, fromY + PARTS.floorProbeLength, true, undefined, undefined, undefined, excludeBody);
+    if (hit) return fromY - hit.timeOfImpact;
+  } catch (e) { /* an unprimed pipeline is not an error; the fallback is the parent's base */ }
+  return fallbackY;
+}
+
+/** Does a cuboid of `dims` centred at `pos` overlap any collider but the parent's? */
+function occupied(physics, pos, dims, excludeBody) {
+  if (!physics || !physics.R || !physics.world || !physics.R.Cuboid) return false;
+  let hit = false;
+  try {
+    const shape = new physics.R.Cuboid(dims.x / 2, dims.y / 2, dims.z / 2);
+    physics.world.intersectionsWithShape(pos, { x: 0, y: 0, z: 0, w: 1 }, shape,
+      () => { hit = true; return false; }, undefined, undefined, undefined, excludeBody);
+  } catch (e) { hit = false; }
+  return hit;
+}
+
+/**
+ * Where `count` pieces of `dims` go beside `parent`, and which way round.
+ *
+ * Against one face of the parent's world AABB, PARTS.pieceClearance of air between them
+ * and it, resting on the floor under each slot (spawnLift above it, so they settle in a
+ * frame without an impact). Two layouts: FLAT pieces (a door, a shelf board — height under
+ * half the smaller footprint axis) are STACKED on one footprint, the way a mover lays
+ * doors down; everything else (legs, a stand) is a ROW along the face, PARTS.pieceSpacing
+ * apart or the piece's own extent plus pieceGap. A piece is turned so its LONG horizontal
+ * axis lies along the face first (a leg across the row, a door parallel to the wardrobe),
+ * and pointing out from it second. The four faces (+z, -z, +x, -x) x the two turns are
+ * tried in that order and the first whose slots are all free of other colliders wins; a
+ * parent hemmed in on every side gets the first candidate anyway — the solver separates
+ * light bodies gently, and a piece somewhere inconvenient is §2.2's state, not a refusal.
+ * Exported so a suite can assert the geometry without spawning.
+ *
+ * @returns {{slots: {x,y,z}[], yaw: number, side: string, layout: 'row'|'stack', free: boolean}}
+ */
+export function pieceSlots(parent, dims, count, physics = null) {
+  const box = worldAabbOf(parent);
+  const body = parent.body;
+  const sides = [
+    { side: '+z', along: 'x', out: 'z', sign: +1 },
+    { side: '-z', along: 'x', out: 'z', sign: -1 },
+    { side: '+x', along: 'z', out: 'x', sign: +1 },
+    { side: '-x', along: 'z', out: 'x', sign: -1 },
+  ];
+  const longH = Math.max(dims.x, dims.z), shortH = Math.min(dims.x, dims.z);
+  const layout = (count > 1 && dims.y <= shortH * PARTS.flatAspect) ? 'stack' : 'row';
+  const baseY = Math.max(0, box.min.y);
+  let first = null;
+  for (const s of sides) {
+    for (const turn of ['along', 'across']) {
+      // Footprint on this face: the long axis along the face, or out from it.
+      const f = { x: 0, y: dims.y, z: 0 };
+      f[s.along] = turn === 'along' ? longH : shortH;
+      f[s.out] = turn === 'along' ? shortH : longH;
+      // Rotate a quarter turn when the def's own x/z do not already match that footprint.
+      const yaw = (Math.abs(f.x - dims.x) < 1e-9 && Math.abs(f.z - dims.z) < 1e-9) ? 0 : Math.PI / 2;
+      const outAt = (s.sign > 0 ? box.max[s.out] : box.min[s.out]) + s.sign * (PARTS.pieceClearance + f[s.out] / 2);
+      const spacing = Math.max(PARTS.pieceSpacing, f[s.along] + PARTS.pieceGap);
+      const slots = [];
+      for (let i = 0; i < count; i++) {
+        const p = { x: 0, y: 0, z: 0 };
+        p[s.along] = box.centre[s.along] + (layout === 'row' ? (i - (count - 1) / 2) * spacing : 0);
+        p[s.out] = outAt;
+        const floorY = floorUnder(physics, p.x, p.z, box.max.y + PARTS.floorProbeLift, body, baseY);
+        p.y = floorY + dims.y / 2 + PARTS.spawnLift + (layout === 'stack' ? i * (dims.y + PARTS.stackGap) : 0);
+        slots.push(p);
+      }
+      const free = slots.every((p) => !occupied(physics, p, f, body));
+      const candidate = { slots, yaw, side: s.side, layout, free };
+      if (free) return candidate;
+      if (!first) first = candidate;
+    }
+  }
+  return first;
+}
+
+/** Spawn `count` bodies of `def` beside `parent` and tag each through `tag(entity, i)`. */
+function spawnPieces(registry, parent, def, count, tag) {
+  const placed = pieceSlots(parent, def.dimensions, count, registry.physics);
+  const out = [];
+  placed.slots.forEach((at, i) => {
+    const p = registry.spawn(def, { x: at.x, y: at.y, z: at.z, yaw: placed.yaw });
+    tag(p, i);
+    p.state.lastStable = { x: at.x, y: at.y, z: at.z };
+    out.push(p);
+  });
+  if (out.length && registry.physics && registry.physics.primeQueries) registry.physics.primeQueries();
+  return out;
+}
+
+/**
+ * Where the pieces of one detached part are, relative to their parent: how many exist,
+ * how many are within PARTS.reattachRange, and which are not. The prompt's
+ * 'find the legs (1 of 4 missing)' and reassemble()'s refusal both read this.
+ *
+ * @returns {{part, of, present, missing, ids, farIds, name}}
+ */
+export function partStatus(registry, entity, partName) {
+  const ids = ((entity.state.parts || {})[partName]) || [];
+  const entry = (entity.def.disassembly || []).find((p) => p.part === partName);
+  const of = ids.length || (entry && entry.piece ? entry.piece.count : 0);
+  const c = entity.body.translation();
+  let present = 0;
+  const farIds = [];
+  for (const id of ids) {
+    const p = registry.get(id);
+    if (!p) { farIds.push(id); continue; }
+    const t = p.body.translation();
+    /* HORIZONTAL distance. A wardrobe's centre is a metre up and its doors lie at its foot;
+     * measured in 3D they read 1.72 m away while touching it (m6 E5, m11 C10 caught this). */
+    if (Math.hypot(t.x - c.x, t.z - c.z) <= PARTS.reattachRange) present++;
+    else farIds.push(id);
+  }
+  return { part: partName, of, present, missing: of - present, ids, farIds,
+           name: entry && entry.piece ? entry.piece.name : partName };
+}
+
+/** Every loose piece that belongs to `entity`: its detached parts' bodies and its fragments. */
+export function piecesOf(registry, entity) {
+  const ids = [];
+  for (const list of Object.values(entity.state.parts || {})) ids.push(...list);
+  ids.push(...(entity.state.fragments || []));
+  return ids.map((id) => registry.get(id)).filter(Boolean);
+}
+
+/**
+ * §26.4 "Broken required cargo stays deliverable or becomes trackable pieces" — BOTH. The
+ * entity stays, as the deliverable hulk (its mass, collider and manifest row untouched);
+ * PARTS.brokenFragmentCount[fragility] fragments spawn beside it as trackable bodies. Once
+ * per object: a hulk does not break again, and a piece never breaks at all.
+ *
+ * @returns {string[]} the fragment ids (empty when nothing was spawned)
+ */
+export function breakInto(registry, entity) {
+  if (entity.state.fragments || entity.state.partOf || entity.state.fragmentOf) return [];
+  const def = fragmentDefFor(entity.def);
+  const pieces = spawnPieces(registry, entity, def, def.fragmentOf.count,
+    (p, i) => { p.state.fragmentOf = { entityId: entity.id, defId: entity.defId, index: i }; });
+  entity.state.fragments = pieces.map((p) => p.id);
+  return entity.state.fragments;
+}
+
+/** Remove an object's fragments (contract reset, §26.6 "reset removes … fragments"). */
+export function clearFragments(registry, entity) {
+  const ids = entity.state.fragments || [];
+  let n = 0;
+  for (const id of ids) if (registry.remove(id)) n++;
+  if (entity.state.fragments !== undefined) delete entity.state.fragments;
+  return n;
 }

@@ -24,6 +24,13 @@ import { buildPrefab } from '../render/prefabs.js';
 
 let _nextId = 0;
 
+/** A pose's rotation as a quaternion: an explicit `rot`, else a yaw about y (M11). */
+function rotationOf(pose) {
+  if (pose.rot) return { x: pose.rot.x, y: pose.rot.y, z: pose.rot.z, w: pose.rot.w };
+  const yaw = pose.yaw || 0;
+  return { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+}
+
 export class ObjectRegistry {
   /**
    * @param {PhysicsWorld} physics
@@ -43,15 +50,21 @@ export class ObjectRegistry {
   }
 
   /**
-   * @param {string} defId key in OBJECT_DEFS
+   * @param {string|object} defId key in OBJECT_DEFS — or a definition object itself, for
+   *        the DERIVED defs a detached part or a fragment spawns from (definitions.js
+   *        pieceDefFor / fragmentDefFor, M12); those pass the same validator.
    * @param {{x,y,z,yaw}} at
+   * @param {{manifest?: boolean, state?: object}} [opts]  M11: `manifest: false` marks an
+   *        entity that is part of the HOUSE rather than the customer's goods (a door leaf) —
+   *        never a manifest row, never counted by the contract panel; `state` is plain data
+   *        merged into the §7.2 runtime state at birth ({ doorId, hung, home, rest }).
    * @returns {object} the entity
    */
-  spawn(defId, at = {}) {
-    const def = OBJECT_DEFS[defId];
+  spawn(defId, at = {}, opts = {}) {
+    const def = typeof defId === 'string' ? OBJECT_DEFS[defId] : defId;
     if (!def) throw new Error(`unknown object definition "${defId}"`);
     const problems = validateDef(def);
-    if (problems.length) throw new Error(`definition "${defId}" is invalid: ${problems.join('; ')}`);
+    if (problems.length) throw new Error(`definition "${def.id || defId}" is invalid: ${problems.join('; ')}`);
 
     const R = this.physics.R;
     const THREE = window.THREE;
@@ -142,6 +155,8 @@ export class ObjectRegistry {
       body,
       collider,
       mesh,
+      /** false for a fixture (M11): in the world and the registry, never on the manifest. */
+      manifest: opts.manifest !== false,
       /** §7.2 runtime state — the serializable half. */
       state: {
         id,
@@ -154,11 +169,59 @@ export class ObjectRegistry {
         settled: false,
         /** Set on release; cleared once the object is clear of the player. See grip.js. */
         awaitingPlayerClearance: false,
+        ...(opts.state || {}),
       },
     };
 
     this.entities.set(id, entity);
     this.byCollider.set(collider.handle, entity);
+    return entity;
+  }
+
+  /* ── fixtures on and off the house (M11; §8.2 "remove from hinges", "reattach") ─────
+   *
+   * The same Fixed ↔ Dynamic flip the ramp uses when it is deployed and retrieved
+   * (tools.js deployRamp / retrieveRamp): a hung leaf is bolted to its jamb and FIXED is the
+   * honest body type — two kinematic bodies generate no contact in Rapier, and the player
+   * capsule is kinematic, so a kinematic leaf could be walked through. Nothing about the
+   * entity's identity changes: it keeps its id, its collider handle (so a raycast still
+   * finds it and the grip can still take hold of it), its mesh and its damage record. */
+
+  /** Pin an entity at `pose` as a FIXED body — a door leaf hung on its hinges. `pose` is
+   *  {x, y, z, yaw} (house.js leafPose) or {x, y, z, rot}. Sets state.hung. */
+  hang(entity, pose) {
+    const R = this.physics.R;
+    entity.body.setBodyType(R.RigidBodyType.Fixed, true);
+    entity.body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, true);
+    entity.body.setRotation(rotationOf(pose), true);
+    entity.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    entity.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    entity.state.hung = true;
+    entity.state.settled = false;
+    entity.state.outOfBoundsMs = 0;
+    entity.state.lastStable = { x: pose.x, y: pose.y, z: pose.z };
+    entity.body.wakeUp();
+    this.physics.primeQueries();
+    return entity;
+  }
+
+  /** Take it off: DYNAMIC again, laid at `pose` when one is given (house.js leafRestPose —
+   *  flat on the floor beside the doorway, never left balanced on a 40 mm edge to topple
+   *  onto whoever unscrewed it), else freed where it stands. Sets state.hung false. */
+  unhang(entity, pose = null) {
+    const R = this.physics.R;
+    entity.body.setBodyType(R.RigidBodyType.Dynamic, true);
+    if (pose) {
+      entity.body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, true);
+      entity.body.setRotation(rotationOf(pose), true);
+      entity.state.lastStable = { x: pose.x, y: pose.y, z: pose.z };
+    }
+    entity.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    entity.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    entity.state.hung = false;
+    entity.state.settled = false;
+    entity.body.wakeUp();
+    this.physics.primeQueries();
     return entity;
   }
 
@@ -312,5 +375,19 @@ export class ObjectRegistry {
     for (const id of Array.from(this.entities.keys())) this.remove(id);
   }
 
+  /** Every BODY the registry owns — manifest objects AND the loose pieces beside them
+   *  (M12). A suite that means "manifest objects" reads game.state.manifest.length. */
   get count() { return this.entities.size; }
+
+  /** The loose pieces only: detached parts (`state.partOf`) and a broken item's fragments
+   *  (`state.fragmentOf`). Never manifest rows; removed together by the contract reset. */
+  pieces() {
+    return [...this.entities.values()].filter((e) => e.state.partOf || e.state.fragmentOf);
+  }
+
+  get pieceCount() {
+    let n = 0;
+    for (const e of this.entities.values()) if (e.state.partOf || e.state.fragmentOf) n++;
+    return n;
+  }
 }

@@ -29,6 +29,8 @@ shipped contract at last, not demonstration geometry. The 32" opening remains on
 off every route, as the legible example of a clearance the legs unlock.
 
 
+**Addendum (Phase 20, M11).** The 0.82 m figure this question was about IS the 0.86 m door with its 40 mm leaf hung: four doorways now have their doors on (interior32 0.78 hung / 0.82 off, door34 0.82 / 0.86, living_kitchen 0.82 / 0.86, kitchen_bedroom 0.87 / 0.91), the screwdriver takes a leaf off its hinges for 45 s of labour, and the couch's three approaches at the turn are all real: legs off (90 mm), door off (10 mm intact on its side), or both (140 mm at the front door).
+
 ## Technical limitations
 
 **Must be served over http.** ES modules are blocked on `file://` by CORS. `play.bat`
@@ -172,7 +174,7 @@ is *satisfying* or merely *fiddly* is the single most important open question in
 project, and it cannot be answered by a test. It is the first thing to put in front of a
 playtester.
 
-**§8.2's second answer to the turn exists; the third does not.** Pivot it (Phase 5), or unscrew
+~~§8.2's second answer to the turn exists; the third does not.~~ **Closed in Phase 20 (M11): the third answer exists — door leaves come off their hinges.** Pivot it (Phase 5), or unscrew
 the couch's legs (Phase 11 M8: 90 mm at the 34" door for 60 s of labour). Taking a door off its
 hinges is still unbuilt — no door leaf exists as an object anywhere (docs/PHASE11_PLAN.md,
 "Deliberately not now"). §3.3's "at least two approaches" now holds at the turn with two, not three.
@@ -667,7 +669,7 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 
 **The legless couch is a shorter couch.** disassemble() rescales the whole prefab in y (tools.js), so the mesh reads as a squashed couch rather than one without legs. Collider-faithful per §13.4 and asserted (m6 E15f, m13 A-series unchanged); a leg-hiding prefab variant is art, not scope.
 
-**Loose parts are still a string.** `state.removedParts` records 'legs'; no 12.6 kg of leg bodies appear (`TOOLS.screwdriver.partMassFraction` still has no consumer). Unchanged from Phase 6.
+~~Loose parts are still a string.~~ **Closed in Phase 20 (M12): a part is piece.count registry bodies.** `state.removedParts` records 'legs'; no 12.6 kg of leg bodies appear (`TOOLS.screwdriver.partMassFraction` still has no consumer). Unchanged from Phase 6.
 
 **The archival screenshot scripts reference the old couch position.** tools/_shot-phase5.js and later still stage the couch in the living room; they are documented as not re-shot. tools/_shot-couch-legs.js is the M8 shot.
 
@@ -691,4 +693,34 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 
 - **m2 and m3 measured with a compounding accumulator until M10** — their harnesses never called `physics.clearForces()` (main.js, m4 and m6 do), so every Phase 2/3 grip number they recorded (sag, lift forces, the 8 mm / 0.91 m/s drag) included Rapier's persisting force sum; world-frame damping self-cancelled it, which is why nothing failed. Both suites pass unchanged assertions with the fix in; the recorded numbers are historical.
 - **m6 B8's margin is 4 cm** — the brief's 0.30 m line is met at 0.34 m only because GRIP.towSpeedSafety moved 0.55 → 0.65 (0.304 m at 0.55). A later change to the couch's friction, mass or CARRY.pullDamping will move B8 first; the safety sweep in `tools/_probe-drag.js` is the place to re-tune.
+
+
+## Phase 20 open items
+
+### M11
+
+- **~~A hung leaf can be 'grabbed'.~~ Fixed at integration (Phase 20): `GripSystem.probe()` skips an entity whose `state.hung` is true.** Recorded as found: grip.js acquires any registry entity, so a hand on a door still on its hinges holds a Fixed body: the spring pulls nothing, the grip tears at maxStretch ('pulled out of reach'), and until it does the leaf's collider is in the held group, so the holder can walk through the doorway edge. grip.js is outside M11's files; a `state.hung` check in GripSystem.probe() is the fix (one line).
+- **Rehanging into an occupied doorway** (Q with a box or a mover standing where the leaf hangs) pins the leaf through it and the solver shoves the occupant out; no occupancy check.
+- **The rest spot is not checked at removal**: a mover or object standing on the strip beside the doorway when E is pressed is separated by the solver over a few steps.
+- **A 1.5 m drop breaks a door** (condition 100 → 14, the whole 180 billed): the normal-fragility curve treats a stock door like a nightstand. Realistic doors are sturdier; a 'sturdy' band or a leaf-specific tolerance is a data change.
+- **Door damage lands on the furniture-damage line**, not property damage — ledger.propertyDamage is still never written (Phase 10 open item).
+- **DOOR_STATE 'hung' is never emitted**: the boot state is `entity.state.hung`; the run record starts with the leaves on their hinges implicitly.
+- **Jamb markers overlap the hung leaf visually** by 20 mm (they are 0.04 m meshes centred ON the gap edge; the leaf sits flush inside it). Colour-only; no collider.
+- **Legs-off past a hung door needs aim**: 50 mm of geometry is 25 mm a side aimed at the open 0.82 (goes through at 600 N) and 3.5 mm at the door's nominal centre. The intact couch cannot pass a hung 34" door at any aim (−30 mm).
+- **The 32" front aperture's leaf swings out onto the grass** and lies there when removed; it is on no route, demo geometry as before.
+- **Doors are a third body type in the world**: 4 Fixed bodies (75 total at boot). m14's soak equality and every leak check pass; any future 'bodies === N' pin must count them.
+
+Resolved by M11: KNOWN_ISSUES's 'single most important open question' (the 0.82 vs 0.86 door) — 0.82 IS the 0.86 door with its leaf hung; §8.2's 'remove from hinges' now exists; §15.2's front_door_removed exists.
+
+### M12
+
+- Fragments are trackable only: they never hold a row open and are priced at 0 (the broken band already charged the item). A shard left at the pickup is counted (piecesLeftBehind) but costs nothing — deliberate, recorded so nobody 'fixes' it into a double charge.
+- The break trigger is entering the 'broken' band (condition < 35), not exactly 0. One fragmentation per object; a piece never fragments. A door leaf (M11 fixture) that reaches the band fragments too (2 pieces); reset removes them.
+- Piece placement falls back to the first candidate (+z face, long axis along it) when every face x turn is occupied — a parent hemmed in on all sides (a wardrobe in a corner with a mattress beside it) can spawn a door overlapping a wall or an object, and the solver ejects it. No damage measured at the shipped spawn positions (m20 P1h asserts zero at the pad; m6 E2/E7 and m14 take the wardrobe and bookshelf apart in place) but it is not asserted for every room.
+- Reassembly reach is the parent's centre ± 1.5 m horizontally; a leg at the far end of a 2.10 m couch is 1.3 m out. Fine for the shipped table, tight for anything longer than 3 m.
+- Reassembly still costs no labour (the M8 seam) and the pieces teleport away on reattach — no animation, no pickup.
+- The 'parts left at pickup' line prices any piece not INSIDE the destination shell, wherever it is (on the road, at the kerb, lost off the world and recovered to its spawn slot) — the wording says pickup because that is where they get left, but the test is the shell.
+- m14's soak now completes 22/23 each run: its fixture takes the wardrobe's doors off and never brings the two door pieces (2 x 5.25 kg) to the destination, so that row stays open and the invoice carries a 72.80 parts-left line. S0-S8 assert none of that; the equality counters hold (registry 27, bodies 75).
+- m13 A1/A2 do not cover the derived piece prefabs (they iterate OBJECT_DEFS); m20 P9 does, over definitions.derivedDefs().
+- A piece's lastStable is its spawn slot until it settles; a piece knocked off the world in its first frames is recovered to beside where the parent WAS.
 

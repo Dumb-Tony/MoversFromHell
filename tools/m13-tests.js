@@ -32,7 +32,7 @@ import { KINDS } from '../src/render/materials.js';
 import { BODY_RATIOS } from '../src/render/playerBody.js';
 import { RENDER } from '../src/config.js';
 import { APERTURES, REFERENCE_DIMS } from '../src/render/scene.js';
-import { ZONES, ROOM as HOUSE_ROOM, INTERIOR_DOORS } from '../src/world/house.js';
+import { ZONES, ROOM as HOUSE_ROOM, INTERIOR_DOORS, leafDoors } from '../src/world/house.js';   // leafDoors: M11, B1c
 import { DEST_ZONES } from '../src/world/destination.js';
 
 const ROOM_WALL_H = HOUSE_ROOM.wallH;
@@ -140,6 +140,24 @@ lines.push('--- B. nothing decorative has crept into a doorway (§26.2) ---');
    * central mechanic in a way no physics test can see: the collider list is untouched and
    * every clearance assertion still passes, while the player watches a couch pass through a
    * door frame. So this measures the VISIBLE geometry against the clear opening. */
+  /* Phase 11 build-side M11: a door LEAF is a registry entity that stands in its doorway by
+   * design (§8.2 — hung swung open against the hinge jamb, its 40 mm inside the opening). It
+   * is exempt from both sweeps the way B1b has always exempted entities — by IDENTITY, never
+   * by widening the clear box — and B1c below insists the only meshes that exemption ever
+   * covers are door leaves, so the exemption cannot quietly hide a picture frame again. */
+  const entityOf = (o) => {
+    for (const e of registry.entities.values()) { if (e.mesh === o || e.mesh.children.includes(o)) return e; }
+    return null;
+  };
+  /* Meshes are where their bodies are only after the render loop's sync, which never runs
+   * headless: without this every entity mesh still sits at the origin and the sweeps below
+   * measure a world with no objects in it — B1c caught exactly that (the four hung leaves
+   * were nowhere near their doorways). Sync first, as every drawn frame does — and update
+   * the world matrices, because Box3.setFromObject(child) reads the PARENT group's
+   * matrixWorld as it is, and a synced group's is stale until a render or this call. */
+  registry.syncMeshes();
+  world.scene.updateMatrixWorld(true);
+  const exempted = [];   // [doorId, entity] for every entity mesh a sweep skipped
   const bad = [];
   const wallZ = -2.0;
   for (const a of APERTURES) {
@@ -157,6 +175,9 @@ lines.push('--- B. nothing decorative has crept into a doorway (§26.2) ---');
         // through every box and are not obstructions.
         const s = b.getSize(new THREE.Vector3());
         if (s.x > 30 || s.z > 30) return;
+        // Movable objects may legitimately be mid-doorway (M11: a hung leaf IS); static dressing may not.
+        const ent = entityOf(o);
+        if (ent) { exempted.push([a.id, ent]); return; }
         bad.push(`${a.id}: a ${s.x.toFixed(2)}x${s.y.toFixed(2)}x${s.z.toFixed(2)} mesh`);
       }
     });
@@ -181,13 +202,31 @@ lines.push('--- B. nothing decorative has crept into a doorway (§26.2) ---');
       const sz = b.getSize(new THREE.Vector3());
       if (sz.x > 30 || sz.z > 30) return;
       // Movable objects may legitimately be mid-doorway; static dressing may not.
-      let isEntity = false;
-      for (const e of registry.entities.values()) { if (e.mesh === o || e.mesh.children.includes(o)) { isEntity = true; break; } }
-      if (!isEntity) badInterior.push(dr.id + ': ' + sz.x.toFixed(2) + 'x' + sz.y.toFixed(2) + 'x' + sz.z.toFixed(2));
+      const ent = entityOf(o);
+      if (ent) { exempted.push([dr.id, ent]); return; }
+      badInterior.push(dr.id + ': ' + sz.x.toFixed(2) + 'x' + sz.y.toFixed(2) + 'x' + sz.z.toFixed(2));
     });
   }
   ok('B1b interior doorways are clear of scenery too', badInterior.length === 0,
      badInterior.slice(0, 4).join(' | '));
+
+  /* M11 — the exemption, audited. Every entity mesh a sweep skipped must be a door leaf
+   * (definitions.js door_leaf_01) standing in ITS OWN doorway, and every doorway that has a
+   * leaf record must have exactly one such entity in its box. Anything else the exemption
+   * swallowed — a box someone parked in a doorway at boot, a picture frame that became an
+   * entity — is a FAIL here even though B1/B1b stayed green. */
+  const leafDoorIds = leafDoors(APERTURES).map((d) => d.id).sort();
+  const notLeaves = exempted.filter(([, e]) => e.defId !== 'door_leaf_01').map(([id, e]) => `${id}: ${e.defId}`);
+  ok('B1c the only meshes the doorway sweeps exempt are door leaves (M11)', notLeaves.length === 0, [...new Set(notLeaves)].slice(0, 4).join(' | '));
+  const wrongDoor = exempted.filter(([id, e]) => e.defId === 'door_leaf_01' && e.state.doorId !== id).map(([id, e]) => `${e.state.doorId} found in ${id}`);
+  ok('B1c …each in its own doorway', wrongDoor.length === 0, [...new Set(wrongDoor)].slice(0, 4).join(' | '));
+  const perDoor = {};
+  for (const [id, e] of exempted) { (perDoor[id] = perDoor[id] || new Set()).add(e.id); }
+  const seenDoors = Object.keys(perDoor).sort();
+  eq('B1c …and every leaf-bearing doorway has exactly one leaf standing in it', seenDoors.join(','), leafDoorIds.join(','));
+  ok('B1c …one entity per door, not two', seenDoors.every((id) => perDoor[id].size === 1), seenDoors.map((id) => `${id}:${perDoor[id].size}`).join(' '));
+  ok('B1c …and every one of them is hung and Fixed at the moment of the sweep',
+     exempted.every(([, e]) => e.state.hung === true && e.body.isFixed()));
 
   // And the numbers themselves are untouched — the art pass must not have moved a jamb.
   eq('B2 the 32" door is still 0.82 m', APERTURES.find((a) => a.id === 'interior32').gap, 0.82);

@@ -156,6 +156,10 @@ export class GripSystem {
     if (!hit) return null;
 
     const entity = this.registry.fromCollider(hit.collider);
+    /* A door still on its hinges is a Fixed fixture (M11): a hand on it would hold an
+     * immovable body until the spring tore, with the leaf in the held collision group
+     * meanwhile. Not a target; the screwdriver is the verb (review minor, Phase 20). */
+    if (entity && entity.state && entity.state.hung) return null;
     if (!entity) return null;              // static architecture is not grabbable
 
     const toi = hit.timeOfImpact;
