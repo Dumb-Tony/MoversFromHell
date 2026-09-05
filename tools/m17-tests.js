@@ -26,7 +26,7 @@
  * --user-data-dir has a working store; m16's rule).
  */
 
-import { SIM, TELEMETRY, ECONOMY } from '../src/config.js';
+import { SIM, TELEMETRY, ECONOMY, TRUCK } from '../src/config.js';   // TRUCK: M17 R2f
 import { EVENTS, PHASES, EventBus } from '../src/core/eventBus.js';
 import { cabPoint, cargoInterior } from '../src/world/truck.js';
 import { routeSteps } from '../src/drive/route.js';
@@ -279,10 +279,15 @@ lines.push('--- R2. the run summary round-trips and names every §27.4 signal --
   const missingTop = top.filter((k) => !(k in rt));
   ok('R2 …with keys phases, counters, complete, restarts, questionnaire (and build, seed, events, invoice)',
      missingTop.length === 0, 'missing ' + missingTop.join(','));
-  const ck = ['grips', 'drops', 'recoveries', 'damageEvents', 'straps', 'cargo', 'trips', 'worstCargoShift'];
+  // M17 extends the key list: shiftByEvent {hardBrake, sharpTurn, speedBump} — §27.4's cargo
+  // motion per §11.3 event (m25 K8 measures the metres; here only the shape).
+  const ck = ['grips', 'drops', 'recoveries', 'damageEvents', 'straps', 'cargo', 'trips', 'worstCargoShift', 'shiftByEvent'];
   const missingC = ck.filter((k) => !(k in rt.counters));
-  ok('R2 …and counters.{grips,drops,recoveries,damageEvents,straps,cargo,trips,worstCargoShift} — one per §27.4 signal',
+  ok('R2 …and counters.{grips,drops,recoveries,damageEvents,straps,cargo,trips,worstCargoShift,shiftByEvent} — one per §27.4 signal',
      missingC.length === 0, 'missing ' + missingC.join(','));
+  ok('R2f M17: counters.shiftByEvent names every TRUCK.roadEvents key as a finite metre figure (zeros before a drive)',
+     rt.counters.shiftByEvent && Object.keys(TRUCK.roadEvents).every((k) => Number.isFinite(rt.counters.shiftByEvent[k]) && rt.counters.shiftByEvent[k] >= 0),
+     JSON.stringify(rt.counters.shiftByEvent));
   // Phase 11 build-side M14: the property ledger's count, apart from damageEvents (R1c).
   ok('R2e M14: counters.propertyEvents is a number — the second ledger counted apart from damageEvents',
      typeof rt.counters.propertyEvents === 'number' && rt.counters.propertyEvents === game.state.ledger.propertyDamage.length,

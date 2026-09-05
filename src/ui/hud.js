@@ -220,7 +220,7 @@ export class Hud {
     const cls = pct === 0 ? 'ok' : pct < 35 ? 'warn' : 'bad';
     const html =
       `<div class="row"><span>cargo</span><b>${q.loadedCount} items · ${Math.round(q.totalMass)} kg</b></div>` +
-      `<div class="row ${cls}"><span>${band}</span><b>${pct}% unstrapped</b></div>` +
+      `<div class="row ${cls}"><span>${band}</span><b>${Number.isFinite(q.quality) ? `${Math.round(q.quality * 100)}% pack · ` : ''}${pct}% unstrapped</b></div>` +
       `<div class="row"><span>space used</span><b>${Math.round(q.volumeFraction * 100)}%</b></div>`;
     this._set(this.cargoStatus, 'cargo', html);
   }

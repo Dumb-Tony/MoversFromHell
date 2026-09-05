@@ -118,20 +118,31 @@ export class CargoSystem {
    * later, a score — see the file header.
    *
    * @returns {{loadedCount, totalMass, unsecuredMass, unsecuredFraction, warn, centreOfMass,
-   *            lateralOffset, longitudinalOffset}}
+   *            lateralOffset, longitudinalOffset, heightFraction, runUpFraction, quality}}
    */
   packQuality() {
     const loaded = this.loadedEntities();
     const i = cargoInterior();
     const mid = { x: (i.minX + i.maxX) / 2, z: (i.minZ + i.maxZ) / 2 };
+    const boxH = i.maxY - i.minY, boxL = i.maxZ - i.minZ;
 
     let totalMass = 0, unsecuredMass = 0;
     let mx = 0, my = 0, mz = 0;
+    /* M17 (§26.3): of the UNRESTRAINED mass, how high it sits and how much open deck lies
+     * ahead of it toward the headboard — the two things that decided the three measured
+     * packs (tools/m25-packs-tests.js) once "how much is strapped" could not: TALL and
+     * SLIDE are both 100% loose. Mass-weighted, as fractions of the box, from the item's
+     * centre (rotation-independent — this is an estimate, not a collision query). */
+    let looseHeight = 0, looseRunUp = 0;
     for (const e of loaded) {
       const m = e.def.mass;
       const t = e.body.translation();
       totalMass += m;
-      if (!this.isSecured(e)) unsecuredMass += m;
+      if (!this.isSecured(e)) {
+        unsecuredMass += m;
+        looseHeight += m * Math.min(1, Math.max(0, (t.y - i.minY) / boxH));
+        looseRunUp += m * Math.min(1, Math.max(0, (i.maxZ - t.z) / boxL));
+      }
       mx += t.x * m; my += t.y * m; mz += t.z * m;
     }
 
@@ -139,6 +150,12 @@ export class CargoSystem {
       ? { x: mx / totalMass, y: my / totalMass, z: mz / totalMass }
       : { x: mid.x, y: i.minY, z: mid.z };
     const unsecuredFraction = totalMass > 0 ? unsecuredMass / totalMass : 0;
+    const heightFraction = totalMass > 0 ? looseHeight / totalMass : 0;
+    const runUpFraction = totalMass > 0 ? looseRunUp / totalMass : 0;
+    const Q = CARGO.quality;
+    const risk = Q.unsecuredWeight * unsecuredFraction
+               + Q.heightWeight * heightFraction
+               + Q.runUpWeight * runUpFraction;
 
     return {
       loadedCount: loaded.length,
@@ -146,6 +163,12 @@ export class CargoSystem {
       unsecuredMass,
       unsecuredFraction,
       warn: unsecuredFraction > CARGO.unsecuredWarnFraction,
+      /** M17: the loose mass's height and run-up as fractions, and the ONE number they and
+       *  the unsecured fraction make (CARGO.quality; 1 is a pack the drive will not move).
+       *  Tuned so that it ORDERS the measured packs the way the route punished them. */
+      heightFraction,
+      runUpFraction,
+      quality: Math.min(1, Math.max(0, 1 - risk)),
       centreOfMass: com,
       /** §11.2: "poor balance modestly affects steering and braking". These are the inputs
        *  to that, expressed as offsets from the middle of the deck in metres. */

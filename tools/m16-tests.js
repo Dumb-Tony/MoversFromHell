@@ -21,7 +21,7 @@
  */
 
 import { load, save, clearSave, defaultSave, SAVE_KEY, SAVE_SCHEMA, SHELL_DEFAULTS } from '../src/core/save.js';
-import { Input, DEFAULT_SETTINGS, PAD } from '../src/core/input.js';
+import { Input, DEFAULT_SETTINGS, PAD, SEAT_BINDINGS, bindingConflicts, bindingDiffCount } from '../src/core/input.js';   // SEAT_BINDINGS, bindingConflicts, bindingDiffCount: M18
 import { BUILD, RENDER, SETTINGS, SIM, COOP } from '../src/config.js';
 
 const lines = [];
@@ -136,15 +136,17 @@ lines.push('--- V. the versioned save (GDD §26.6, §27.1, §21.2) ---');
     shell: { uiScale: 1.3, cameraDistance: 5.5, tier: 'gpu', audioMaster: 0.8, audioUi: 0.6, audioWorld: 0.9, captions: false, cameraShake: false },
     bestInvoice: { profit: 123.45, grade: 'B', score: 71, delivered: 20, total: 23, build: 'phase-16', date: '2026-09-04' },
     runs: [],   // M6: the §27.4 kept-runs section (m17 R5 fills it; here it round-trips empty)
+    // M18: the §21.4 remap section — the DIFF from the shipped bindings (m26 B6 fills it; empty here).
+    bindings: {},
   };
   eq('V4 save(x) reports success', save(x), true);
   deep('V4 …then load() deep-equals x', load(), x);
   const blob = JSON.parse(localStorage.getItem(SAVE_KEY));
   eq('V4a the blob carries the schema', blob.schema, SAVE_SCHEMA);
   eq('V4b …and the build label that wrote it (§27.1)', blob.build, BUILD.label);
-  // M6 added `runs` (§27.4 kept run records) as the sixth top-level key.
-  eq('V4c …and exactly the six documented sections beside them',
-     Object.keys(blob).sort().join(','), 'bestInvoice,build,runs,schema,settings,shell');
+  // M6 added `runs` (§27.4 kept run records) as the sixth top-level key; M18 `bindings` as the seventh.
+  eq('V4c …and exactly the seven documented sections beside them',
+     Object.keys(blob).sort().join(','), 'bestInvoice,bindings,build,runs,schema,settings,shell');
 
   // A save is a file a player can edit. Same validator as the live Input (input.js).
   localStorage.setItem(SAVE_KEY, JSON.stringify({
@@ -521,6 +523,55 @@ lines.push('--- M16. the camera-shake switch is a shell key (§26.5, §21.4 Moti
   eq('M16-3 save(false) → load() false', load().shell.cameraShake, false);
   localStorage.setItem(SAVE_KEY, JSON.stringify({ schema: SAVE_SCHEMA, shell: { cameraShake: 'no' } }));
   eq('M16-4 a non-boolean in the blob is the default, not a truthy string', load().shell.cameraShake, true);
+  localStorage.removeItem(SAVE_KEY);
+}
+
+/* ── M18 (Phase 11 build-side): the Controls rows consume — U2's walk, for the remapper ──
+ * §21.4 Input "full remapping". Same claim as U2 ("assert consumption, not presence"): every
+ * Rebind row on the card changes the thing that consumes it — the LIVE binding table the
+ * game reads (input.bindingTable()), and through it the chip on the row — and Defaults puts
+ * every one back. The rows carry data-bind, not data-setting, so U2's own walk and its
+ * one-control-per-consumer count are unchanged (asserted). */
+lines.push('--- M18. the Controls rows consume: every Rebind moves the live table (§21.4 full remapping) ---');
+{
+  const keyEvent = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, key: code, bubbles: true, cancelable: true }));
+  const rowsAll = Array.from(panel().querySelectorAll('[data-bind]'));
+  const binds = M.settingsPanel.bindRows();
+  ok('M18-U2h the Controls group lists rows, none of them a data-setting control', rowsAll.length > 0 && rowsAll.every((r) => !r.dataset.setting), String(rowsAll.length));
+  eq('M18-U2i …so keys() (U2\'s walk) is unchanged', M.settingsPanel.keys().filter((k) => /:/.test(k)).length, 0);
+  ok('M18-U2j every rebindable row names an action in that seat\'s on-foot table',
+     binds.every((b) => { const [s, c, a] = b.split(':'); return !!(input.bindingTable()[Number(s)] || {})[c][a]; }), binds.join(','));
+  // A pool of codes no shipped binding uses, one per row; each capture lands and stays unique.
+  const pool = ['F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+                'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9',
+                'KeyB', 'KeyF', 'KeyG', 'KeyI', 'KeyL', 'KeyM', 'KeyN', 'KeyO', 'KeyT', 'KeyV', 'KeyX', 'KeyY', 'KeyZ'];
+  ok('M18-U2k the pool covers every row', pool.length >= binds.length, `${pool.length} codes for ${binds.length} rows`);
+  M.settingsPanel.show();
+  const inert = [];
+  const wrongChip = [];
+  binds.forEach((b, i) => {
+    const [s, c, a] = b.split(':');
+    const row = panel().querySelector(`[data-bind="${b}"]`);
+    const before = JSON.stringify(input.bindingTable()[Number(s)][c][a]);
+    row.querySelector('[data-act="rebind"]').click();
+    keyEvent('keydown', pool[i]); keyEvent('keyup', pool[i]);
+    const def = input.bindingTable()[Number(s)][c][a];
+    if (JSON.stringify(def) === before || !def.keys || def.keys[0] !== pool[i]) inert.push(`${b} (${before} → ${JSON.stringify(def)})`);
+    const chip = row.querySelector('.key.kbm');
+    const want = pool[i].replace(/^(Key|Digit)/, '');
+    if (!chip || chip.textContent !== want) wrongChip.push(`${b} (chip ${chip ? chip.textContent : 'none'}, want ${want})`);
+  });
+  ok(`M18-U2l every Rebind row moves the live table (${binds.length} rows, zero inert)`, inert.length === 0, inert.join(' | '));
+  ok('M18-U2m …and the row\'s chip shows the new key', wrongChip.length === 0, wrongChip.join(' | '));
+  eq('M18-U2n …with the table still conflict-free', bindingConflicts(input.seatBindings).length, 0);
+  eq(`M18-U2o …and the save holds exactly ${binds.length} diffs`, bindingDiffCount(load().bindings), binds.length);
+  eq('M18-U2p …and no capture is left open', input.capturing, false);
+  panel().querySelector('[data-act="defaults"]').click();
+  eq('M18-U2q Defaults puts every binding back (the live table is the shipped one)', input.seatBindings, SEAT_BINDINGS);
+  deep('M18-U2r …and the save holds no diffs', load().bindings, {});
+  ok('M18-U2s …while the interact row reads E again', /\bE\b/.test(panel().querySelector('[data-bind="0:foot:interact"]').textContent));
+  panel().querySelector('[data-act="close"]').click();
+  eq('M18-U2t the card is closed, the game running, solo', `${panel().hidden}/${game.state.paused}/${M.seatCount}`, 'true/false/1');
   localStorage.removeItem(SAVE_KEY);
 }
 

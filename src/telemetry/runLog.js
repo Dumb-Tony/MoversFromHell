@@ -63,6 +63,11 @@ export function createTelemetryCounters() {
     /** Metres: the single largest departure-to-arrival displacement of a loaded item. Written
      *  by the 'phase' system in main.js from cargo.shiftSince (§27.4 "cargo motion"). */
     worstCargoShift: 0,
+    /** M17 (§26.3 "observably different turn, brake, and bump results"): the same measure
+     *  PER §11.3 EVENT — the worst displacement of a loaded item between that ROAD_FORCE and
+     *  the next one (or the arrival), the max over every leg driven. Written by main.js's
+     *  ROAD_FORCE observer and the 'phase' system's arrival, keyed by TRUCK.roadEvents. */
+    shiftByEvent: { hardBrake: 0, sharpTurn: 0, speedBump: 0 },
   };
 }
 
@@ -228,6 +233,11 @@ export function buildRunSummary(state, invoice, review, summary, stats, recorder
        *  whatever was still aboard. */
       trips: (stats && stats.trips) || state.tripCount || 1,
       worstCargoShift: Math.round((c.worstCargoShift || 0) * TELEMETRY.precision.metres) / TELEMETRY.precision.metres,
+      /** M17: per-event worst shift, metres to the millimetre, every §11.3 event named
+       *  whether or not it fired (a run that never drove exports three zeros). */
+      shiftByEvent: Object.fromEntries(Object.keys(TRUCK.roadEvents).map((k) => [
+        k, Math.round(((c.shiftByEvent && c.shiftByEvent[k]) || 0) * TELEMETRY.precision.metres) / TELEMETRY.precision.metres,
+      ])),
     },
     delivered: summary ? summary.delivered : null,
     total: summary ? summary.total : null,

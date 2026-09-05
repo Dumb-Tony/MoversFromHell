@@ -580,7 +580,7 @@ lines.push('--- A11. the Sound group on the settings card moves its consumers (G
   ok('A11b the four persisted in the shell save', Math.abs(saved.audioMaster - 0.4) < 1e-9 && Math.abs(saved.audioUi - 0.3) < 1e-9 && Math.abs(saved.audioWorld - 0.7) < 1e-9 && saved.captions === true,
      JSON.stringify(saved));
   ok('A11b1 …under shell — the save\'s top-level key set is unchanged (m16 V4c)',
-     Object.keys(JSON.parse(localStorage.getItem(SAVE_KEY))).sort().join(',') === 'bestInvoice,build,runs,schema,settings,shell');
+     Object.keys(JSON.parse(localStorage.getItem(SAVE_KEY))).sort().join(',') === 'bestInvoice,bindings,build,runs,schema,settings,shell');
   audio.setMaster = realMaster; audio.setBus = realBus;
   panel().querySelector('[data-act="defaults"]').click();
   ok('A11c Defaults puts the levels back', Math.abs(audio.levels.master - SHELL_DEFAULTS.audioMaster) < 1e-9 && Math.abs(audio.levels.ui - SHELL_DEFAULTS.audioUi) < 1e-9 &&

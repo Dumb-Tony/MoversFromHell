@@ -137,6 +137,10 @@ async function boot() {
   const bus = new EventBus();
   // The saved feel settings arrive as the constructor patch (input.js validates them).
   const input = new Input(window, canvas, undefined, saved.settings).attach();
+  /* §21.4 full remapping (Phase 11 build-side M18): the saved binding DIFFS over this
+   * build's defaults. save.js already sanitised them (an unknown action or a conflicting
+   * entry was dropped there, with a console.info), so nothing is dropped here. */
+  input.applyBindings(saved.bindings);
   const game = new Game({ contractId: 'suburban_starter', input, bus });
   /* §22.3 step 6, "record a lightweight event log for scoring and debugging", made a RECORD
    * rather than the bus's 256-entry diagnostic tail (Phase 11 build-side M6, runLog.js).
@@ -653,7 +657,28 @@ async function boot() {
    * delete Phase 8's gate, which requires that a badly packed truck can be driven. */
   /** §27.4 "cargo motion": where every loaded item was when the truck left. Measurement
    *  scaffolding, not contract state, so it lives here beside the stall timer (M6). */
-  const cargoShift = { snapshot: null };
+  const cargoShift = { snapshot: null, event: null };
+  /* M17 (§26.3): the same measurement PER §11.3 EVENT. A ROAD_FORCE opens a window on the
+   * positions at that instant and closes the previous event's — the worst item's
+   * displacement between one event and the next (or the arrival) is that event's shift,
+   * onto counters.shiftByEvent as a max over legs. A read-only observer like the shake's:
+   * it runs inside route.step's emit, before the physics step that the event first acts
+   * on, so the window starts exactly where the event found the load. */
+  const closeShiftWindow = (state) => {
+    const w = cargoShift.event;
+    if (!w) return;
+    const c = state.telemetry && state.telemetry.counters;
+    if (c) {
+      if (!c.shiftByEvent) c.shiftByEvent = {};
+      c.shiftByEvent[w.type] = Math.max(c.shiftByEvent[w.type] || 0, cargo.shiftSince(w.snapshot).worst);
+    }
+    cargoShift.event = null;
+  };
+  bus.on(EVENTS.ROAD_FORCE, (e) => {
+    if (!TRUCK.roadEvents[e.roadType]) return;
+    closeShiftWindow(game.state);
+    cargoShift.event = { type: e.roadType, snapshot: cargo.snapshotPositions() };
+  });
   game.addSystem('phase', (state) => {
     if (state.phase === PHASES.TRANSIT && !cargoShift.snapshot) {
       cargoShift.snapshot = cargo.snapshotPositions();
@@ -670,6 +695,7 @@ async function boot() {
         c.cargo.measured = sh.count;
       }
       cargoShift.snapshot = null;
+      closeShiftWindow(state);   // M17: the last event's window ends at the arrival
       /* THE RETURN LEG ARRIVES (M13; §3.4 "a phase may return to an earlier phase for an
        * extra trip. The state machine must not lose damage, time, fees, or manifest
        * status"). Nothing is reset but the route: the ledger, the clock, the delivered rows
@@ -878,7 +904,8 @@ async function boot() {
   let keptRuns = Array.isArray(saved.runs) ? saved.runs.slice() : [];
   let currentRunIndex = -1;
   function persist() {
-    return writeSave({ settings: input.getSettings(), shell, bestInvoice, runs: keptRuns });
+    // bindings (M18): the live table's diff from the defaults — never the whole table.
+    return writeSave({ settings: input.getSettings(), shell, bestInvoice, runs: keptRuns, bindings: input.bindingDiff() });
   }
   function storeRun(summary) {
     keptRuns.push(compactRun(summary));
@@ -964,6 +991,20 @@ async function boot() {
       // M16: 'Defaults' restores the OS reading for the shake switch, not a bare true.
       this.apply({ ...DEFAULT_SETTINGS, ...SHELL_DEFAULTS, cameraShake: !reducedMotion });
     },
+    /* §21.4 "full remapping" (Phase 11 build-side M18): the Controls group. The live Input
+     * OWNS the table (rebind validates through bindingConflicts and installs only a clean
+     * result); the store persists the diff after every change and redraws the help line,
+     * which derives from the same table the prompts do (glyphFor). A capture routes the
+     * next press of ANY device to the card instead of the game (input.js _press). */
+    bindings: () => input.bindingTable(),
+    rebind(seat, ctx, action, token) {
+      const r = input.rebind(seat, ctx, action, token);
+      if (r.ok) { persist(); refreshHelp(); }
+      return r;
+    },
+    resetBindings(seat) { const r = input.resetBindings(seat); persist(); refreshHelp(); return r; },
+    beginCapture: (fn) => input.beginCapture(fn),
+    endCapture: () => input.endCapture(),
   };
   const settingsPanel = new SettingsPanel(ui, settingsStore);
   // Reachable from the title card and the pause card (§21.4; INDEX "settings panel").
@@ -1286,6 +1327,7 @@ async function boot() {
     recorder.closeRun(closing);
     invoiceScreen.clearRun();
     cargoShift.snapshot = null;
+    cargoShift.event = null;   // M17: an event window never crosses a reset
     recoveriesSeen.clear();
     game.reset();
     // AFTER game.reset(): the damage system reads game.state through a getter, so this

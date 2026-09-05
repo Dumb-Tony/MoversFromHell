@@ -179,6 +179,19 @@ proves no common sequence produces an unrecoverable soft lock (§26.6).
 bumps, nearby impacts and your own knockdown — never on your look — and it starts off when your
 system prefers reduced motion.
 
+**Rebind any action** (Phase 23, M18) — Settings → Controls lists every on-foot action for each
+player with its keyboard/mouse chip and its pad chip. Click Rebind and press the key, mouse
+button or pad button you want; Esc cancels, a click on the card cancels, and a capture closes
+itself after 8 s. A key another action already has — on either player — is refused and named;
+Escape, F3, F2 and the pad's View button are the game's own and cannot be bound; Pause and the
+stats overlay are fixed. The reticle prompt, the grip label and the help line redraw from the
+new binding at once. Saved on this machine as the differences from the defaults, so an update
+that improves a default you never touched still reaches you; Reset per player or Defaults
+restores the shipped keys, and a reset that knocks the other player's binding back to its
+default says so on that row.
+
+![Phase 23](docs/phase23-controls.png)
+
 ## Test it
 
 ```bash
@@ -242,7 +255,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**2333 assertions across twenty-five suites, all passing** — plus a GPU-only suite that the
+**2459 assertions across twenty-seven suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -283,7 +296,10 @@ property-damage entry with a notice, a caption, a bounded scuff and the §15.1 l
 closed the last two §26 lines a build can close alone: tools, door leaves and loose parts recover
 from out of bounds mid-run, a seeded sweep of forty random sessions proves no common sequence
 produces an unrecoverable soft lock, and camera shake exists with the switch §26.5 names. Batch 8
-(three packs for §26.3; full remapping for §21.4) is briefed in the plan.
+proved §26.3 with three packs of the same six items driven the whole route (LOW 0.030 m, TALL
+0.577 m and leaning at 27°, SLIDE 1.520 m and a holed headboard; two straps take SLIDE to
+0.135 m) and closed §21.4's last Input row with a Rebind on every on-foot action. Batch 9 (the
+last §21.4 rows and a consistency pass) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -397,7 +413,7 @@ forces, and this is where the solver left them.
 | the same route, the same objects | worst shift | damage |
 |---|---|---|
 | good pack — heavy low and forward, strapped | 0.470 m | **none** |
-| poor pack — stacked high, loose, unstrapped | **2.615 m** | television destroyed |
+| poor pack — stacked high, loose, unstrapped | **2.611 m** | television destroyed |
 | **the poor pack, parked for the same 28 s** | — | **none** |
 
 That third row is the one that matters. The pack is identically bad and the game knows it —
@@ -421,6 +437,17 @@ there is no inventory here. An object is in the truck when it is physically in t
 
 **Measured, one §11.3 hard brake over the same six-item pack:** unstrapped worst shift
 **1.645 m**; strapped **0.141 m**.
+
+**Measured (Phase 23, M17), three arrangements of the same six items over the full route:**
+LOW — the fridge and dresser strapped into the headboard corner, the light things wedged —
+worst shift **0.030 m**, no damage. TALL — the fridge upright against the headboard with open
+deck beside it, three boxes stacked, nothing strapped — the turn slides the fridge **0.577 m**
+sideways and leaves it leaning at **27°**. SLIDE — nothing stacked, nothing strapped, the fridge
+with 1.8 m of open deck ahead of it — the brake tips it forward **1.520 m** into the headboard
+for a **400.00 property line**. SLIDE with two straps crossed over the fridge: **0.135 m**, no
+line. The §10.2 pack-quality number the HUD now prints orders them 1.000 / 0.298 / 0.199, the
+same order the road does. The turn is as hard sideways as the brake is forward
+(`TRUCK.roadEvents.sharpTurn.accel` 1.0): at the old 0.8 it moved nothing upright on the deck.
 
 ![Phase 6](docs/phase6-tools.png)
 
@@ -563,6 +590,11 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
+- **Cargo tuning has two hard edges (M17).** A sideways fall in the 2.10 m box caps near 31°
+  because the fridge's top meets the far wall; a taut strap on a 9 kg box is numerically
+  unstable at 1/60 s, so strap the heavy things and wedge the light ones; the speed bump moves
+  nothing. **Rebinding (M18)** keeps one binding per device class per action, chords are not
+  bindings (the first keydown wins), and only the on-foot table is listed.
 - **The grab ray's origin follows the shaken camera** for up to 0.6 s after a nudge (its direction
   does not); the seat that feels road events is the one whose mover stood nearest the cab when
   the drive began; shake intensity is on/off only.

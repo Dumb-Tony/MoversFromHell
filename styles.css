@@ -776,6 +776,53 @@ body.coop #build-stamp { opacity: .45; }
 #settings-screen button:hover { filter: brightness(1.1); }
 #settings-screen button:focus-visible { outline: 2px solid var(--paper); outline-offset: 3px; }
 
+/* Controls group (Phase 11 build-side M18, §21.4 "full remapping"): one row per action, the
+   keyboard/mouse chip (lime, like the prompt's primary key) and the pad chip (violet) from the
+   live table, a Rebind button; a refusal is a coral sentence under the row, never a silence. */
+.set-seat {
+  margin: 8px 0 2px;
+  font: 700 calc(11px * var(--ts))/1.3 Quicksand, system-ui, sans-serif;
+  letter-spacing: .06em;
+  color: var(--paper);
+  opacity: .8;
+}
+.set-row.set-bind { grid-template-columns: 160px 1fr auto; padding: 3px 0; }
+.set-bind .set-glyphs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  font: calc(11px * var(--ts))/1.4 Quicksand, system-ui, sans-serif;
+  opacity: .9;
+}
+.set-bind .key {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--lime);
+  color: #101408;
+  font: 700 calc(11px * var(--ts))/1.2 ui-monospace, Consolas, monospace;
+  text-align: center;
+}
+.set-bind .key.pad { background: var(--violet); color: #100e1c; }
+.set-bind .key.none { background: transparent; color: var(--paper); opacity: .35; border: 1px dashed var(--line); }
+.set-bind.capturing .set-glyphs { color: var(--amber); opacity: 1; font-weight: 700; }
+.set-bind .set-fixed {
+  font: calc(10px * var(--ts))/1.4 Quicksand, system-ui, sans-serif;
+  color: var(--paper);
+  opacity: .45;
+  padding: 0 6px;
+}
+#settings-screen .set-bind button { padding: 5px 10px; font-size: calc(11px * var(--ts)); }
+.set-conflict {
+  margin: 0 0 4px;
+  font: calc(10px * var(--ts))/1.5 Quicksand, system-ui, sans-serif;
+  color: var(--coral);
+}
+.set-conflict[hidden] { display: none; }
+.set-bind-actions { display: flex; gap: 8px; margin: 6px 0 2px; }
+
 /* The title card's way into the settings — a text button in the "other ways to start" line. */
 #title-screen .alt .settings {
   padding: 1px 7px;

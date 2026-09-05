@@ -172,11 +172,10 @@ export function rampAnchorPoint(pose = TRUCK_POSE, box = CARGO_BOX) {
 export function roadEventForce(type, mass) {
   const ev = TRUCK.roadEvents[type];
   if (!ev) return null;
-  const a = type === 'hardBrake' ? TRUCK.brakeForce
-          : type === 'sharpTurn' ? TRUCK.brakeForce * 0.8
-          : TRUCK.brakeForce * 0.55;                 // speedBump, mostly vertical
-  const mag = mass * a * ev.severity;
-  if (type === 'hardBrake') return { x: 0, y: 0, z: mag };
-  if (type === 'sharpTurn') return { x: mag, y: 0, z: 0 };
-  return { x: 0, y: mag, z: 0 };                     // speedBump throws it up
+  /* The composition lives in config (M17): TRUCK.roadEvents[type].accel is the cargo's
+   * pseudo-acceleration in multiples of brakeForce, truck-local — a brake is +z (toward the
+   * headboard), a turn +x, a bump +y. Severity multiplies the whole thing (§11.3). */
+  const a = ev.accel || { x: 0, y: 0, z: 0 };
+  const k = mass * TRUCK.brakeForce * ev.severity;
+  return { x: a.x * k, y: a.y * k, z: a.z * k };
 }

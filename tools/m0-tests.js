@@ -13,7 +13,7 @@
 
 import { GameClock } from '../src/core/clock.js';
 import { EventBus, EVENTS, PHASES } from '../src/core/eventBus.js';
-import { Input, DEFAULT_BINDINGS, SEAT1_BINDINGS, CONTEXTS, PAD, MOUSE } from '../src/core/input.js';
+import { Input, DEFAULT_BINDINGS, SEAT1_BINDINGS, SEAT_BINDINGS, CONTEXTS, PAD, MOUSE } from '../src/core/input.js';   // SEAT_BINDINGS: M18
 import { mulberry32, Rng, hashStr } from '../src/core/rng.js';
 import { Game, createInitialState } from '../src/game.js';
 import { SIM, RENDER, PLAYER, GRIP, DAMAGE, STRAP, TRUCK, ECONOMY } from '../src/config.js';
@@ -220,6 +220,19 @@ lines.push('--- B. action map (GDD §4.2-4.4, §21.4) ---');
   ok('B24d …while a fresh press is', sh.consumeShellEdge('pause'));
   sh._debugPress('Escape'); sh.clear(); sh.poll();
   ok('B24e clear() drops a pending shell edge too', !sh.consumeShellEdge('pause'));
+
+  /* M18 (Phase 11 build-side, §21.4 full remapping): the shipped tables are the DEFAULTS a
+   * remap diffs against, so they must be frozen and a rebind must never write them — every
+   * assertion above reads them. A fresh Input IS the shipped table until something differs. */
+  const rb = new Input(window, null);
+  ok('M18-1 a fresh Input reads the shipped SEAT_BINDINGS themselves (same object)', rb.seatBindings === SEAT_BINDINGS);
+  const r = rb.rebind(0, CONTEXTS.FOOT, 'interact', 'KeyF');
+  ok('M18-2 rebind installs a CLONE with the change', r.ok && rb.seatBindings !== SEAT_BINDINGS && rb.bindings !== DEFAULT_BINDINGS);
+  eq('M18-3 …and the shipped default is untouched (interact is still KeyE)', DEFAULT_BINDINGS[CONTEXTS.FOOT].interact.keys[0], 'KeyE');
+  ok('M18-4 …because the shipped tables are frozen', Object.isFrozen(DEFAULT_BINDINGS) && Object.isFrozen(SEAT1_BINDINGS) && Object.isFrozen(SEAT_BINDINGS));
+  rb.resetBindings();
+  ok('M18-5 resetBindings() is the shipped table again, not a copy of it', rb.seatBindings === SEAT_BINDINGS);
+  ok('M18-6 …and B1-B23 read the live defaults: KeyE still interacts on a reset Input', (rb._debugPress('KeyE'), rb.isDown('interact')));
 }
 emit('running...');
 }

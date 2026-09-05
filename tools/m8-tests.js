@@ -192,6 +192,29 @@ lines.push('--- A. the route (GDD §11.1, §11.3, §13.3) ---');
 }
 emit('running...');
 
+/* ── A-M17. the events' composition is config, not a literal (Phase 11 build-side M17) ── */
+lines.push('--- A-M17. the road events\' composition lives in TRUCK.roadEvents[type].accel (M17, §26.3) ---');
+{
+  /* Until M17 the turn's 0.8 and the bump's 0.55 were literals in truck.js; the turn at
+   * 0.8 × brakeForce (0.42 g) moved NOTHING upright on a 0.40 deck and only the brake told
+   * one pack from another. tools/m25-packs-tests.js measures the three packs at 1.0. This
+   * suite's two-arrangement numbers under it: GOOD 0.470 m, BAD 2.611 m (was 2.615). */
+  for (const t of ['hardBrake', 'sharpTurn', 'speedBump']) {
+    const ev = TRUCK.roadEvents[t];
+    const f = roadEventForce(t, 100);
+    const k = 100 * TRUCK.brakeForce * ev.severity;
+    ok(`A10 M17: roadEventForce('${t}') = mass × brakeForce × severity × TRUCK.roadEvents.${t}.accel`,
+       !!ev.accel && Math.hypot(f.x - ev.accel.x * k, f.y - ev.accel.y * k, f.z - ev.accel.z * k) < 1e-9,
+       JSON.stringify({ f, accel: ev.accel, severity: ev.severity }));
+  }
+  ok('A11 M17: the turn is as hard as the brake, sideways (accel.x 1.0 — an upright fridge slides and tips on it)',
+     TRUCK.roadEvents.sharpTurn.accel.x === 1.0 && TRUCK.roadEvents.hardBrake.accel.z === 1.0,
+     `${TRUCK.roadEvents.sharpTurn.accel.x} vs ${TRUCK.roadEvents.hardBrake.accel.z}`);
+  ok('A12 M17: severities untouched (the shake and the audio scale on them): 1.0 / 1.0 / 0.8',
+     TRUCK.roadEvents.hardBrake.severity === 1.0 && TRUCK.roadEvents.sharpTurn.severity === 1.0 && TRUCK.roadEvents.speedBump.severity === 0.8);
+}
+emit('running...');
+
 /* ── B. §8.3's damage model, on real contacts ────────────────────────────── */
 lines.push('--- B. damage on real contacts (GDD §8.3, §8.4) ---');
 {

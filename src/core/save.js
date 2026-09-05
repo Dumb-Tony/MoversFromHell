@@ -20,6 +20,13 @@
  *                TELEMETRY.keepRuns compact run summaries — phases, counters, invoice totals,
  *                completion, restarts and the §27.3 questionnaire answers — never the event
  *                lists. "Deletable": the settlement sheet's 'clear responses' empties it.
+ *   bindings     §21.4 "full remapping" (Phase 11 build-side M18): the DIFFERENCES from the
+ *                shipped binding tables, per seat, context and action — never the whole
+ *                table, so a default this build changes wins for every action the player
+ *                never touched. Validated by input.js's own applyBindingDiff: an unknown
+ *                action, a malformed or reserved token and any entry that would conflict
+ *                (two actions on one key, a key on two seats, the mouse on seat 1) are
+ *                DROPPED with a console.info, never half-applied.
  *
  * Deliberately NOT saved: anything in game.state. Settings never enter it (m0 E8 / m12 J3),
  * and a contract is not resumable mid-run — §26.6's replay is from the start. The stored blob
@@ -28,7 +35,7 @@
  */
 
 import { BUILD, SETTINGS, TELEMETRY } from '../config.js';
-import { DEFAULT_SETTINGS, sanitiseSettings } from './input.js';
+import { DEFAULT_SETTINGS, sanitiseSettings, applyBindingDiff, bindingDiff, bindingDiffCount } from './input.js';
 
 export const SAVE_KEY = SETTINGS.saveKey;
 export const SAVE_SCHEMA = SETTINGS.schema;
@@ -44,6 +51,7 @@ export function defaultSave({ reducedMotion = false } = {}) {
     shell: { ...SHELL_DEFAULTS, cameraShake: !reducedMotion },
     bestInvoice: null,
     runs: [],
+    bindings: {},
   };
 }
 
@@ -93,7 +101,24 @@ export function migrate(data, opts = {}) {
     shell: sanitiseShell(data.shell, opts),
     bestInvoice: sanitiseInvoice(data.bestInvoice),
     runs: sanitiseRuns(data.runs),
+    bindings: sanitiseBindings(data.bindings),
   };
+}
+
+/** The saved binding diff, kept only where it still applies cleanly over THIS build's
+ *  defaults (input.js applyBindingDiff). What was dropped, and why, goes to console.info —
+ *  a player who edited the file or a build that moved a default should be able to see it —
+ *  and the survivors are re-diffed so the result is minimal. Never throws. */
+export function sanitiseBindings(diff) {
+  if (!diff || typeof diff !== 'object' || Array.isArray(diff)) return {};
+  const { table, dropped } = applyBindingDiff(diff);
+  if (dropped.length && typeof console !== 'undefined' && console.info) {
+    console.info(`${SAVE_KEY}: ${dropped.length} saved binding(s) dropped — ` + dropped.map((d) =>
+      `seat ${d.seat}${d.ctx ? ' ' + d.ctx : ''}${d.action ? ' ' + d.action : ''}: ${d.reason}` +
+      (d.conflicts ? ` (${d.conflicts.join('; ')})` : '')).join(' | '));
+  }
+  const kept = bindingDiff(table);
+  return bindingDiffCount(kept) ? kept : {};
 }
 
 /** The kept runs: an array of compact run records, newest last, at most TELEMETRY.keepRuns.
@@ -195,9 +220,9 @@ export function sanitiseInvoice(obj) {
 /**
  * Write the whole save. Returns false rather than throwing on a full or refused store —
  * settle() calls this and the invoice must show regardless (m16 V5).
- * @param {{settings?: object, shell?: object, bestInvoice?: object|null, runs?: object[]}} data
+ * @param {{settings?: object, shell?: object, bestInvoice?: object|null, runs?: object[], bindings?: object}} data
  */
-export function save({ settings = {}, shell = {}, bestInvoice = null, runs = [] } = {}) {
+export function save({ settings = {}, shell = {}, bestInvoice = null, runs = [], bindings = {} } = {}) {
   const s = storage();
   if (!s) return false;
   const payload = {
@@ -207,6 +232,7 @@ export function save({ settings = {}, shell = {}, bestInvoice = null, runs = [] 
     shell: sanitiseShell(shell),
     bestInvoice: sanitiseInvoice(bestInvoice),
     runs: sanitiseRuns(runs),
+    bindings: sanitiseBindings(bindings),
   };
   try { s.setItem(SAVE_KEY, JSON.stringify(payload)); return true; } catch (e) { return false; }
 }

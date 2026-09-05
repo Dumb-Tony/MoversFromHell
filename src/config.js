@@ -19,9 +19,9 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 22,
-  label: 'phase-22',
-  date: '2026-09-04',
+  phase: 23,
+  label: 'phase-23',
+  date: '2026-09-05',
 });
 
 /** Simulation cadence. Validated by Phase 0. */
@@ -895,6 +895,21 @@ export const CARGO = Object.freeze({
    *  job from one hanging off the side, and it is the same thing §10.3's SLACK state means. */
   securedSlackM: 0.05,
   restrainingTensionN: 40,
+  /** §10.2 pack quality as ONE number (M17, §26.3): quality = 1 − (unsecuredWeight × the
+   *  fraction of the load's mass that is unrestrained + heightWeight × how high the
+   *  UNRESTRAINED mass sits, as a mass-weighted fraction of the box height + runUpWeight ×
+   *  how much open deck lies ahead of it toward the headboard, as a mass-weighted fraction
+   *  of the box length), clamped to 0..1. Restrained mass contributes nothing to the last
+   *  two: a strapped fridge at the tail is not the same risk as a loose one. Still §10.4's
+   *  ADVISORY heuristic — nothing acts on it but a warning and a score.
+   *
+   *  TUNED against tools/m25-packs-tests.js so that the number predicts the drive: the three
+   *  packs measure LOW 0.030 m / TALL 0.577 m / SLIDE 1.520 m of worst shift over the route
+   *  and score 1.000 / 0.298 / 0.199 here — the same order. The run-up term outweighs the
+   *  height term because that is what the physics did: an upright fridge with 1.8 m of open
+   *  deck ahead of it (SLIDE) fell forward and holed the headboard, the same fridge against
+   *  the headboard (TALL) slid 0.577 m and leaned at 31° on the turn. */
+  quality: { unsecuredWeight: 0.5, heightWeight: 0.3, runUpWeight: 0.5 },
 });
 
 /** §11.2 truck. "Driving is the final exam for packing, not a racing minigame" (§11.1).
@@ -911,11 +926,26 @@ export const TRUCK = Object.freeze({
   steerRate: 0.85,           // rad/s at low speed
   steerSpeedFalloff: 0.55,   // §11.2 "wide turns"
   bodyRollPerG: 0.09,        // rad
-  /** §11.3 the three prototype-required road events. Severity is the impulse multiplier. */
+  /** §11.3 the three prototype-required road events. Severity is the impulse multiplier;
+   *  `accel` is the event's COMPOSITION — the pseudo-acceleration the cargo feels in the
+   *  truck's frame, in multiples of brakeForce, truck-local (+z forward = toward the
+   *  headboard, +x = the side the turn throws to, +y up). truck.js roadEventForce reads it:
+   *  force = mass × brakeForce × severity × accel. Until M17 the turn's 0.8 and the bump's
+   *  0.55 were literals in truck.js.
+   *
+   *  M17 (§26.3 "three different pack arrangements yield observably different turn, brake,
+   *  and bump results"): the turn's lateral fraction goes 0.8 → 1.0. MEASURED at 0.8
+   *  (0.42 g) the turn moved NOTHING upright — the deck friction combined with a fridge's
+   *  own (Rapier averages: (0.32 + 0.48)/2 = 0.40) is 0.40 g, a box's 0.52 g, a dresser's
+   *  0.50 g — so an unstrapped upright fridge against the headboard rocked 1.0° and slid
+   *  0.000 m, and the brake was the only event that distinguished one pack from another.
+   *  At 1.0 (0.53 g, the same magnitude the brake already had) the turn slides the fridge
+   *  and the television sideways and tips a top-heavy fridge for a visible reason. Severity
+   *  is unchanged (the shake and the audio scale on it); the timing is unchanged (m21). */
   roadEvents: {
-    hardBrake:  { severity: 1.0 },
-    sharpTurn:  { severity: 1.0 },
-    speedBump:  { severity: 0.8 },
+    hardBrake:  { severity: 1.0, accel: { x: 0, y: 0, z: 1.0 } },
+    sharpTurn:  { severity: 1.0, accel: { x: 1.0, y: 0, z: 0 } },
+    speedBump:  { severity: 0.8, accel: { x: 0, y: 0.55, z: 0 } },   // mostly vertical
   },
   /** §11.2: poor balance affects handling "without becoming a punishing simulator". */
   imbalanceSteerPenaltyMax: 0.18,
@@ -1136,6 +1166,34 @@ export const SETTINGS = Object.freeze({
   /** 'auto' detects (lighting.js detectRenderTier); the other two force. Applies on reload —
    *  the tier decides how many shadow maps get BUILT, before the scene exists. */
   tiers: ['auto', 'gpu', 'software'],
+});
+
+/** §21.4 "full remapping" — Phase 11 build-side M18. The remapper is UI over seams that
+ *  already existed (input.js bindingConflicts / glyphFor, the settings card, the versioned
+ *  save); these are its only numbers. */
+export const INPUT = Object.freeze({
+  remap: {
+    /** A Rebind capture nobody answers closes itself after this much time on the FRAME clock
+     *  Input.poll() runs on (capped per frame at SIM.maxFrameMs like the sim clock). The frame
+     *  clock, not the sim clock, because the card opens from the PAUSE card and a paused sim
+     *  clock never advances (m0 A9/E3) — a sim-time timeout there would never fire. */
+    captureTimeoutMs: 8000,
+    /** Key codes no action may be bound to. The shell reads them raw (Escape cancels a capture
+     *  and is the Chrome pointer-lock release; F3 is the overlay toggle; COOP.joinKey seats
+     *  the second player), so an action on one would fire twice. COOP.joinPad is reserved
+     *  beside them for the same reason (input.js reservedReason). */
+    reservedKeys: ['Escape', 'F3', COOP.joinKey],
+    /** Actions the Controls group lists but never rebinds: the shell's own. 'pause' is Escape
+     *  + Menu on every seat and the card itself closes on Escape; 'debug' is F3. */
+    lockedActions: ['pause', 'debug'],
+    /** Token shapes rebind() accepts: a KeyboardEvent.code, 'Mouse<0..maxMouseButton>', or
+     *  'P<seat>B<0..maxPadButton>' (Standard Gamepad has 17; 31 leaves room for exotic pads). */
+    maxMouseButton: 4,
+    maxPadButton: 31,
+    /** Longest KeyboardEvent.code a saved binding may carry (the longest real code, 'NumpadDecimal'
+     *  / 'IntlBackslash', is 13; 32 bounds a hand-edited save). */
+    maxKeyCodeLength: 32,
+  },
 });
 
 /** §27.4 telemetry and the §27.3 questionnaire — Phase 11 build-side M6.

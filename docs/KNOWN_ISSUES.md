@@ -432,10 +432,10 @@ screwdriver is genuinely unpointable, but everything else is hit-or-miss on one 
 or a small sphere cast would be truer to the GDD; the tolerance hack was the cheap version
 and should be replaced rather than extended.
 
-**No rebinding, and the keys are hard-coded.** E, Q, Tab, R and F3 are literals in
+**~~No rebinding, and the keys are hard-coded.~~ Closed in Phase 23 (M18): Settings → Controls rebinds every on-foot action per player, validated by the conflict checker and saved as diffs — see the Phase 23 entry.** ~~E, Q, Tab, R and F3 are literals in
 `main.js`'s key handler rather than a binding table. Fine for a prototype with one tester,
 wrong the moment anyone else plays it, and an accessibility problem regardless (§26.5 cares
-about readability but the GDD has no input-remapping requirement — it should).
+about readability but the GDD has no input-remapping requirement — it should).~~
 
 **The settlement screen is the only place the invoice appears.** There is no way to look at
 the ledger mid-contract, so the §8.4 cost notices are the only in-flight feedback about what
@@ -606,7 +606,6 @@ file. AirportBaggageCrew's settings panel is in Dev\INDEX.md and is the thing to
 
 ### M7
 
-REPLACE the Phase 6 paragraph 'Solo couch dragging got harder, not easier' (KNOWN_ISSUES.md ~237-243) with:
 
 **Solo couch drag travels, slowly and by design (Phase 11 M10, measured).** One hand, unbraced, 3 s:
 0.34 m, held throughout (2.45 m in 10 s, force ~620–680 N against 552 N of floor friction, no
@@ -645,7 +644,7 @@ AMEND the Phase 3 paragraph (~124-131) 'Candidate levers, none yet tried in ange
 
 **~~No settings, so no accessibility surface.~~ CLOSED in Phase 11 M4** — the settings card (title and pause) exposes grip hold/toggle, mouse/stick/P2-key sensitivity, invert X/Y, deadzone, trigger threshold, text size, camera distance and quality tier, saved under one localStorage key with a schema gate. What remains open from the same entry:
 
-- **No key remapping UI.** `setBindings`/`bindingConflicts` exist (input.js) and nothing calls them after boot; §21.4 scopes full remapping to the full product.
+- **~~No key remapping UI.~~ Closed in Phase 23 (M18).** ~~`setBindings`/`bindingConflicts` exist (input.js) and nothing calls them after boot; §21.4 scopes full remapping to the full product.~~
 - **No camera-shake, reduced-motion or subtitle control** — deliberately: there is no shake, no particle system and no audio for one to act on. Adding the switch before the thing it switches is a lie the card would tell (§2.1).
 - **Quality tier applies on reload**, and the card says so. The tier decides how many shadow maps are BUILT before the scene exists (lighting.js), so a live switch would mean rebuilding the scene. `?tier=` on the URL still overrides the saved tier, so shot scripts and the harness are unaffected by a player's choice.
 - **Text size scales type, not boxes.** `--ts` multiplies every font-size; panel `min-width`s and the 1280-wide `#help` line are still px, so at 1.6× the help line can wrap in co-op and the contract panel grows only as tall as its text. Measured clear of the centre third at 1.5× (m16 U1d); 1.6× not measured.
@@ -778,4 +777,25 @@ Resolved by M11: KNOWN_ISSUES's 'single most important open question' (the 0.82 
 - **The rotational part is pitch and roll only; no yaw, by design** (§21.4: the look axes are the player's).
 - **Impacts nudge on relVelocity alone**, not mass: a 9 kg box and a 90 kg couch landing at the same speed feel the same. AUDIO.impact has the same simplification; a mass term is a one-line change in the IMPACT observer if the audio gets one.
 - **No screen-shake control beyond on/off** (intensity slider deferred — §26.5 asks only that the switch exist).
+
+
+## Phase 23 open items
+
+### M17
+
+**A sideways fall cannot pass 45° in the truck (M17).** The cargo box is 2.10 m wide and the fridge 1.75 m tall: tipping sideways, its top meets the far wall at asin((2.10 − 0.70 − slide)/1.75) — 53° if the base did not move, 28° after the 0.57 m it slides at 0.53 g on the 0.40 deck (measured peak 30.8°, 26.6° at rest, TALL). m25 K4 asserts > 25° and prints the bound; the brief's 45° is only reachable along the box's length, on the brake (SLIDE: 90.0°). A wider box or a lower fridge would change the number; neither is a tuning knob.
+
+**A taut strap on a light item is numerically unstable (M17, straps.js).** STRAP.damping 1400 applied explicitly at 1/60 s exceeds the stability bound c·dt/m = 2 for any body under 11.7 kg: a 9 kg box (2.6) that loads its strap is launched — the M17 probe measured a strapped box on the dresser top thrown 1.45 m backward and 0.81 m down during a brake. The fridge (0.21) and dresser (0.42) are fine, the television (1.06) marginal. This is why m8's GOOD pack shows 0.470 m of shift and why m25 LOW straps its light items with 20 mm of slack, wedged so the straps never load. Fix: clamp the strap's damping per body (c ≤ 2m/dt) or integrate it semi-implicitly.
+
+**The bump moves nothing (M17).** speedBump is purely vertical at 0.55 × 0.8 × 5.2 = 2.3 m/s² (0.23 g): nothing lifts, nothing slides, and shiftByEvent.speedBump reads 0.000 for every pack. §26.3's 'bump results' differ only as a null. A longitudinal fraction on TRUCK.roadEvents.speedBump.accel is one number away if the bump should ever be an exam.
+
+**~~The HUD does not show the pack-quality number (M17).~~ Fixed at integration (Phase 23): the cargo row reads '30% pack · 100% unstrapped'.** cargo.packQuality().quality (LOW 1.000 / TALL 0.298 / SLIDE 0.199) is on the heuristic the HUD receives, but hud.js still prints '% unstrapped' and the band, so TALL and SLIDE both read 'LOOSE 100% unstrapped' while the drive punishes them 0.577 m vs 1.520 m. One line in setCargo. Likewise the invoice's stat rows do not carry shiftByEvent; the run summary (Copy run report) does.
+
+**The turn is as hard as the brake (M17).** TRUCK.roadEvents.sharpTurn.accel.x is 1.0 × brakeForce (0.53 g sideways) — a real box truck rolls before that. §7.1's exaggeration licence applies: at the previous 0.8 (0.42 g) the turn moved nothing upright on the deck and only the brake told one pack from another.
+
+### M18
+
+**Remapping (Phase 11 build-side M18).** Every on-foot action can be rebound from Settings → Controls, per player, keyboard/mouse and pad separately; conflicts are refused by name; the save keeps only the differences from the defaults. Limits, recorded not fixed: (1) one binding per device class per action — rebinding an action that shipped with two alternates (crouch: Ctrl or C) leaves it with the one you pressed; (2) chords are not bindings — the first keydown wins, so pressing Shift+F binds Shift; (3) only the on-foot table is listed, because the driving table is never entered (the route is scripted); (4) Escape, F3, F2 and the pad's View button are reserved for the shell and pause/debug are fixed; (5) a capture in solo takes the press from the only pad whichever player's row you clicked — the row decides the seat, which is the intended reading but can surprise a tester with two pads; (6) a capture nobody answers closes after 8 s of frame time (INPUT.remap.captureTimeoutMs); (7) a saved binding that a later build's default makes a conflict is dropped with a console.info, not merged — the default wins and the player rebinds. The reticle prompt, the grip label and the help line all follow the live table (glyphFor), so a remap is visible everywhere at once; the title card's control columns are authored text and still name the defaults.
+
+Fixed at integration (Phase 23): a click on the card during a capture cancels it instead of binding the mouse button, a captured mouse button's mouseup is swallowed like a keyup, and a reset that drops the other player's binding says so on that row.
 
