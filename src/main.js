@@ -224,6 +224,12 @@ async function boot() {
   const contractEntityIds = [];
   PHASE5_SPAWNS.forEach((s, i) => {
     const e = registry.spawn(s.def, s);
+    /* §15.3 "heaviest thing moved" (M26): the flag heaviestMoved() reads and respawnContract
+     * clears starts as a BOOLEAN, not as an absent key. Read undefined it behaved correctly
+     * (falsy), but game.state's shape is a §22.4 contract — m0 E8 and the run export both
+     * walk it — and a field that only exists after someone has grabbed something is a shape
+     * that changes under the reader. grip.js writes the true. */
+    e.state.everHeld = false;
     game.state.manifest[i].entityId = e.id;
     contractEntityIds[i] = e.id;
   });
@@ -255,7 +261,7 @@ async function boot() {
     const rest = leafRestPose(d);
     // hinge: where a FORCED door's mark goes — the jamb the hinges were screwed to (M23).
     const hinge = leafHingeMark(d);
-    const e = registry.spawn('door_leaf_01', home, { manifest: false, state: { doorId: d.id, hung: false, home, rest, hinge } });
+    const e = registry.spawn('door_leaf_01', home, { manifest: false, state: { doorId: d.id, hung: false, home, rest, hinge, everHeld: false } });
     registry.hang(e, home);
     leafEntities.set(d.id, e);
   }
@@ -876,7 +882,9 @@ async function boot() {
    * unpositioned until it is used. */
   const huds = [];
   for (let s = 0; s < COOP.maxSeats; s++) {
-    const h = new Hud(ui, s);
+    /* The SIM clock, third argument (M26): §8.4's notices age on the same clock M9's
+     * captions do, so a paused game freezes both and a headless suite expires both. */
+    const h = new Hud(ui, s, () => game.clock.simTimeMs);
     /* HIDDEN AT BIRTH, not at the first frame. The empty panels collapse on their own
      * (`:empty { display: none }`), but the RETICLE does not — it is three divs that are
      * always drawn — so an unhidden seat-1 HUD puts a second crosshair in the middle of a
@@ -1249,9 +1257,14 @@ async function boot() {
     const seat = seatCount === 1 ? 0 : seatOfMover(shakeDriver.mover);
     if (seat < 0) return;
     const rig = moverOfSeat(seat).rig;
-    // The same truck-frame direction the cargo's pseudo-force takes (truck.js): a brake
-    // throws forward (+Z, TRUCK_POSE.yaw is 0), a turn sideways, a bump up.
-    const f = roadEventForce(e.roadType, 1);
+    // The truck-frame direction the seat is nudged in: the same one the cargo's pseudo-force
+    // takes (truck.js) — a brake throws forward (+Z, TRUCK_POSE.yaw is 0), a turn sideways, a
+    // bump up — unless the event names its own. M26 gave the bump a forward fraction on the
+    // CARGO (the deck walking out from under the load); the cab itself still only rises, so
+    // TRUCK.roadEvents.speedBump carries a `seatAccel` and the shake is unchanged (m24 K2g).
+    // Only the direction is used: k below normalises it back to shake.road × severity.
+    const sa = ev.seatAccel;
+    const f = sa ? { x: sa.x, y: sa.y, z: sa.z } : roadEventForce(e.roadType, 1);
     if (!f) return;
     const len = Math.hypot(f.x, f.y, f.z) || 1;
     const k = SHAKE.road * sev / len;
@@ -1447,6 +1460,9 @@ async function boot() {
       recoveries: recoveryCount(),
       collisions: 0,
       moverCount: movers.length,
+      /* §15.3 (M26): how many people are playing, so the property line can name the seat
+       * that was carrying — and say nothing at all when there is only one (§21.1). */
+      seatCount,
     };
     const invoice = buildInvoice(game.state, summary, opts);
     const review = reviewFor(invoice, game.state, summary, opts);
@@ -1568,6 +1584,12 @@ async function boot() {
     cargoShift.event = null;   // M17: an event window never crosses a reset
     recoveriesSeen.clear();
     noticeHistory.length = 0;   // M19: the new run's 'What happened' starts empty
+    /* M26: and the notices on screen go with it. They expire against the SIM clock, which
+     * game.reset() below puts back to zero, so a notice raised at 4:12 of the last run would
+     * outlive every clock it could be measured by. The queue too — a notice raised for a run
+     * that no longer exists has nothing to say about this one. */
+    pendingNotices.length = 0;
+    for (const h of huds) h.clearNotices();
     game.reset();
     // AFTER game.reset(): the damage system reads game.state through a getter, so this
     // clears the NEW run's ledger and windows rather than the state just thrown away.

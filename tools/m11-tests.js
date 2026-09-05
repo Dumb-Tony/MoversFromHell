@@ -38,6 +38,7 @@ import { LINE_KINDS } from '../src/contract/invoice.js';
 import { disassemble } from '../src/tools/tools.js';
 import { partStatus, clearFragments } from '../src/tools/tools.js';   // Phase 11 build-side M12, situation 9 / section Q
 import { PARTS } from '../src/config.js';                              // M12
+import { NOTICE } from '../src/config.js';                             // M26, section F (notices on sim time)
 
 const lines = [];
 let passes = 0, fails = 0;
@@ -737,11 +738,28 @@ lines.push('--- F. the HUD (GDD §21.1, §21.2, §26.5) ---');
   // §8.4's "one small cost notice".
   hud.notice('television — broken · 900.00', 'damage');
   ok('F7 §8.4: an impact can post a cost notice', /900/.test(hud.notices.textContent));
-  ok('F8 …and notices expire on their own', (() => {
-    hud._notices.forEach((n) => { n.until = performance.now() - 1; });
+  /* F8 restated at M26: `until` is SIM milliseconds now, not performance.now() — the clock
+   * M9's captions already ran on. The stub is the sim clock, and the notice raised by F7 a
+   * moment ago is stamped `simTimeMs + NOTICE.ttlMs`, so ageing it past the current sim time
+   * is what expires it. Under the harness performance.now() is frozen, which is exactly why
+   * the wall clock had to go (KNOWN_ISSUES Phase 17: the soak watched notices pile up). */
+  ok('F8 …and notices expire on their own, on SIM time (M26)', (() => {
+    const now = game.clock.simTimeMs;
+    const fresh = hud._notices.every((n) => n.until > now);
+    hud._notices.forEach((n) => { n.until = now - 1; });
     hud.tickNotices();
-    return hud.notices.textContent === '';
+    return fresh && hud.notices.textContent === '';
   })());
+  ok('F8b …and tickNotices takes the time it is given: a notice raised now is gone NOTICE.ttlMs of sim ms later, not before', (() => {
+    const t = game.clock.simTimeMs;
+    hud._notices.length = 0; hud._renderNotices();
+    hud.notice('a strap gave way', 'damage', t);
+    hud.tickNotices(t + NOTICE.ttlMs - 1);
+    const alive = hud._notices.length === 1;
+    hud.tickNotices(t + NOTICE.ttlMs);
+    const dead = hud._notices.length === 0;
+    return alive && dead;
+  })(), `ttl ${NOTICE.ttlMs}`);
 
   // The DOM must not be rewritten when nothing changed — §26.6's frame budget.
   hud.setPrompt({ primary: 'pick up the flat dolly', secondary: null });

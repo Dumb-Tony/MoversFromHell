@@ -318,7 +318,7 @@ Lambert, post-processing, variance shadows, contact occlusion. None of them is �
 Phase 11 — that one is the playtest, it is next, and the last three are what make it possible
 to run with strangers.
 
-**3451 assertions across thirty-two suites, all passing** — plus a GPU-only suite that the
+**3612 assertions across thirty-four suites, all passing** — plus a GPU-only suite that the
 software harness cannot run, for the paths the tier strips there.
 
 **Phase 11's build side has started** (the ordered plan is [docs/PHASE11_PLAN.md](docs/PHASE11_PLAN.md)).
@@ -371,7 +371,12 @@ opened §3.3's brute-force door — a two-hand shove tears a hung leaf off in 1.
 frame 140.00 against the screwdriver's 21.00, calibrated from the printed impulse trace — and closed
 §21.2 with a job sheet beside the title card, an invoice whose major lines land one at a time over
 the unchanged ledger, a recap from the run's own events and a retry that keeps the tools. Batch 12
-(the strap that launches a light box; a second consistency pass) is briefed in the plan.
+fixed the strap that launched a light box — the damping is solved rather than sampled, so its
+amplification factor is at most 1 at every mass, and a 9 kg box thrown 1.077 m at 4.27 m/s now
+moves 0.025 m over a whole route while the 110 kg fridge is unchanged to half a millimetre —
+and made four recorded inconsistencies true: the carry counter, notices on sim time, the holder
+on the property line, and a speed bump that finally does something. Batch 13 (trigger pressure
+at the hand; the haptic pulse) is briefed in the plan.
 
 ![The pause card](docs/phase16-pause.png)
 
@@ -485,7 +490,7 @@ forces, and this is where the solver left them.
 | the same route, the same objects | worst shift | damage |
 |---|---|---|
 | good pack — heavy low and forward, strapped | 0.470 m | **none** |
-| poor pack — stacked high, loose, unstrapped | **2.611 m** | television destroyed |
+| poor pack — stacked high, loose, unstrapped | **2.640 m** | television destroyed |
 | **the poor pack, parked for the same 28 s** | — | **none** |
 
 That third row is the one that matters. The pack is identically bad and the game knows it —
@@ -508,16 +513,20 @@ there is no inventory here. An object is in the truck when it is physically in t
 | Per-surface friction | `src/physics/world.js` | A truck deck is 0.32, not a house floor's 0.8 — which is the actual reason real loads get strapped. |
 
 **Measured, one §11.3 hard brake over the same six-item pack:** unstrapped worst shift
-**1.645 m**; strapped **0.141 m**.
+**1.645 m**; strapped **0.141 m** — both re-measured under the Phase 27 strap fix and both
+unchanged, because this pack's hooks sit near each item's centre of mass and its straps were
+never in the band that used to launch a light one.
 
 **Measured (Phase 23, M17), three arrangements of the same six items over the full route:**
-LOW — the fridge and dresser strapped into the headboard corner, the light things wedged —
-worst shift **0.030 m**, no damage. TALL — the fridge upright against the headboard with open
+LOW — the fridge and dresser strapped into the headboard corner and every light item strapped
+**taut** beside them (Phase 27 removed the 20 mm of slack they used to need) — worst shift
+**0.029 m**, no damage, and the fastest anything strapped moves all leg is **0.217 m/s**. TALL — the fridge upright against the headboard with open
 deck beside it, three boxes stacked, nothing strapped — the turn slides the fridge **0.577 m**
 sideways and leaves it leaning at **27°**. SLIDE — nothing stacked, nothing strapped, the fridge
 with 1.8 m of open deck ahead of it — the brake tips it forward **1.520 m** into the headboard
-for a **400.00 property line**. SLIDE with two straps crossed over the fridge: **0.135 m**, no
-line. The §10.2 pack-quality number the HUD now prints orders them 1.000 / 0.298 / 0.199, the
+for a **400.00 property line**. SLIDE with two straps crossed over the fridge: the **strapped fridge** moves **0.009 m** and
+leans 0.8°, no line, while the pack's worst becomes **0.374 m** and belongs to a loose box the
+new speed bump walks (the published 0.135 m was the PACK's worst, never the fridge's). The §10.2 pack-quality number the HUD now prints orders them 1.000 / 0.298 / 0.199, the
 same order the road does. The turn is as hard sideways as the brake is forward
 (`TRUCK.roadEvents.sharpTurn.accel` 1.0): at the old 0.8 it moved nothing upright on the deck.
 
@@ -662,9 +671,9 @@ Names were kept so the lineage stays greppable.
 
 ## Known limitations
 
-- **Cargo tuning has two hard edges (M17).** A sideways fall in the 2.10 m box caps near 31°
-  because the fridge's top meets the far wall; a taut strap on a 9 kg box is numerically
-  unstable at 1/60 s, so strap the heavy things and wedge the light ones; the speed bump moves
+- **Cargo tuning has one hard edge (M17).** A sideways fall in the 2.10 m box caps near 31°
+  because the fridge's top meets the far wall. The strap that used to launch a light box is
+  fixed (Phase 27) and the speed bump now takes the weight off the deck rather than doing
   nothing. **Rebinding (M18)** keeps one binding per device class per action, chords are not
   bindings (the first keydown wins), and only the on-foot table is listed.
 - **The seat that feels road events** is the one whose mover stood nearest the cab when the

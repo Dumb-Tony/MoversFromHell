@@ -19,8 +19,8 @@
  * tell, which makes "is this the current build?" unanswerable during a playtest. Bump
  * `label` on every deploy. */
 export const BUILD = Object.freeze({
-  phase: 26,
-  label: 'phase-26',
+  phase: 27,
+  label: 'phase-27',
   date: '2026-09-05',
 });
 
@@ -955,8 +955,43 @@ export const STRAP = Object.freeze({
   /* Damping acts on the rate of separation only. Near-critical for a mid-weight item:
    * 2*sqrt(k*m) at m = 40 kg is 2530, and a strap wants to be slightly under-damped so a
    * hard brake produces a visible snatch rather than a silent absorb (§10.3's feedback
-   * column asks for "ratchet clicks", "creak, vibration"). */
+   * column asks for "ratchet clicks", "creak, vibration").
+   *
+   * SINCE M25 THIS IS THE COEFFICIENT THE SOLVE STARTS FROM, NOT THE ONE APPLIED. straps.js
+   * delivers the damping as an impulse solved over the step, c_eff = c/(1 + c·dt/m_eff), so
+   * 1400 is an upper bound the applied coefficient approaches as the effective mass grows:
+   * MEASURED (m32 S4) 776 N·s/m on the 110 kg fridge and 137 N·s/m on a 9 kg box. The impulse
+   * over a step is what the load feels, and it is unchanged where it was already stable — the
+   * fridge's strapped brake shift moved by 0.49 mm (m32 S3). Retuning this number changes the
+   * light end far less than it looks; the ratio γ = β/(1+β) is what to reason about. */
   damping: 1400,
+
+  /* THE BOUND THAT MAKES THAT DAMPING SAFE ON A LIGHT BODY (M25). DERIVED, NOT PICKED.
+   *
+   * Explicit Euler on a damper is stable only while γ = c·dt/m < 2; above 2 the correction
+   * overshoots and reverses the velocity, and a one-sided rope never pays the overshoot back.
+   * The mass in that ratio is the EFFECTIVE mass at the hook (1/m_eff = 1/m + (r×dir)ᵀ I⁻¹
+   * (r×dir), always ≤ m), so at 1400 N·s/m and 1/60 s the fault line is not the 11.7 kg the
+   * body mass suggests. MEASURED, m32 S4's table, one strap under a 400 N pre-load:
+   *
+   *     mass    m_eff     γ if explicit      mass    m_eff     γ if explicit
+   *      9 kg   2.54 kg       9.19            55 kg  10.61 kg      2.20
+   *     22 kg   9.49 kg       2.46           110 kg  29.01 kg      0.80
+   *
+   * A 9 kg box hooked 0.33 m off centre is 2.54 kg effective and γ 9.19 — and M17 saw exactly
+   * that box thrown 1.45 m backward and 0.81 m down in a brake. Only the fridge was ever under
+   * the bound, which is why §26.3's promise held for the heavy case and lied about the light
+   * one: three of four masses were past it, not one. (m_eff moves with the hook, so a pose can
+   * read higher or lower than its row — S4's table is the figure to quote for a mass.)
+   *
+   * straps.js now solves the closing velocity after the damping impulse instead of sampling
+   * it — c_eff = c / (1 + c·dt/m_eff) — whose amplification factor 1/(1 + β) ≤ 1 for every
+   * mass, damping and step. The ratio the solved form actually uses is γ = β/(1+β), which is
+   * strictly below 1, so this fraction is the PROOF the code re-checks with a Math.min that
+   * has never bound (m32 S4 asserts it for 9, 22, 55 and 110 kg), not a knob to turn.
+   * Raising it above 1.0 would re-admit the explicit form's overshoot; 0.5 states the rule
+   * as "a strap may spend at most half of explicit Euler's budget of 2". */
+  stabilityFraction: 0.5,
 
   /** How much a ratchet click takes up. 8 mm against a 40 000 N/m strap is about 320 N per
    *  click — four clicks to a sensible pre-load and fifteen to break it. The default was
@@ -986,6 +1021,23 @@ export const CARGO = Object.freeze({
    *  job from one hanging off the side, and it is the same thing §10.3's SLACK state means. */
   securedSlackM: 0.05,
   restrainingTensionN: 40,
+  /** NOTHING A STRAP HOLDS MAY MOVE THIS FAST (M25, §12.2 "consequences must be
+   *  understandable" — a strapped box that LAUNCHES is not).
+   *
+   *  DERIVED from the two speeds that bracket it. Below: TRUCK.brakeForce 5.2 m/s² for the
+   *  half second a strap has to react is 2.6 m/s, so anything a strap holds should stay under
+   *  that; box_small_01's §8.3 damage tolerance is 2.00 m/s, so a strapped box moving faster
+   *  than 3 m/s is already breaking itself. Above: the road event's own worst is
+   *  5.2 × 1.1 s = 5.7 m/s (an UNRESTRAINED item on the brake), which a restrained one must
+   *  never approach. 3.0 sits above every legitimate strapped motion measured — the worst any
+   *  strapped item reaches over a whole route is 0.518 m/s (m32 S1) and 0.217 m/s in a full
+   *  pack (m25 K10) — and far below the M17 launch, which touched 4.27 m/s.
+   *
+   *  IT IS A LINEAR SPEED, m/s. A body's spin is rad/s, a different quantity, and no assertion
+   *  compares one with the other; the suites read the linear peak and print the spin beside it.
+   *  It is a TEST BOUND, asserted, never a clamp: §10.4 forbids the cargo system from moving
+   *  anything without a physical cause, and that includes braking it. */
+  launchSpeedM: 3.0,
   /** §10.2 pack quality as ONE number (M17, §26.3): quality = 1 − (unsecuredWeight × the
    *  fraction of the load's mass that is unrestrained + heightWeight × how high the
    *  UNRESTRAINED mass sits, as a mass-weighted fraction of the box height + runUpWeight ×
@@ -995,7 +1047,8 @@ export const CARGO = Object.freeze({
    *  ADVISORY heuristic — nothing acts on it but a warning and a score.
    *
    *  TUNED against tools/m25-packs-tests.js so that the number predicts the drive: the three
-   *  packs measure LOW 0.030 m / TALL 0.577 m / SLIDE 1.520 m of worst shift over the route
+   *  packs measure LOW 0.029 m / TALL 0.577 m / SLIDE 1.527 m of worst shift over the route
+   *  (re-measured in Phase 27: M25 strapped LOW's light items taut, M26 retuned the bump)
    *  and score 1.000 / 0.298 / 0.199 here — the same order. The run-up term outweighs the
    *  height term because that is what the physics did: an upright fridge with 1.8 m of open
    *  deck ahead of it (SLIDE) fell forward and holed the headboard, the same fridge against
@@ -1033,10 +1086,58 @@ export const TRUCK = Object.freeze({
    *  At 1.0 (0.53 g, the same magnitude the brake already had) the turn slides the fridge
    *  and the television sideways and tips a top-heavy fridge for a visible reason. Severity
    *  is unchanged (the shake and the audio scale on it); the timing is unchanged (m21). */
+  /*  M26 (§26.3's THIRD result, "observably different turn, brake AND bump"): the bump goes
+   *  { y 0.55, z 0 } → { y 2.20, z 0.50 }. It is still MOSTLY VERTICAL — the lift is 4.4× the
+   *  nudge — and it is now the only event that works by taking friction away rather than by
+   *  pushing hard.
+   *
+   *  WHY THE OLD NUMBERS DID NOTHING. 0.55 × 0.8 × 5.2 = 2.29 m/s² of lift against 9.81 of
+   *  gravity leaves 77% of the load on the deck, and a purely vertical force slides nothing:
+   *  shiftByEvent.speedBump read 0.000 for every pack, so the bump told the three packs apart
+   *  only as a null. KNOWN_ISSUES called that "one number away". It is not, because the
+   *  response is a STEP and not a ramp: a 9 kg box (μ 0.72 on the 0.32 deck, Rapier averages
+   *  to 0.52) resting under 7.52 m/s² of normal load needs 3.91 m/s² of longitudinal push
+   *  before it moves AT ALL, i.e. a z of 3.91 / (0.8 × 5.2) = 0.94 — harder than the brake.
+   *  MEASURED that way on m25's SLIDE pack (worst shift inside the bump window, y left at
+   *  0.55): z 0.30 → 0.000 m, 0.50 → 0.000, 0.70 → 0.000, 0.90 → 0.008, 0.95 → 0.011,
+   *  1.00 → 0.038, 1.05 → 0.066, 1.10 → 0.097, 1.35 → 0.280. Reaching CARGO.shiftToleranceM
+   *  by z alone costs 1.35 — a second brake, and a bump whose forward push is twice its lift.
+   *
+   *  WHAT A BUMP ACTUALLY DOES is unload the deck, and THAT is the number that was wrong.
+   *  2.20 × 0.8 × 5.2 = 9.15 m/s² up leaves 0.66 m/s² net down: for the half-second of the
+   *  event the load presses at 6.7% of its weight and its friction falls with it (0.34 m/s²
+   *  for that box), so half the brake's longitudinal fraction is now more than enough. Below
+   *  9.81 / (0.8 × 5.2) = 2.358 nothing leaves the deck — 2.20 keeps a 6% margin, and every
+   *  measured window has Δy = 0.00, so this is a load gone light, not a load thrown.
+   *  MEASURED at y 2.20, z 0.50 over m25's four drives, worst shift inside the bump window:
+   *  LOW 0.006 m · TALL 0.243 m · SLIDE 0.282 m · SLIDE+2 straps 0.282 m. The strapped pack
+   *  is 47× stiller than the loose ones — that is LOW's PACKING, not its straps: the controlled
+   *  pair SLIDE and SLIDE+2 straps both read 0.282 m, so straps do nothing for a bump (they
+   *  resist the brake's forward pull, not a load going light). The loose ones pass
+   *  CARGO.shiftToleranceM (0.25),
+   *  TALL's fridge gains 0.0° of tilt on the bump (it is already at 26.6° from the turn), and
+   *  the whole-route worsts are the ones the packs already had: LOW 0.029, TALL 0.577,
+   *  SLIDE 1.527. At y 2.00 the same z gives SLIDE 0.199 m, short of the tolerance — 2.20 is
+   *  the smallest 0.10 step that clears it.
+   *
+   *  NOT A SECOND BRAKE, by every reading. Peak longitudinal 0.50 × 0.8 = 0.40 of the brake's
+   *  (exactly half its accel.z, and less after severity). Longitudinal IMPULSE 0.8 × 0.50 ×
+   *  0.5 s = 0.20 against the brake's 1.0 × 1.0 × 1.1 s = 1.10 — 18%. And the outcomes are
+   *  two different events: SLIDE's brake throws the fridge 1.5 m into the headboard and holes
+   *  it (400.00); SLIDE's bump walks a box 282 mm and bills nothing.
+   *
+   *  THE SEAT IS NOT THE CARGO. `accel` is what the LOAD feels in the truck's frame;
+   *  `seatAccel` — optional, and only the bump needs one — is the direction the DRIVER's
+   *  camera is nudged in (main.js's ROAD_FORCE shake normalises it, so only the direction is
+   *  read; the magnitude stays RENDER.camera.shake.road × severity). The forward fraction
+   *  above is the deck walking out from under the load, not a lurch the driver feels: a cab
+   *  going over a bump goes UP, which is what m24 K2g has pinned since M16. Events without a
+   *  `seatAccel` keep taking the cargo's direction, as every event did before M26. */
   roadEvents: {
     hardBrake:  { severity: 1.0, accel: { x: 0, y: 0, z: 1.0 } },
     sharpTurn:  { severity: 1.0, accel: { x: 1.0, y: 0, z: 0 } },
-    speedBump:  { severity: 0.8, accel: { x: 0, y: 0.55, z: 0 } },   // mostly vertical
+    speedBump:  { severity: 0.8, accel: { x: 0, y: 2.20, z: 0.50 },     // mostly vertical (M26)
+                  seatAccel: { x: 0, y: 1, z: 0 } },                    // …and the cab only rises
   },
   /** §11.2: poor balance affects handling "without becoming a punishing simulator". */
   imbalanceSteerPenaltyMax: 0.18,
@@ -1135,6 +1236,25 @@ export const INVOICE = Object.freeze({
   /** … and at most this many per kind (door, part, drop, damage, property, road, recovery),
    *  so a run with forty impacts still lists its one door and its one recovery. */
   recapPerKind: 3,
+  /** §15.3/§21.1 (M26): the property line aggregates every impact into one row, so its "who"
+   *  clause names at most this many distinct holder-and-object pairs and then says "and N
+   *  more". Same reason as recapPerKind — the sheet stays compact; the per-impact breakdown
+   *  is the recap's job. invoice.js propertyHolders reads it (m33 C4h). */
+  holderMax: 2,
+});
+
+/** §8.4 "one small cost notice" — the HUD's transient bottom-right stack (src/ui/hud.js).
+ *  Phase 11 build-side M26 moved the two numbers out of hud.js, where the TTL was a literal,
+ *  and moved the clock they are measured against from `performance.now()` to the SIM clock —
+ *  the same clock M9's captions already run on. Consequences, both deliberate: a notice
+ *  freezes under the pause card with the rest of the simulation, and a headless suite (where
+ *  the wall clock is frozen and only game.frame() advances time) sees notices expire on
+ *  schedule instead of accumulating to `maxStack` for the whole run. */
+export const NOTICE = Object.freeze({
+  /** Sim milliseconds a notice stays up. 3200 is the number hud.js carried from Phase 11. */
+  ttlMs: 3200,
+  /** §21.1: the working area stays clear, so the stack is short by rule, not by luck. */
+  maxStack: 4,
 });
 
 /** The physical world's extent (Phase 11 build-side M15). ONE number: the side of the

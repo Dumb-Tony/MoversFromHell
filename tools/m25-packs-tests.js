@@ -134,6 +134,9 @@ function angleDeg(a, b) {
 }
 const UP = { x: 0, y: 1, z: 0 };
 const tiltOf = (e) => angleDeg(upOf(e), UP);
+/** STILLNESS PREDICATE (K1's "settled", the settle loop) — the larger of |v| in m/s and |ω| in
+ *  rad/s, which is not a speed in any unit. M25's launch bound is m/s and reads peakLin
+ *  instead; do not compare this with CARGO.launchSpeedM. */
 const speedOf = (e) => {
   const v = e.body.linvel(), w = e.body.angvel();
   return Math.max(Math.hypot(v.x, v.y, v.z), Math.hypot(w.x, w.y, w.z));
@@ -178,8 +181,9 @@ const SIX = [fridge, dresser, tv, ...boxes];
 const ID_SET = SIX.map((e) => e.id).sort().join(',');
 /** A strap: from this anchor to a hook at this offset from the item's centre. `slack` is
  *  metres of spare length — 0 is taut with no pre-load (m7's lesson: a ratcheted pre-load
- *  DRAGS the pack); 0.02 stays inside CARGO.securedSlackM (0.05) and so counts as restraint
- *  while never loading on an item that is wedged and cannot move. */
+ *  DRAGS the pack); anything up to CARGO.securedSlackM (0.05) still counts as restraint.
+ *
+ *  LOW'S LIGHT ITEMS USED TO CARRY 0.02 OF SLACK, AND M25 TOOK IT OUT (see below). */
 const S = (anchor, dx, dy, dz, slack = 0) => ({ anchor, dx, dy, dz, slack });
 const R = Math.PI / 2;
 
@@ -187,20 +191,38 @@ const PACKS = {
   /* LOW — heavy low in the headboard corner, light on top and behind, everything strapped.
    * The fridge in the +x/headboard corner is supported on both sides the events push
    * (brake +z, turn +x); the dresser beside it is pushed INTO it; the boxes on the dresser
-   * and behind the fridge, the television flat behind the dresser, all wedged. */
+   * and behind the fridge, the television flat behind the dresser, all wedged.
+   *
+   * THE 20 mm OF SLACK ON THE FOUR LIGHT ITEMS WAS A WORKAROUND, AND M25 REMOVED IT.
+   *
+   * It was written around the bug KNOWN_ISSUES recorded for Phase 23: the strap's damping was
+   * integrated explicitly, so c·dt/m_eff was 9.19 on a 9 kg box (m32 S4) against a stability
+   * bound of 2, and a strap that LOADED threw it. Wedging each light item and giving its
+   * straps 20 mm of spare length meant those straps
+   * never took any force, which kept the pack still and made §26.3's promise — "a tensioned
+   * strap reduces relative motion" — untestable on exactly the items where it was false. The
+   * comment said "never loading on an item that is wedged and cannot move", which was true and
+   * was the tell.
+   *
+   * straps.js now solves the damping impulse instead of sampling it (m32 S1-S4), so all six
+   * items are strapped TAUT at 0 slack, the way a player would. RE-MEASURED both ways, same
+   * fixture, same route:  slack 0.02 → route worst 0.030 m;  taut 0 → 0.029 m. The pack still
+   * holds, and now it holds because the straps hold it — no strapped item's LINEAR speed comes
+   * anywhere near CARGO.launchSpeedM 3.0 m/s over the whole leg (K10 measures it, and prints
+   * each item's spin in rad/s separately rather than mixing the two). */
   LOW: () => [
     { e: fridge, x: 1.295, y: DECK + 0.875 + 0.01, z: 12.145,
       straps: [S('anchor_L1', -0.30, 0.80, -0.34), S('anchor_R1', 0.30, 0.80, -0.34)] },
     { e: dresser, x: 0.39, y: DECK + 0.425 + 0.01, z: 12.245,
       straps: [S('anchor_L1', -0.50, 0.38, -0.24), S('anchor_R1', 0.50, 0.38, -0.24)] },
     { e: boxes[0], x: 0.10, y: DECK + 0.85 + 0.25 + 0.03, z: 12.245,
-      straps: [S('anchor_L1', -0.22, 0.22, -0.24, 0.02), S('anchor_R1', 0.22, 0.22, -0.24, 0.02)] },
+      straps: [S('anchor_L1', -0.22, 0.22, -0.24), S('anchor_R1', 0.22, 0.22, -0.24)] },
     { e: boxes[1], x: 0.66, y: DECK + 0.85 + 0.25 + 0.03, z: 12.245,
-      straps: [S('anchor_L1', -0.22, 0.22, -0.24, 0.02), S('anchor_R1', 0.22, 0.22, -0.24, 0.02)] },
+      straps: [S('anchor_L1', -0.22, 0.22, -0.24), S('anchor_R1', 0.22, 0.22, -0.24)] },
     { e: tv, x: 0.30, y: DECK + 0.045 + 0.02, z: 11.61, roll: R,
-      straps: [S('anchor_L0', -0.55, 0.04, -0.30, 0.02), S('anchor_R0', 0.55, 0.04, -0.30, 0.02)] },
+      straps: [S('anchor_L0', -0.55, 0.04, -0.30), S('anchor_R0', 0.55, 0.04, -0.30)] },
     { e: boxes[2], x: 1.295, y: DECK + 0.25 + 0.02, z: 11.54,
-      straps: [S('anchor_L0', -0.22, 0.22, -0.24, 0.02), S('anchor_R0', 0.22, 0.22, -0.24, 0.02)] },
+      straps: [S('anchor_L0', -0.22, 0.22, -0.24), S('anchor_R0', 0.22, 0.22, -0.24)] },
   ],
   /* TALL — the fridge upright against the headboard on the −x side with 1.4 m of open deck
    * beside it; three boxes stacked in the +x/headboard corner; the dresser behind the
@@ -302,14 +324,33 @@ function drive(name, items) {
   route.depart();
   game.setPhase(PHASES.TRANSIT, { ok: true, warn: !!advice.warn, reason: advice.reason || '' });
   let arrivedAt = -1, tiltMax = 0;
+  /* M25: the peak speed of every STRAPPED item over the whole leg, for CARGO.launchSpeedM.
+   * §12.2 says consequences must be understandable, and a strapped box that launches is not;
+   * the bound is asserted here because this is the only suite that drives full packs.
+   *
+   * LINEAR AND ANGULAR ARE KEPT APART. CARGO.launchSpeedM is m/s, so peakLin is what the bound
+   * is asserted against; peakAng (rad/s) is recorded and printed beside it because a strap that
+   * spins what it holds is worth seeing, but it is a different quantity and is never compared
+   * with a speed. (`speedOf` above is the settle predicate — the larger of the two — and is
+   * deliberately not used here.) */
+  const strapped = items.filter((it) => it.straps && it.straps.length);
+  const peakLin = Object.fromEntries(strapped.map((it) => [it.e.id, 0]));
+  const peakAng = Object.fromEntries(strapped.map((it) => [it.e.id, 0]));
   for (let k = 0; k < LEG + 30; k++) {
     frames(1);
     const tilt = tiltOf(fridge);
     if (cur && tilt > cur.tiltMax) cur.tiltMax = tilt;
     if (tilt > tiltMax) tiltMax = tilt;
+    for (const it of strapped) {
+      const v = it.e.body.linvel(), w = it.e.body.angvel();
+      peakLin[it.e.id] = Math.max(peakLin[it.e.id], Math.hypot(v.x, v.y, v.z));
+      peakAng[it.e.id] = Math.max(peakAng[it.e.id], Math.hypot(w.x, w.y, w.z));
+    }
     if (route.state === 'arrived') { arrivedAt = k + 1; close(); break; }
   }
   off();
+  const worstStrappedLin = strapped.length ? Math.max(...Object.values(peakLin)) : 0;
+  const worstStrappedAng = strapped.length ? Math.max(...Object.values(peakAng)) : 0;
 
   const total = cargo.shiftSince(snap0);
   const totalPer = {};
@@ -331,12 +372,14 @@ function drive(name, items) {
   straps.releaseAll();
   const rec = { name, items, idSet, loaded, inside, maxSpeed, strapCount, settleFrames, strapFrames, q, band, advice,
                 windows, worstEvent, total, totalPer, worstTotalId, tilt0, tiltMax, tiltEnd: tiltOf(fridge), arrivedAt,
-                props, truckProps, itemDamage, insideAtArrival, counters, summary };
+                props, truckProps, itemDamage, insideAtArrival, counters, summary,
+                peakLin, peakAng, worstStrappedLin, worstStrappedAng };
 
   lines.push(`      ${name}: settled ${settleFrames}+${strapFrames} frames, ${strapCount} straps, quality ${q.quality.toFixed(3)} ` +
              `(unsecured ${(q.unsecuredFraction * 100).toFixed(0)}%, height ${q.heightFraction.toFixed(2)}, run-up ${q.runUpFraction.toFixed(2)}), band "${band}"; ` +
              `arrived at frame ${arrivedAt}; route worst ${total.worst.toFixed(3)} m (${worstTotalId}), ${total.moved}/${total.count} past tolerance; ` +
-             `fridge tilt max ${tiltMax.toFixed(1)}° rest ${rec.tiltEnd.toFixed(1)}°`);
+             `fridge tilt max ${tiltMax.toFixed(1)}° rest ${rec.tiltEnd.toFixed(1)}°` +
+             (strapCount ? `; worst strapped-item peak ${worstStrappedLin.toFixed(3)} m/s linear (M25, bound CARGO.launchSpeedM ${CARGO.launchSpeedM}) and ${worstStrappedAng.toFixed(3)} rad/s of spin` : ''));
   for (const t of EVENT_TYPES) {
     const w = windows[t];
     if (!w) { lines.push(`        ${t.padEnd(9)} — no window`); continue; }
@@ -513,6 +556,127 @@ lines.push('--- K8. the M6 counters carry the same metres per event (§27.4 carg
      (() => { try { const t = JSON.parse(JSON.stringify(game.state.telemetry)); return EVENT_TYPES.every((k) => typeof t.counters.shiftByEvent[k] === 'number'); } catch (e) { return false; } })());
   ok('m25 K8 a reset zeroes it', (() => { freshRun(); const c = game.state.telemetry.counters.shiftByEvent; return EVENT_TYPES.every((k) => c[k] === 0); })(), JSON.stringify(live));
 }
+
+/* ── K9. the bump (Phase 11 build-side M26 — the UNSTRAPPED bump column) ──────
+ * M17 left the bump purely vertical at 0.55 × 0.8 × 5.2 = 2.29 m/s², which lifts nothing and
+ * slides nothing: every pack read shiftByEvent.speedBump 0.000 and §26.3's third result was a
+ * null. M26 makes the bump work the way a bump works — it UNLOADS the deck (y 2.20, leaving
+ * 0.66 m/s² net down, 6.7% of the weight on the deck) so that half the brake's longitudinal
+ * fraction (z 0.50) is enough to walk a loose item. This section is about the bump alone; the
+ * strapped numbers everywhere else in this suite are M25's territory (strap damping) and the
+ * two changes do not touch: LOW's bump number is small because it is STRAPPED, and K9c states
+ * it as a ratio against the loose packs rather than as an absolute. */
+lines.push('--- K9. the bump: an unloaded deck lets half a brake move a loose pack, and holds a strapped one (M26, §26.3, §11.3) ---');
+{
+  const B = TRUCK.roadEvents.speedBump;
+  const bump = (n) => results[n].windows.speedBump;
+  lines.push(`      bump column: ${['LOW', 'TALL', 'SLIDE', 'SLIDE_STRAPPED'].map((n) => `${n} ${bump(n).worst.toFixed(3)} m (${bump(n).worstId})`).join('; ')}`);
+  ok(`m25 K9a the bump is no longer a null — SLIDE's worst inside the bump window passes CARGO.shiftToleranceM (${bump('SLIDE').worst.toFixed(3)} m ≥ ${CARGO.shiftToleranceM})`,
+     bump('SLIDE').worst >= CARGO.shiftToleranceM, `${bump('SLIDE').worst.toFixed(3)} m by ${bump('SLIDE').worstId}`);
+  ok(`m25 K9b …and TALL's loose pack moves on it too (${bump('TALL').worst.toFixed(3)} m, ${bump('TALL').worstId})`,
+     bump('TALL').worst >= 0.15, `${bump('TALL').worst.toFixed(3)} m`);
+  ok(`m25 K9c …while LOW, strapped, stays under 0.05 m (${bump('LOW').worst.toFixed(3)} m) — at least 20× stiller than either loose pack`,
+     bump('LOW').worst < 0.05 && bump('LOW').worst * 20 <= Math.min(bump('TALL').worst, bump('SLIDE').worst),
+     `LOW ${bump('LOW').worst.toFixed(3)} vs TALL ${bump('TALL').worst.toFixed(3)} / SLIDE ${bump('SLIDE').worst.toFixed(3)}`);
+  ok(`m25 K9d the bump's shift is along the truck's forward axis, not sideways or up (SLIDE Δ=(${bump('SLIDE').d.x.toFixed(3)}, ${bump('SLIDE').d.y.toFixed(3)}, ${bump('SLIDE').d.z.toFixed(3)}))`,
+     bump('SLIDE').d.z > 0 && Math.abs(bump('SLIDE').d.z) > 4 * Math.abs(bump('SLIDE').d.x) && Math.abs(bump('SLIDE').d.y) < 0.02,
+     `axis ${axisOf(bump('SLIDE').d)}`);
+  ok(`m25 K9e nothing LEAVES the deck on the bump — every pack's vertical displacement is under 20 mm (a load gone light, not a load thrown)`,
+     ['LOW', 'TALL', 'SLIDE', 'SLIDE_STRAPPED'].every((n) => Math.abs(bump(n).d.y) < 0.02),
+     ['LOW', 'TALL', 'SLIDE', 'SLIDE_STRAPPED'].map((n) => `${n} Δy ${bump(n).d.y.toFixed(3)}`).join(', '));
+  /* THE TILT IS READ AS A GAIN, and it has to be. The absolute tilt inside the bump window is
+   * ~26.6°, all of it left over from the SHARP TURN two events earlier — a pre-M26 number that
+   * K4 already reads the same relative way ("no further tip on the bump"). An absolute "< 5°
+   * on the bump" was never true and is not what the bump is being examined for; what would
+   * indict the bump is the fridge tipping FURTHER while the deck is unloaded, and it does not:
+   * the gain is 0.0°. */
+  ok(`m25 K9f TALL's fridge gains no tilt on the bump — it is already at ${results.TALL.windows.sharpTurn.tiltEnd.toFixed(1)}° from the TURN, and the bump adds ${(bump('TALL').tiltMax - results.TALL.windows.sharpTurn.tiltEnd).toFixed(1)}° of it (bump max ${bump('TALL').tiltMax.toFixed(1)}°, < 5° more)`,
+     bump('TALL').tiltMax - results.TALL.windows.sharpTurn.tiltEnd < 5,
+     `${bump('TALL').tiltMax.toFixed(1)}° vs ${results.TALL.windows.sharpTurn.tiltEnd.toFixed(1)}°`);
+  ok(`m25 K9g the bump is still the SMALLEST of the three events for every pack that the brake or the turn moved (it is not a second brake)`,
+     ['TALL', 'SLIDE'].every((n) => bump(n).worst < Math.max(results[n].windows.hardBrake.worst, results[n].windows.sharpTurn.worst)),
+     ['TALL', 'SLIDE'].map((n) => `${n} bump ${bump(n).worst.toFixed(3)} vs brake ${results[n].windows.hardBrake.worst.toFixed(3)} / turn ${results[n].windows.sharpTurn.worst.toFixed(3)}`).join('; '));
+  ok(`m25 K9h the counter carries the bump for every pack now (shiftByEvent.speedBump was 0.000 everywhere before M26)`,
+     ['TALL', 'SLIDE', 'SLIDE_STRAPPED'].every((n) => (results[n].counters.shiftByEvent.speedBump || 0) > 0),
+     ['LOW', 'TALL', 'SLIDE', 'SLIDE_STRAPPED'].map((n) => `${n} ${(results[n].counters.shiftByEvent.speedBump || 0).toFixed(3)}`).join(', '));
+  ok(`m25 K9i the composition that does it is config, not a literal: y ${B.accel.y} leads z ${B.accel.z}, and z is half the brake's ${TRUCK.roadEvents.hardBrake.accel.z}`,
+     B.accel.y > B.accel.z && B.accel.z === TRUCK.roadEvents.hardBrake.accel.z / 2 && B.accel.x === 0 && B.severity === 0.8,
+     JSON.stringify(B));
+  /* THE CONSEQUENCE, PINNED — because a bump that finally moves something changes what a
+   * badly packed load COSTS, and K2 already holds the equivalent guard on the other side
+   * ("LOW: no property line at all, no item damage"). §26.3 asks that poor packing have
+   * understandable consequences, so TALL billing a little on the drive is the point; what
+   * must not happen is the bump quietly growing into the event that holes a headboard, which
+   * is the brake's 400.00 on SLIDE. This is the guard that would notice. */
+  const tallProps = results.TALL.props, tallCost = tallProps.reduce((a, l) => a + l.cost, 0);
+  lines.push(`      TALL's drive-time bill (new at M26 — it billed nothing before): ${tallProps.length} property line(s) ` +
+             `totalling ${tallCost.toFixed(2)} [${tallProps.map((l) => `${l.location} ${l.band} (${l.defId}) ${l.cost.toFixed(2)}`).join('; ') || 'none'}]; ` +
+             `items ${results.TALL.itemDamage.join(', ') || 'none'}`);
+  ok(`m25 K9j TALL, badly packed, now bills a LITTLE on the drive: ${tallProps.length} property line(s) totalling ${tallCost.toFixed(2)}, ` +
+     `against the ${results.SLIDE.props.reduce((a, l) => a + l.cost, 0).toFixed(2)} SLIDE's brake costs`,
+     tallProps.length >= 1 && tallProps.length <= 2 && tallCost > 0 && tallCost < 40,
+     `${tallProps.length} lines, ${tallCost.toFixed(2)}`);
+  ok('m25 K9j …all of it on the truck itself, never on the house — the load never leaves the box (§11.3)',
+     tallProps.every((l) => /^truck/.test(l.surfaceId)), tallProps.map((l) => l.surfaceId).join(', ') || 'none');
+  ok(`m25 K9j …and at most one item is scratched by it (${results.TALL.itemDamage.join(', ') || 'none'})`,
+     results.TALL.itemDamage.length <= 1, results.TALL.itemDamage.join(', ') || 'none');
+}
+emit('running...');
+
+/* ── K10. straps that hold light things (Phase 26 build-side M25) ─────────────
+ * §26.3: "A tensioned strap reduces relative motion and damage." Until M25 this suite could
+ * only demonstrate that on the fridge, because the strap's damping was integrated explicitly
+ * and c·dt/m_eff was 9.19 on a 9 kg box (m32 S4) against a bound of 2 — a light item whose
+ * strap actually LOADED was thrown
+ * (M17: 1.45 m backward, 0.81 m down). LOW's four light items were therefore wedged and given
+ * 20 mm of slack so their straps never took any force, which is a workaround wearing a pack's
+ * clothes. straps.js now solves the damping impulse (m32 S1-S4) and all six items are strapped
+ * TAUT at 0 slack.
+ *
+ * K10 pins what that changed and, more importantly, what it did NOT: TALL and SLIDE carry no
+ * straps at all, so no change to the strap force can reach them. */
+lines.push('--- K10. LOW is strapped taut, and nothing a strap holds is ever launched (M25, §26.3, §12.2) ---');
+{
+  const lowTaut = PACKS.LOW().every((it) => !it.straps || it.straps.every((s) => s.slack === 0));
+  ok('m25 K10 every strap in the LOW pack is TAUT — 0 slack, including the four light items that used to carry 20 mm',
+     lowTaut, JSON.stringify(PACKS.LOW().map((it) => (it.straps || []).map((s) => s.slack))));
+  ok(`m25 K10 …and LOW still holds: route worst ${results.LOW.total.worst.toFixed(3)} m < 0.20 m (was 0.030 m with the slack in)`,
+     results.LOW.total.worst < 0.20, `${results.LOW.total.worst.toFixed(4)} m`);
+  ok(`m25 K10 …with 12 straps on six items and 0% unsecured`,
+     results.LOW.strapCount === 12 && results.LOW.q.unsecuredFraction === 0,
+     `${results.LOW.strapCount} straps, ${(results.LOW.q.unsecuredFraction * 100).toFixed(0)}% unsecured`);
+
+  /* THE LAUNCH BOUND, over every pack that has a strap in it, for the whole route. The bound
+   * is m/s, so it is read against the LINEAR peak; each pack's worst spin is printed beside it
+   * as its own number rather than folded into the same comparison. */
+  for (const n of ['LOW', 'SLIDE_STRAPPED']) {
+    const r = results[n];
+    const worstId = Object.entries(r.peakLin).sort((a, b) => b[1] - a[1])[0];
+    const spinId = Object.entries(r.peakAng).sort((a, b) => b[1] - a[1])[0];
+    ok(`m25 K10 ${n}: no strapped item exceeds CARGO.launchSpeedM over the whole route — ${r.worstStrappedLin.toFixed(3)} m/s < ${CARGO.launchSpeedM} (${worstId[0]}); the worst spin is a separate ${r.worstStrappedAng.toFixed(3)} rad/s (${spinId[0]})`,
+       r.worstStrappedLin < CARGO.launchSpeedM, `${r.worstStrappedLin.toFixed(4)} m/s by ${worstId[0]}`);
+  }
+  /* K7's published headline, 0.135 m, was the PACK's worst under M17 — K7's own fridge
+   * assertion has always been the tighter < 0.10 m, so the 0.135 was never the fridge's number.
+   * M26's speed bump (accel y 0.55 → 2.20, z 0 → 0.50) now moves the three LOOSE boxes in that
+   * pack as well, so the pack worst is 0.374 m and belongs to a box, and comparing today's
+   * pack worst with M17's would be comparing two different populations. The strapped item is
+   * the one M25 owns, so it is asserted on its own, twice: against M17's pack figure as a
+   * ceiling that cannot have risen, and pinned near what it actually measures. */
+  const fridgeShift = results.SLIDE_STRAPPED.totalPer[fridge.id].m;
+  ok(`m25 K10 SLIDE + two straps holds the STRAPPED fridge under M17's published 0.135 m pack figure (${fridgeShift.toFixed(3)} m; the pack's worst ${results.SLIDE_STRAPPED.total.worst.toFixed(3)} m is a loose box under M26's bump)`,
+     fridgeShift <= 0.135,
+     `fridge ${fridgeShift.toFixed(4)} m, pack worst ${results.SLIDE_STRAPPED.total.worst.toFixed(4)} m by ${results.SLIDE_STRAPPED.worstTotalId}`);
+  /* …and pinned, because ≤ 0.135 m against a measured 9 mm is a 15× margin that would not
+   * notice the strap force doubling. 0.030 m is a 3× band on the measurement: tight enough
+   * that a doubling fails it, loose enough not to report solver noise. */
+  ok(`m25 K10 …and the strapped fridge is pinned near what it measures, < 0.030 m (${fridgeShift.toFixed(4)} m)`,
+     fridgeShift < 0.030, `${fridgeShift.toFixed(4)} m`);
+  ok(`m25 K10 TALL and SLIDE carry no straps, so M25 cannot have touched them (0 and 0 straps; ${results.TALL.total.worst.toFixed(3)} m / ${results.SLIDE.total.worst.toFixed(3)} m)`,
+     results.TALL.strapCount === 0 && results.SLIDE.strapCount === 0,
+     `${results.TALL.strapCount} / ${results.SLIDE.strapCount}`);
+}
+emit('running...');
 
 /* ── the composition (M17 moved it into config) ────────────────────────────── */
 lines.push('--- the road events\' composition lives in config (TRUCK.roadEvents[type].accel) ---');

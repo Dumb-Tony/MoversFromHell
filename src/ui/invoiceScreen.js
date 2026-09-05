@@ -163,7 +163,13 @@ function classify(e, h) {
     case EVENTS.DAMAGE_APPLIED: {
       const cost = Number(e.cost) || 0;
       if (e.category === 'property') {
-        return { kind: 'property', text: `${e.location || e.surfaceId || 'a surface'} marked by ${h.nameOf(e.entityId)} — ${money(cost)}`, seat: -1, rank: cost };
+        /* §15.3 "who was holding it" (M26). heldBy is M14's shape and M23 kept it: ONE ENTRY
+         * PER HAND, so a two-hand shove reads ['p0','p0'] — the seat column wants the first
+         * holder, not the count. Empty (a thrown object) stays the blank column M24 recorded
+         * as an open item: nobody was carrying it, so no seat is named. */
+        const by = Array.isArray(e.heldBy) ? e.heldBy.find((id) => id != null) : null;
+        return { kind: 'property', text: `${e.location || e.surfaceId || 'a surface'} marked by ${h.nameOf(e.entityId)} — ${money(cost)}`,
+                 seat: by == null ? -1 : h.seat(by), rank: cost };
       }
       return { kind: 'damage', text: `${h.nameOf(e.entityId)} ${e.band || 'damaged'} — ${money(cost)}`, seat: -1, rank: cost };
     }

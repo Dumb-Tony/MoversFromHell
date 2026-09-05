@@ -186,7 +186,14 @@ lines.push('--- A. the route (GDD §11.1, §11.3, §13.3) ---');
   const bump = roadEventForce('speedBump', 100);
   ok('A6 §11.3 hard brake tests FORWARD restraint', brake.z > 0 && brake.x === 0);
   ok('A7 §11.3 sharp turn tests LATERAL restraint', Math.abs(turn.x) > 0 && turn.z === 0);
-  ok('A8 §11.3 speed bump tests VERTICAL bounce', bump.y > 0 && bump.x === 0 && bump.z === 0);
+  /* A8 restated at M26 (§26.3's third result). It read 'VERTICAL bounce … bump.z === 0', and
+   * that zero was the bug the assertion was protecting: a purely vertical 0.23 g lifts
+   * nothing and slides nothing, so shiftByEvent.speedBump was 0.000 for every pack and the
+   * bump told none of them apart. The bump is now MOSTLY vertical rather than purely: the
+   * lift dominates (2.20 against 0.50, 4.4×), there is still no lateral component, and the
+   * forward nudge is exactly half the brake's longitudinal fraction. A13 pins the rest. */
+  ok('A8 §11.3 speed bump tests VERTICAL bounce — mostly vertical (M26): up, no lateral, forward nudge, and the lift leads',
+     bump.y > 0 && bump.x === 0 && bump.z > 0 && bump.y > bump.z, JSON.stringify(bump));
 
   eq('A9 the truck starts parked', route.state, DRIVE_STATE.PARKED);
 }
@@ -198,7 +205,12 @@ lines.push('--- A-M17. the road events\' composition lives in TRUCK.roadEvents[t
   /* Until M17 the turn's 0.8 and the bump's 0.55 were literals in truck.js; the turn at
    * 0.8 × brakeForce (0.42 g) moved NOTHING upright on a 0.40 deck and only the brake told
    * one pack from another. tools/m25-packs-tests.js measures the three packs at 1.0. This
-   * suite's two-arrangement numbers under it: GOOD 0.470 m, BAD 2.611 m (was 2.615). */
+   * suite's two-arrangement numbers under it: GOOD 0.470 m, BAD 2.611 m (was 2.615).
+   * RE-MEASURED after M25 (straps.js: the damping is solved, not sampled) and M26 (the bump's
+   * accel): GOOD 0.470 m UNCHANGED, BAD 2.640 m. Only the bump moved either of them — an
+   * unstrapped pack cannot feel a change to the strap force, and GOOD's hooks sit close enough
+   * to each item's centre of mass that its straps were never in the unstable band. C9/C10
+   * below pin both. */
   for (const t of ['hardBrake', 'sharpTurn', 'speedBump']) {
     const ev = TRUCK.roadEvents[t];
     const f = roadEventForce(t, 100);
@@ -212,6 +224,30 @@ lines.push('--- A-M17. the road events\' composition lives in TRUCK.roadEvents[t
      `${TRUCK.roadEvents.sharpTurn.accel.x} vs ${TRUCK.roadEvents.hardBrake.accel.z}`);
   ok('A12 M17: severities untouched (the shake and the audio scale on them): 1.0 / 1.0 / 0.8',
      TRUCK.roadEvents.hardBrake.severity === 1.0 && TRUCK.roadEvents.sharpTurn.severity === 1.0 && TRUCK.roadEvents.speedBump.severity === 0.8);
+}
+emit('running...');
+
+/* ── A-M26. the bump is a bump: mostly vertical, and NOT a second brake ───── */
+lines.push('--- A-M26. the speed bump unloads the deck instead of pushing hard (M26, §26.3, §11.3) ---');
+{
+  const B = TRUCK.roadEvents.speedBump, BR = TRUCK.roadEvents.hardBrake;
+  const bumpDur = PROTOTYPE_ROUTE.find((e) => e.type === 'speedBump').durationS;
+  const brakeDur = PROTOTYPE_ROUTE.find((e) => e.type === 'hardBrake').durationS;
+  const liftAccel = B.accel.y * B.severity * TRUCK.brakeForce;         // m/s^2 up
+  const liftOff = -SIM.gravity;                                        // the accel that lifts
+  ok(`A13 M26: the bump is mostly vertical — the lift fraction leads the nudge 4.4x (${B.accel.y} vs ${B.accel.z})`,
+     B.accel.y > B.accel.z && B.accel.x === 0, JSON.stringify(B.accel));
+  ok(`A13b M26: the nudge is EXACTLY half the brake's longitudinal fraction (${B.accel.z} of ${BR.accel.z})`,
+     B.accel.z === BR.accel.z / 2, `${B.accel.z} vs ${BR.accel.z}`);
+  ok(`A13c M26: …and under a fifth of the brake's longitudinal IMPULSE — the bump lasts ${bumpDur} s, the brake ${brakeDur} s ` +
+     `(${(B.severity * B.accel.z * bumpDur).toFixed(2)} vs ${(BR.severity * BR.accel.z * brakeDur).toFixed(2)})`,
+     B.severity * B.accel.z * bumpDur <= 0.5 * BR.severity * BR.accel.z * brakeDur,
+     `${(B.severity * B.accel.z * bumpDur / (BR.severity * BR.accel.z * brakeDur) * 100).toFixed(0)}%`);
+  ok(`A13d M26: the lift takes friction away without throwing the load — ${liftAccel.toFixed(2)} m/s² up against ${liftOff.toFixed(2)}, ` +
+     `so ${(100 * (1 - liftAccel / liftOff)).toFixed(1)}% of the weight still presses the deck (nothing leaves it)`,
+     liftAccel > 0 && liftAccel < liftOff, `${liftAccel.toFixed(3)} vs ${liftOff.toFixed(3)}`);
+  ok('A13e M26: …and it is enough of a lift to matter — more than half the weight comes off',
+     liftAccel > 0.5 * liftOff, `${(100 * liftAccel / liftOff).toFixed(1)}% of g`);
 }
 emit('running...');
 
@@ -335,6 +371,31 @@ lines.push('--- C. the gate: poor pack shifts or damages visibly ---');
   ok('C5 …and the difference is VISIBLE, not marginal',
      bad.shift.worst - good.shift.worst > CARGO.shiftToleranceM,
      `${(bad.shift.worst - good.shift.worst).toFixed(3)} m apart`);
+
+  /* ── M25: the two route figures, PINNED ─────────────────────────────────────────────
+   * C3-C5 are ratios and inequalities. They are the gate and they are blind to a drift that
+   * keeps the ordering. M25 changed how the strap's damping is integrated, so the STRAPPED
+   * arrangement is the one that could have moved here; it did not.
+   *
+   * GOOD 0.470 m, re-measured under M25 and unchanged inside its own run-to-run spread — two
+   * runs of this suite read 0.4700 and 0.4695 m, which is why the pin is ±5 mm and not ±0.5.
+   * buildPack('good')
+   * hooks each item at 0.35 of its height and 0.3 of its smaller footprint, close enough to
+   * each centre of mass that the effective mass at the hook stays high and the pre-M25
+   * damping was never in its unstable band — the 9 kg boxes here are packed flat against the
+   * headboard with nothing to slide into. (m32 S1 has the fixture that DID launch, and m25's
+   * LOW pack is the one whose light items could finally be strapped taut.)
+   *
+   * BAD 2.640 m, up from 2.611. That is M26's speed bump (accel y 0.55 → 2.20, z 0 → 0.50),
+   * not M25: the BAD arrangement carries no straps at all, so no change to the strap force can
+   * reach it. Banded rather than pinned to the cent, because the road event is M26's number. */
+  ok(`C9 M25: the GOOD (strapped) pack is unchanged at 0.470 m ± 0.005 (${good.shift.worst.toFixed(4)} m)`,
+     Math.abs(good.shift.worst - 0.470) <= 0.005, `${good.shift.worst.toFixed(4)} m`);
+  ok(`C10 M25: the BAD (unstrapped) pack is 2.640 m ± 0.05 — moved by M26's bump, not by the strap fix (${bad.shift.worst.toFixed(4)} m)`,
+     Math.abs(bad.shift.worst - 2.640) <= 0.05, `${bad.shift.worst.toFixed(4)} m`);
+  ok(`C10 M25: …and the BAD pack's damage lines are unchanged: ${bad.totals.lines} line(s), $${bad.totals.cost.toFixed(2)}, worst condition ${bad.worstCondition.toFixed(0)}`,
+     bad.totals.lines === 0 && bad.totals.cost === 0 && bad.worstCondition === 100,
+     `${bad.totals.lines} lines, $${bad.totals.cost}, condition ${bad.worstCondition}`);
 
   /* §11.2's coarse indicator has to be honest about it BEFORE departure, or the player has
    * no way to have known. */

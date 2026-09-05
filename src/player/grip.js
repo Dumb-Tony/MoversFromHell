@@ -251,6 +251,13 @@ export class GripSystem {
 
     entity.state.grips.push({ playerId, hand });
     entity.state.held = true;
+    /* §15.3 "heaviest thing moved" (M26): the flag is written HERE, on the grab, not on the
+     * frames that follow. registry.step has set it since M6 for anything still held when a
+     * step runs, which is every carry that lasts a frame — but a grab and a release inside
+     * ONE frame (a bump, a slip, a suite that grabs and lets go without stepping) left the
+     * couch you actually lifted out of the settlement's stat. Plain boolean on the entity's
+     * own state, so it unwinds with everything else on a replay (respawnContract, m0 E8). */
+    entity.state.everHeld = true;
     // A held object stops colliding with its carrier. The player capsule is KINEMATIC and
     // therefore unstoppable, so without this, walking into a wall crushes the box between
     // an immovable body and a static one and the solver ejects it straight through —

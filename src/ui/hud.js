@@ -29,6 +29,7 @@
  */
 
 import { glyphsFor } from '../core/input.js';
+import { NOTICE } from '../config.js';
 
 /** Tokens a device-neutral hint may carry; setPrompt resolves them from the glyph set. */
 const GLYPH_TOKEN = /\{(primary|secondary|gripL|gripR)\}/g;
@@ -47,8 +48,23 @@ export class Hud {
    * id is invalid HTML whose symptom is subtle rather than loud: `document.querySelector`
    * silently returns the first, so seat 1's panels would be read and written as seat 0's by
    * anything that did not scope its lookup. Every selector below is scoped to `this.el`. */
-  constructor(root, seat = 0) {
+  /**
+   * @param {HTMLElement} root  the `#ui` layer
+   * @param {number} seat
+   * @param {() => number} [nowMs]  THE SIM CLOCK (M26). Notices expire against it, exactly as
+   *   M9's captions do — `audio.lastCaption(game.clock.simTimeMs)` hands the HUD a caption
+   *   that the SIM clock decided had not aged out yet, and until M26 the notice beside it was
+   *   the one line of this HUD still measured against `performance.now()`. Two consequences of
+   *   the wall clock, both fixed by passing this in: a notice kept counting down behind the
+   *   pause card while everything else froze, and under headless virtual time (where
+   *   performance.now() does not advance and only game.frame() moves time) nothing ever
+   *   expired, so the soak watched one 'new contract' notice per replay pile up to maxStack.
+   *   Omitted, the HUD has no clock and notices never age — a bare Hud in a fixture clears
+   *   its own stack.
+   */
+  constructor(root, seat = 0, nowMs = null) {
     this.seat = seat;
+    this._clock = typeof nowMs === 'function' ? nowMs : null;
     this.el = document.createElement('div');
     this.el.className = 'hud';
     this.el.dataset.seat = String(seat);
@@ -284,17 +300,30 @@ export class Hud {
    * NOTICE." One small notice — so these are short, they stack at most a few deep, and they
    * expire on their own.
    */
-  notice(text, kind = 'info') {
-    this._notices.push({ text, kind, until: performance.now() + 3200 });
-    if (this._notices.length > 4) this._notices.shift();
+  notice(text, kind = 'info', nowMs = this.simNow()) {
+    this._notices.push({ text, kind, until: nowMs + NOTICE.ttlMs });
+    if (this._notices.length > NOTICE.maxStack) this._notices.shift();
     this._renderNotices();
   }
 
-  tickNotices() {
-    const now = performance.now();
+  tickNotices(nowMs = this.simNow()) {
     const before = this._notices.length;
-    this._notices = this._notices.filter((n) => n.until > now);
+    this._notices = this._notices.filter((n) => n.until > nowMs);
     if (this._notices.length !== before) this._renderNotices();
+  }
+
+  /** Sim milliseconds, or 0 when nobody handed this HUD a clock (see the constructor). */
+  simNow() { return this._clock ? this._clock() : 0; }
+
+  /** Drop the stack (M26). A contract reset restarts the SIM CLOCK at zero (game.reset), so a
+   *  notice stamped `until` late in the last run can never age out against the new run's
+   *  clock — it would sit there for ever, which is the accumulation KNOWN_ISSUES Phase 17
+   *  described in a different disguise. A notice belongs to the run that raised it and goes
+   *  with it, like noticeHistory (M19). */
+  clearNotices() {
+    if (!this._notices.length) return;
+    this._notices.length = 0;
+    this._renderNotices();
   }
 
   /**

@@ -25,7 +25,7 @@
  * afternoon is not among them).
  */
 
-import { ECONOMY, DAMAGE, PARTS } from '../config.js';
+import { ECONOMY, DAMAGE, PARTS, INVOICE } from '../config.js';   // INVOICE.holderMax: M26
 import { undeliveredRows } from './manifest.js';   // M20: the ONE definition of "left behind"
 
 /** §15.1's line items, in the order the formula names them. `sign` is +1 for money in. */
@@ -72,6 +72,68 @@ export function itemsLeftBehind(state) {
 const wordsOf = (id) => (id || '').replace(/_\d+$/, '').replace(/_/g, ' ');
 
 /**
+ * §15.3 "who was holding it" (M26). A mover id -> the seat word the whole game already uses:
+ * p0 -> P1, p1 -> P2 (the HUD's seat tag, the recap's seat column, the settings card's rows).
+ * Anything that is not a pN id comes back unchanged, so a future named player still prints.
+ */
+export function seatWordFor(playerId) {
+  const m = /^p(\d+)$/.exec(String(playerId || ''));
+  return m ? `P${Number(m[1]) + 1}` : String(playerId || '');
+}
+
+/**
+ * The holders of a property-damage window, as words.
+ *
+ * `heldBy` is M14's shape and M23 kept it: ONE ENTRY PER HAND, so a two-hand shove reads
+ * ['p0', 'p0'] and a co-op carry ['p0', 'p1']. Deduped in first-seen order; an empty list
+ * (the object was thrown, or nobody was holding it) is an empty list, and the line then says
+ * nothing about a person — a box that flew into a wall on its own has no culprit (§10.4).
+ *
+ * SOLO PRINTS NOTHING. With one SEAT on the job the seat word carries no information and
+ * §21.1 asks the sheet to stay compact, so `seats` of 1 returns '' however full heldBy is.
+ * (Seats, not movers: two mover bodies always exist so Tab can swap between them — invoice
+ * `moverCount` is the labour headcount and is 2 even solo. What decides whether 'P1' means
+ * anything is how many people are playing.) The RECAP's seat column is a different surface
+ * with a different rule (it has always printed P1 in solo for drops and door removals) and
+ * is not touched by this.
+ *
+ * @param {string[]} heldBy   the ledger line's heldBy
+ * @param {number} seats      seats in play (main.js seatCount)
+ * @returns {string} 'P1', 'P1 and P2', or ''
+ */
+export function holdersOf(heldBy, seats = 1) {
+  if (!(seats > 1) || !Array.isArray(heldBy)) return '';
+  const seen = [];
+  for (const id of heldBy) {
+    if (id == null) continue;
+    const w = seatWordFor(id);
+    if (w && !seen.includes(w)) seen.push(w);
+  }
+  if (!seen.length) return '';
+  return seen.length === 1 ? seen[0] : seen.slice(0, -1).join(', ') + ' and ' + seen[seen.length - 1];
+}
+
+/**
+ * The §15.1 property line's "who" clause: one phrase per distinct holder-and-object pair, in
+ * the order the ledger wrote them — 'P1 carrying the dresser'. Lines with no holder
+ * contribute nothing, so a run where every impact was a throw returns '' and the detail reads
+ * exactly as it did before M26.
+ */
+export function propertyHolders(propLines, seats = 1) {
+  const seen = [];
+  for (const l of propLines || []) {
+    const who = holdersOf(l.heldBy, seats);
+    if (!who) continue;
+    const phrase = `${who} carrying the ${wordsOf(l.defId)}`;
+    if (!seen.includes(phrase)) seen.push(phrase);
+  }
+  if (!seen.length) return '';
+  const cap = INVOICE.holderMax;                     // §21.1 compact — never a literal here
+  if (seen.length <= cap) return seen.join(', ');
+  return `${seen.slice(0, cap).join(', ')} and ${seen.length - cap} more`;
+}
+
+/**
  * The §15.1 'parts left' evidence: one record per manifest row and detached part with
  * pieces not at the destination, straight off the rows stepManifest wrote (manifest.js
  * pieceStatusOf) — the same record the delivery flag itself is derived from, so the line
@@ -109,6 +171,9 @@ export function buildInvoice(state, summary, opts = {}) {
     distanceKm = ECONOMY.routeDistanceKm,
     tips = 0,
     moverCount = 2,
+    /** §15.3 (M26): seats in play, which is what decides whether a seat word means anything
+     *  on the sheet. NOT moverCount — two mover bodies exist even solo (Tab swaps them). */
+    seatCount = 1,
   } = opts;
 
   const lines = [];
@@ -202,8 +267,14 @@ export function buildInvoice(state, summary, opts = {}) {
   const propTotal = propLines.reduce((s, l) => s + (l.cost || 0), 0);
   if (propTotal > 0) {
     const surfaces = new Set(propLines.map((l) => l.surfaceId || 'surface')).size;
+    /* §15.3 "who was holding it" (M26): heldBy has been on every property line since M14 and
+     * nothing read it. In co-op the line now names the hands the object was in — the sheet
+     * agrees with the JSON export, which carried the ids all along. Solo says nothing extra
+     * (§21.1 compact), and a thrown object has no holder to name. */
+    const who = propertyHolders(propLines, seatCount);
     add(LINE_KINDS.PROPERTY_DAMAGE, -propTotal,
-        `${propLines.length} impact${propLines.length === 1 ? '' : 's'} on ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
+        `${propLines.length} impact${propLines.length === 1 ? '' : 's'} on ${surfaces} surface${surfaces === 1 ? '' : 's'}` +
+        (who ? ` — ${who}` : ''),
         propLines.map((l) => l.surfaceId || 'surface'));
   }
 

@@ -30,7 +30,7 @@
  * the thing you set up actually happened).
  */
 
-import { SIM, RECOVERY } from '../src/config.js';
+import { SIM, RECOVERY, NOTICE } from '../src/config.js';   // NOTICE.ttlMs: S7-M26
 import { cabPoint, cargoAnchors, cargoInterior } from '../src/world/truck.js';
 import { GROUP_PRESETS } from '../src/physics/world.js';
 import { PHASES } from '../src/core/eventBus.js';
@@ -143,10 +143,17 @@ const slotIn = (zoneId, index) => {
     z: z.minZ + 0.6 + (Math.floor(index / cols) + 0.5) * (d / 2),
   };
 };
-/** The render loop's drain, done by hand; returns how many were queued since the last drain. */
+/** The render loop's drain, done by hand; returns how many were queued since the last drain.
+ *  M26: it also AGES the HUD stacks, which the loop's own drainNotices does on every frame.
+ *  Until M26 nothing here could expire a notice at all — they were stamped against
+ *  performance.now(), which is frozen under virtual time — so the soak watched one 'new
+ *  contract' notice per replay pile up, 1 then 2 then 3 (KNOWN_ISSUES Phase 17). They are on
+ *  the sim clock now, so a tick at a sample point clears everything older than NOTICE.ttlMs
+ *  and the count is the same at every sample instead of a ramp (S7). */
 function drainNotices() {
   const n = M.pendingNotices.length;
   M.pendingNotices.splice(0, n);
+  for (const h of M.huds) h.tickNotices();
   return n;
 }
 
@@ -484,12 +491,57 @@ for (const r of [1, 2, 3]) {
 
 /* ── S7. the bounded things stay bounded ──────────────────────────────────── */
 lines.push('--- S7-S8. logs, notices, registries, heap (GDD §26.6) ---');
-const over = samples.filter((s) => s.busLog > 256 || s.notices > 4 || s.tools !== 4 || s.registry !== baseline.registry || s.pending !== 0);
-ok('S7 bus.log.length <= 256, hud._notices.length <= 4, tools.tools.size === 4, registry.count constant, notice queue drained at every sample',
+const over = samples.filter((s) => s.busLog > 256 || s.notices > 1 || s.tools !== 4 || s.registry !== baseline.registry || s.pending !== 0);
+ok('S7 bus.log.length <= 256, hud._notices.length <= 1, tools.tools.size === 4, registry.count constant, notice queue drained at every sample',
    over.length === 0,
    over.map((s) => `${s.label}: log ${s.busLog} notices ${s.notices} tools ${s.tools} registry ${s.registry} pending ${s.pending}`).join(' | '));
+/* S7-M26: the notice count is a CONSTANT, not a ramp. It used to be 1 then 2 then 3, one per
+ * replay, because a notice expired against performance.now() and virtual time froze that
+ * clock — hud._notices could only grow until it hit the cap of 4, and S7's bound above was
+ * that cap. On the sim clock every sample of the same KIND reads the same number: the
+ * mid-run samples are empty (the previous replay's 'new contract' aged out long before), and
+ * each after-run sample holds exactly the one notice its own replay raised nought
+ * milliseconds earlier. Growth would show as an inequality here. */
+{
+  const mid = runs.map((F) => F.mid.notices), after = runs.map((F) => F.after.notices);
+  lines.push(`      notices: boot ${baseline.notices}; mid-run ${mid.join(',')}; after-run ${after.join(',')} (was 0; 0,1,2; 1,2,3 before M26)`);
+  /* Run 1 begins at boot with nothing on screen; runs 2 and 3 begin with a replay, which
+   * raises 'new contract'. So the comparison that means "no growth" is run 2 against run 3
+   * (same starting conditions) and every after-run sample against every other. */
+  ok('S7-M26 hud._notices is the same at every after-run sample, and the same at every mid-run sample of a run that BEGAN with a replay — a constant, not one more per replay',
+     new Set(after).size === 1 && new Set(mid.slice(1)).size === 1 && mid[0] === 0,
+     `mid ${mid.join(',')} after ${after.join(',')}`);
+  ok('S7-M26 …and never more than the ONE notice a replay raises: nothing is carried over from the run before',
+     Math.max(baseline.notices, ...mid, ...after) <= 1,
+     `boot ${baseline.notices}, mid ${mid.join(',')}, after ${after.join(',')}`);
+  ok('S7-M26 …an after-run sample holds exactly that one ("new contract", raised nought sim ms before the sample)',
+     after.every((n) => n === 1), after.join(','));
+  /* The brief asked this soak to read === 0 at its sample points. At the after-run sample it
+   * cannot, and asserting it would be a false claim: the last thing a replay does is raise
+   * 'new contract' (main.js), and F.after is taken nought sim-milliseconds later. So the ZERO
+   * is asserted where zero is the truth — give the sim clock the TTL it is waiting for, with
+   * no replay in between, and the stack empties itself. THAT is the anti-accumulation claim
+   * the KNOWN_ISSUES entry was about, and before M26 it was unreachable at any sample point,
+   * because virtual time froze performance.now() and a notice could never expire at all.
+   * Safe here: nothing after this line samples live notice state (S8's heap is already read). */
+  const beforeAge = hud._notices.length;
+  const ageFrames = Math.ceil(NOTICE.ttlMs / FRAME) + 2;
+  // Frames AND the drain: ageing happens in the render loop's drain (main.js), which never
+  // runs headless — drainNotices() above is this suite's stand-in for it, exactly as the
+  // sample points use it.
+  for (let k = 0; k < ageFrames; k++) { frames(1); drainNotices(); }
+  ok(`S7-M26 …and it does reach ZERO: ${beforeAge} notice(s) up, then ${ageFrames} frames (${(ageFrames * FRAME / 1000).toFixed(2)} s of sim against NOTICE.ttlMs ${NOTICE.ttlMs} ms) and the stack is empty`,
+     beforeAge >= 1 && hud._notices.length === 0, `${beforeAge} -> ${hud._notices.length}`);
+}
+/* Restated at M26: this used to read `F.noticesDrained >= 1` — the drain taken straight after
+ * the replay — and a contract reset now EMPTIES the queue (main.js resetContract), because a
+ * notice raised for a run that no longer exists has nothing to say about the next one and
+ * could never age out against a clock that restarts at zero. The evidence that the queue is
+ * really being fed is therefore the drain taken mid-run, after the wall hit: the box's and the
+ * wall's own damage notices. */
 ok('S7 …and the notice queue was really being fed (it is only drained by the render loop, which never runs headless)',
-   runs.every((F) => F.noticesDrained >= 1), runs.map((F) => F.noticesDrained).join(','));
+   runs.every((F) => F.wallNotices >= 1),
+   `mid-run ${runs.map((F) => F.wallNotices).join(',')}; after the replay ${runs.map((F) => F.noticesDrained).join(',')} (the reset empties it, M26)`);
 ok('S7 game.state.telemetry and ledger JSON round-trip at every settlement',
    runs.every((F) => F.stateRoundTrips));
 ok('S7 …and telemetry.phaseMs recorded the drive on every run (transit within one step of 28000 ms)',

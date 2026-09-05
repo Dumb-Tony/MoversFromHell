@@ -410,6 +410,26 @@ lines.push('--- D. the gate: secured pack remains stable ---');
      `${(secured.quality.unsecuredFraction * 100).toFixed(0)}% unsecured`);
   ok('D9 …and it reports a real centre of mass', secured.quality.totalMass > 100,
      `${secured.quality.totalMass.toFixed(0)} kg`);
+
+  /* ── M25: the two numbers, PINNED ────────────────────────────────────────────────────
+   * D3-D6 are inequalities against CARGO.shiftToleranceM, which is the right shape for a
+   * gate and blind to a regression that halves the margin without crossing it. M25 changed
+   * how the strap's damping is integrated (straps.js: solved, not sampled), so the strapped
+   * number is exactly the one that could have moved.
+   *
+   * RE-MEASURED under M25: unstrapped 1.645 m, strapped 0.1409 m — BOTH UNCHANGED, and that
+   * is the result, not a null one. This fixture's hooks sit at 0.35 of each item's height and
+   * 0.3 of its smaller footprint, close enough to each centre of mass that the effective mass
+   * at the hook stays high; the lightest thing in it is a 9 kg box among a fridge, a dresser
+   * and a box_heavy_01, and none of them ever gave the damper a closing velocity to overshoot
+   * on. So the strapped figure the phase gate quotes did not move. It is pinned here so that
+   * the next change to the strap force cannot move it silently either. */
+  ok(`D10 M25: the UNSTRAPPED brake is the control and is unchanged — 1.645 m ± 0.01 (${loose.shift.worst.toFixed(3)} m)`,
+     Math.abs(loose.shift.worst - 1.645) <= 0.01, `${loose.shift.worst.toFixed(4)} m`);
+  ok(`D11 M25: the STRAPPED brake is at or below the pre-M25 0.141 m (${secured.shift.worst.toFixed(4)} m)`,
+     secured.shift.worst <= 0.141, `${secured.shift.worst.toFixed(4)} m vs 0.141 m`);
+  ok(`D11 M25: …and pinned at the re-measured 0.141 m ± 0.005 (${secured.shift.worst.toFixed(4)} m)`,
+     Math.abs(secured.shift.worst - 0.141) <= 0.005, `${secured.shift.worst.toFixed(4)} m`);
 }
 emit('running...');
 
